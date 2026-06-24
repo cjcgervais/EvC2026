@@ -1,0 +1,21 @@
+# Rojo / Roblox build artifacts
+*.rbxl
+*.rbxlx
+*.rbxl.lock
+*.rbxlx.lock
+build/
+*.rbxm
+*.rbxmx
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Roblox LSP / tooling
+sourcemap.json
+.luau-analyze-cache/
+
+# Claude local overrides (kept out of team settings)
+.claude/settings.local.json

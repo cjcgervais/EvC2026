@@ -1,0 +1,53 @@
+{
+  "name": "EaglesVsCrows",
+  "tree": {
+    "$className": "DataModel",
+
+    "ReplicatedStorage": {
+      "$className": "ReplicatedStorage",
+      "GameConfig": {
+        "$path": "src/shared/GameConfig.luau"
+      },
+      "FlightPhysics": {
+        "$path": "src/shared/FlightPhysics.luau"
+      },
+      "BirdBuilder": {
+        "$path": "src/shared/BirdBuilder.luau"
+      },
+      "Boids": {
+        "$path": "src/shared/Boids.luau"
+      }
+    },
+
+    "ServerScriptService": {
+      "$className": "ServerScriptService",
+      "GameServer": {
+        "$path": "src/server/GameServer.server.luau"
+      }
+    },
+
+    "StarterPlayer": {
+      "$className": "StarterPlayer",
+      "StarterPlayerScripts": {
+        "$className": "StarterPlayerScripts",
+        "BirdController": {
+          "$path": "src/client/BirdController.client.luau"
+        }
+      }
+    },
+
+    "StarterGui": {
+      "$className": "StarterGui",
+      "GameUI": {
+        "$path": "src/client/GameUI.client.luau"
+      }
+    },
+
+    "Workspace": {
+      "$className": "Workspace",
+      "$properties": {
+        "Gravity": 196.2
+      }
+    }
+  }
+}
