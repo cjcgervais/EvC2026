@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `docs/HANDOFF.md` — current status, the one architecture decision already locked in, and the prioritized work queue. **Start here.**
 - **How to continue:** drive each module through the **`loop-orchestrator` skill** in `loop_skill/` (it has a `roblox-game` profile for this game) and compose the **`deep-research`** skill for the research half. See HANDOFF → "How to continue this work" and the `reference-loop-orchestrator-skill` memory.
 - `docs/RESEARCH.md` — why every flight/balance number is what it is (verified deep-research pass).
-- Project memory index: `C:\Users\Chad\.claude\projects\D--eaglesvscrows2026\memory\MEMORY.md`.
+- Project memory index: `C:\Users\Chad\.claude\projects\D--EvC2026\memory\MEMORY.md`.
 - `EaglesVsCrows.txt` — the original recovered transcript (older versions of the client/UI/server). Historical reference; the live code is under `src/`.
 
 ## What this is

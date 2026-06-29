@@ -82,12 +82,16 @@ local cameraState = {
 	currentDistance = CAM.baseDistance,
 }
 
--- Free-look (Spacebar): when active, the camera orbits the bird without altering
--- the flight input. We accumulate yaw/pitch offsets from mouse delta.
+-- Free-look (Spacebar) — LAW: hold Space to look ALL AROUND while flying. The camera
+-- orbits the bird freely and MUST NEVER alter the flight input (it writes only freeLook.*,
+-- never inputState.*; flight controls are keyboard-only and `isDiving` reads the bird's nose,
+-- not the camera — keep it that way). yaw accumulates unbounded -> full 360° horizontal; pitch
+-- is clamped just short of the poles so you can look straight up/down/behind without gimbal flip.
+local FREE_LOOK_PITCH_LIMIT = 1.54 -- radians (~88°): look nearly straight up/down
 local freeLook = {
 	active = false,
-	yaw    = 0, -- radians, horizontal orbit
-	pitch  = 0, -- radians, vertical orbit (clamped)
+	yaw    = 0, -- radians, horizontal orbit (unbounded -> 360°)
+	pitch  = 0, -- radians, vertical orbit (clamped to +/- FREE_LOOK_PITCH_LIMIT)
 }
 
 -- Formation toggle state (crows).
@@ -205,7 +209,7 @@ UserInputService.InputChanged:Connect(function(input, gameProcessed)
 	if input.UserInputType == Enum.UserInputType.MouseMovement then
 		local s = CAM.freeLookSensitivity * 0.01
 		freeLook.yaw   = freeLook.yaw   - input.Delta.X * s
-		freeLook.pitch = math.clamp(freeLook.pitch - input.Delta.Y * s, -1.3, 1.3)
+		freeLook.pitch = math.clamp(freeLook.pitch - input.Delta.Y * s, -FREE_LOOK_PITCH_LIMIT, FREE_LOOK_PITCH_LIMIT)
 	end
 end)
 
@@ -215,8 +219,8 @@ RunService.RenderStepped:Connect(function(dt)
 	local s = CAM.freeLookSensitivity * 2.5 * dt
 	if UserInputService:IsKeyDown(Enum.KeyCode.Left)  then freeLook.yaw   = freeLook.yaw   + s end
 	if UserInputService:IsKeyDown(Enum.KeyCode.Right) then freeLook.yaw   = freeLook.yaw   - s end
-	if UserInputService:IsKeyDown(Enum.KeyCode.Up)    then freeLook.pitch = math.clamp(freeLook.pitch + s, -1.3, 1.3) end
-	if UserInputService:IsKeyDown(Enum.KeyCode.Down)  then freeLook.pitch = math.clamp(freeLook.pitch - s, -1.3, 1.3) end
+	if UserInputService:IsKeyDown(Enum.KeyCode.Up)    then freeLook.pitch = math.clamp(freeLook.pitch + s, -FREE_LOOK_PITCH_LIMIT, FREE_LOOK_PITCH_LIMIT) end
+	if UserInputService:IsKeyDown(Enum.KeyCode.Down)  then freeLook.pitch = math.clamp(freeLook.pitch - s, -FREE_LOOK_PITCH_LIMIT, FREE_LOOK_PITCH_LIMIT) end
 end)
 
 --------------------------------------------------------------------------------
@@ -460,7 +464,11 @@ local function acquire()
 	local myGen = acquireGen
 	teardownDrive()
 	resetInput()
-	setFreeLook(false)
+	-- Free-look is LAW: it must survive a crow-swap. Don't force it off here — re-arm it to
+	-- whether Space is still physically held, so swapping crows (1-4) while looking around keeps
+	-- the look (and its current orbit, since setFreeLook no-ops when already active). Only a
+	-- genuine release (or focus loss / death without Space) turns it off.
+	setFreeLook(UserInputService:IsKeyDown(Enum.KeyCode.Space))
 
 	if not target then return end
 

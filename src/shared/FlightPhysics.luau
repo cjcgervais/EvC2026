@@ -1,24 +1,37 @@
 --!nonstrict
 --[[
-	FlightPhysics — deterministic 6DOF aerodynamic flight engine.
+	FlightPhysics v2 — deterministic 6DOF aerodynamic flight engine.
 
 	Pure simulation: NO Roblox instances are touched here. The caller (BirdController
 	for players, GameServer/Boids for AI crows) feeds it an input table each frame and
 	reads back `orientation` (CFrame) and `velocity` (Vector3) to drive a BasePart.
+	`.orientation` and `.velocity` are externally-authoritative state: callers may
+	overwrite them after a BirdCollision sweep and the engine reads them fresh each step.
 
-	The model is built on Energy-Maneuverability theory (see docs/RESEARCH.md):
-	  - LIFT follows the bird's UP vector projected perpendicular to airflow, so BANKING
-	    automatically produces a turn (tilt the lift vector sideways -> centripetal force).
-	  - A COORDINATED-TURN assist rotates velocity toward the nose, capped by the profile's
-	    `sustainedTurnRate`. This is the second, independent turn knob the research demands
-	    (instantaneous roll vs sustained turn): eagles bank fast but sustain a WIDE turn;
-	    crows sustain a TIGHT turn.
-	  - STALL: past the critical angle of attack, lift collapses — punishing nose-yanking
-	    at low speed and giving the dive its risk.
-	  - CONTROL AUTHORITY scales with airspeed: a slow/stalled bird can barely steer, which
-	    is what makes energy management matter and unlocks loops/rolls only at speed.
+	WHY v2 (see docs/HANDOFF.md "flight kernel" + docs/RESEARCH.md): v1 produced "not
+	enough lift, constant stalls" for two structural reasons that fought each other:
+	  (1) lift was `Cl * q * sin(AoA)` — ZERO lift at zero angle of attack, so the bird
+	      had to fly permanently nose-high just to hold altitude (a few degrees from stall).
+	  (2) a per-frame path-tracker rotated VELOCITY toward the nose, i.e. it drove AoA->0,
+	      which is exactly the no-lift condition. Any speed dip dropped control authority,
+	      which weakened lift+control+tracking together -> a self-reinforcing stall spiral.
 
-	API (consumed by BirdController — do not change without updating callers):
+	v2 fixes both with the textbook game/aero model:
+	  - REAL LIFT CURVE with a baseline coefficient: CL(a) = cl0 + slope*a, rising to
+	    clMax at the stall angle, then a FORGIVING roll-off to postStallCl (never 0). With
+	    cl0 > 0 the bird makes lift at zero AoA, so LEVEL CRUISE IS THE HANDS-OFF TRIM.
+	  - DRAG POLAR CD = CD0 + k*CL^2: induced drag scales with lift^2 (~g-load^2), so hard
+	    turns/climbs bleed energy -> Energy-Maneuverability emerges for free.
+	  - STATIC AERODYNAMIC STABILITY (weathervane): the airframe gently rotates its
+	    ORIENTATION toward the airflow (not velocity toward the nose). This self-limits AoA
+	    (anti-stall) WITHOUT destroying lift, and the player's pitch input overrides it.
+	    Past the stall a stronger nose-down-toward-airflow term makes "do nothing" recover.
+	  - BANK-GATED coordinated turn (sustainedTurnRate): velocity is redirected toward the
+	    nose ONLY while banked — the eagle-wide / crow-tight lever — never in the pitch
+	    plane, so it cannot recreate the v1 AoA-killing bug.
+	  - CONTROL AUTHORITY scales with airspeed: a slow/stalled bird can barely steer.
+
+	API (consumed by BirdController / GameServer / Boids — do not change without callers):
 	  FlightPhysics.new(profile, position) -> engine
 	  engine:Update(dt, input)            input = {pitch, roll, yaw, flap, dive}
 	  engine:SetThermalForce(Vector3)
@@ -45,10 +58,42 @@ local function rotateTowards(from, to, maxRad)
 	local angle = math.acos(d)
 	if angle < EPS then return to end
 	local t = clamp(maxRad / angle, 0, 1)
-	-- spherical-ish lerp; good enough for steering
 	local result = (from * (1 - t) + to * t)
 	if result.Magnitude < EPS then return to end
 	return result.Unit
+end
+
+-- Rigid-rotate an orientation CFrame so its LookVector turns toward `target` by at most
+-- `maxRad` (the airframe weathervaning into the airflow). Roll/bank is carried along.
+-- Position is PRESERVED: a world-space rotation is applied to the basis only (rotating on the
+-- left of a CFrame would otherwise swing its position about the world origin -> teleport).
+local function rotateLookToward(cf, target, maxRad)
+	if maxRad < EPS then return cf end
+	local look = cf.LookVector
+	local d = clamp(look:Dot(target), -1, 1)
+	local angle = math.acos(d)
+	if angle < EPS then return cf end
+	local axis = look:Cross(target)
+	if axis.Magnitude < EPS then return cf end
+	local r = CFrame.fromAxisAngle(axis.Unit, math.min(angle, maxRad))
+	local pos = cf.Position
+	return r * (cf - pos) + pos
+end
+
+-- LIFT CURVE: CL as a function of signed AoA (degrees). Baseline cl0 at zero AoA (this is
+-- THE fix for "not enough lift"); linear slope to clMax at the stall angle; then a forgiving
+-- lerp down to postStallCl over a stallPadDeg band (a mush, not a cliff). Symmetric in sign so
+-- pushing the nose well below the airflow produces downforce rather than free lift.
+local function computeCL(p, aoaDeg)
+	local linear = p.cl0 + p.liftSlopePerDeg * aoaDeg
+	local mag = math.abs(aoaDeg)
+	if mag <= p.stallAngleDeg then
+		return clamp(linear, -p.clMax, p.clMax)
+	end
+	local over = mag - p.stallAngleDeg
+	local t = clamp(over / math.max(EPS, p.stallPadDeg), 0, 1)
+	local clMag = p.clMax + (p.postStallCl - p.clMax) * t
+	return (linear >= 0 and clMag) or -clMag
 end
 
 function FlightPhysics.new(profile, position)
@@ -57,10 +102,8 @@ function FlightPhysics.new(profile, position)
 
 	-- Kinematic state
 	self.orientation = CFrame.new(position or Vector3.new(0, 200, 0))
-	-- Start with cruise-ish forward speed so the bird flies rather than drops. Must be
-	-- comfortably ABOVE the profile's stall speed or it spawns on the edge of a stall
-	-- (this bit the eagle, whose stall speed was ~spawn speed). GameServer seeds the live
-	-- Body velocity with the same factor; the client re-seeds from it on acquire.
+	-- Spawn with cruise-ish forward speed, comfortably ABOVE stall speed (GameServer seeds the
+	-- live Body velocity with the same factor; the client re-seeds from it on acquire).
 	self.velocity = self.orientation.LookVector * (profile.glideSpeed * 0.9)
 
 	-- Energy / status
@@ -109,19 +152,14 @@ function FlightPhysics:Update(dt, input)
 	local wantDive = input.dive == true
 
 	local cf = self.orientation
-	local look = cf.LookVector
-	local up = cf.UpVector
 	local authority = self:_authority()
 
 	----------------------------------------------------------------------------
 	-- 1. ROTATIONAL CONTROL (with inertia). Produces banking, pitch, yaw; no
 	--    auto-leveling, so loops & barrel rolls are possible at speed.
 	----------------------------------------------------------------------------
-	-- Frame-rate-INDEPENDENT control smoothing. The old `(1 - inertia)` was a fixed
-	-- per-frame blend, so a 144 FPS player spooled up roll/pitch/yaw far faster (in seconds)
-	-- than a 30 FPS player — and control feel is also a balance number. `inertia^(dt*60)`
-	-- equals the original blend exactly at 60 FPS but keeps the spool-up TIME constant at any
-	-- framerate. (inertia is in (0,1) for both profiles, so the power is well-defined.)
+	-- Frame-rate-INDEPENDENT control smoothing: inertia^(dt*60) equals the original
+	-- per-frame blend exactly at 60 FPS but keeps spool-up TIME constant at any framerate.
 	local inertia = p.rollInertia
 	local blend = 1 - inertia ^ (dt * 60)
 	local function smooth(cur, target)
@@ -134,8 +172,8 @@ function FlightPhysics:Update(dt, input)
 	-- Local-space rotation: pitch about X, yaw about Y, roll about Z.
 	local rot = CFrame.Angles(self._pitchVel * dt, self._yawVel * dt, self._rollVel * dt)
 	cf = self.orientation * rot
-	look = cf.LookVector
-	up = cf.UpVector
+	local look = cf.LookVector
+	local up = cf.UpVector
 
 	----------------------------------------------------------------------------
 	-- 2. AERODYNAMICS (world-space forces -> acceleration)
@@ -144,59 +182,45 @@ function FlightPhysics:Update(dt, input)
 	local speed = airVel.Magnitude
 	local accel = Vector3.new()
 
-	-- gravity
+	-- gravity (persistent world force -> dive=accelerate / climb=decelerate fall out free)
 	accel = accel + Vector3.new(0, -F.GRAVITY, 0)
 
+	local cl = 0
 	if speed > EPS then
 		local velDir = airVel.Unit
 
-		-- Angle of attack: signed angle between nose and airflow, about the wing axis.
+		-- Angle of attack: signed angle between nose and airflow about the wing axis.
+		-- Positive when the nose is ABOVE the flight path.
 		local cosA = clamp(look:Dot(velDir), -1, 1)
 		local aoa = math.acos(cosA)
-		-- sign: positive when nose is above the velocity vector
 		if up:Dot(velDir) > 0 then aoa = -aoa end
 		self.aoaDeg = math.deg(aoa)
 
-		-- Stall: lift falls off past the critical AoA.
-		local stallRad = math.rad(p.stallAngleDeg)
-		local stallFactor = 1
-		if math.abs(aoa) > stallRad then
-			self.isStalling = true
-			local over = (math.abs(aoa) - stallRad) / stallRad
-			-- Soft stall: lift bleeds off past the critical AoA but never vanishes (floor 0.3),
-			-- so a stall is a recoverable mush (ease off, regain speed) rather than an
-			-- unrecoverable death spiral. Path tracking (below) redirects velocity regardless of
-			-- lift, so pulling out of a fall works even mid-stall. Still costs you altitude/speed.
-			stallFactor = math.max(0.3, 1 - over * 0.8)
-		else
-			self.isStalling = false
-		end
+		self.isStalling = math.abs(self.aoaDeg) > p.stallAngleDeg
 
-		-- LIFT: magnitude ~ Cl * rho * v^2 * sin(AoA) / wingLoading, perpendicular to
-		-- airflow along the bird's up side. wingLoading divides -> higher loading needs
-		-- more speed for the same lift (eagle), lower loading turns tighter (crow).
+		-- LIFT: L/m_accel = CL(aoa) * rho * v^2 / wingLoading, perpendicular to airflow along
+		-- the bird's up side. Mass-independent (lift balances weight, both scale with mass);
+		-- wingLoading is the lever (low = more lift accel = lower stall + tighter turns = crow).
+		cl = computeCL(p, self.aoaDeg)
 		local q = F.AIR_DENSITY * speed * speed
-		local liftMag = (p.liftCoefficient * q * math.sin(math.abs(aoa)) * stallFactor) / p.wingLoading
-		-- lift direction = bird-up projected perpendicular to velocity
+		local liftAccel = (cl * q) / p.wingLoading
 		local liftDir = up - velDir * up:Dot(velDir)
 		if liftDir.Magnitude > EPS then
-			accel = accel + liftDir.Unit * (liftMag / p.mass)
+			accel = accel + liftDir.Unit * liftAccel
 		end
 
-		-- DRAG: parasitic + induced (induced grows with AoA -> turning costs energy).
-		local sinA = math.sin(math.abs(aoa))
-		local dragMag = (p.parasiticDrag + p.inducedDragK * sinA * sinA) * q
+		-- DRAG polar: parasitic + induced(CL^2). Induced grows with lift^2 (~g-load^2), so
+		-- hard turns/climbs bleed energy. Drag is a force -> /mass (heavier eagle keeps energy).
+		local dragMag = (p.parasiticDrag + p.inducedDragK * cl * cl) * q
 		accel = accel - velDir * (dragMag / p.mass)
 	else
 		self.isStalling = true
 		self.aoaDeg = 0
 	end
 
-	-- THRUST. A DIVE is now detected purely from nose attitude (nosed down) — you no longer
-	-- need to hold the dive key to convert nose-down into acceleration, which is what players
-	-- expect ("point down = speed up"; the level-speed cap lifts to diveSpeedCap while diving).
-	-- Flapping pushes along the nose (amplified in a dive); the dive key (wantDive) adds a
-	-- powered tuck so you can actively drive the dive even without flapping.
+	-- THRUST. A DIVE is detected purely from nose attitude (nosed down) — no key needed to
+	-- convert nose-down into acceleration. Flapping pushes along the nose (amplified diving);
+	-- the dive key adds a powered tuck so you can drive the dive even without flapping.
 	self.isFlapping = wantFlap and true or false
 	self.isDiving = look.Y < -0.2
 	if wantFlap or (wantDive and self.isDiving) then
@@ -205,7 +229,7 @@ function FlightPhysics:Update(dt, input)
 		accel = accel + look * (thrust / p.mass)
 	end
 
-	-- THERMAL (external upward force) — restores the energy spent diving/turning.
+	-- THERMAL (external upward force) — restores energy spent diving/turning.
 	accel = accel + self._thermal
 
 	----------------------------------------------------------------------------
@@ -213,30 +237,38 @@ function FlightPhysics:Update(dt, input)
 	----------------------------------------------------------------------------
 	self.velocity = self.velocity + accel * dt
 
-	-- COORDINATED TURN: the second, independent turn knob. Rotate the velocity
-	-- direction toward the nose, capped by sustainedTurnRate and scaled by bank
-	-- angle (you turn by banking). This makes sustainedTurnRate a direct tuning lever.
-	local v = self.velocity
-	local vMag = v.Magnitude
-	if vMag > F.CONTROL_AUTHORITY_MIN_SPEED then
-		local bank = 1 - math.abs(up.Y)         -- 0 wings-level .. 1 knife-edge
-		-- PATH TRACKING: rotate the velocity vector toward the nose. A base rate
-		-- (F.PATH_TRACK_RATE) makes pitch responsive in EVERY attitude, so nosing down
-		-- accelerates you along the dive and pulling up actually redirects your motion upward
-		-- (you can recover from a fall) — the old model only tracked ~25% unless banked, which
-		-- is why diving stalled and recovery felt impossible. sustainedTurnRate adds tightness
-		-- when BANKED (eagle wide vs crow tight — the turn-fight lever). Authority-scaled so a
-		-- slow bird still mushes out and can stall (energy management preserved).
-		local trackRate = (F.PATH_TRACK_RATE + p.sustainedTurnRate * bank) * authority
-		local newDir = rotateTowards(v.Unit, look, trackRate * dt)
-		self.velocity = newDir * vMag
+	----------------------------------------------------------------------------
+	-- 4. STATIC AERODYNAMIC STABILITY (replaces v1 path-tracking) + bank-gated turn.
+	--    Rotate the ORIENTATION toward the airflow so AoA self-limits (anti-stall) WITHOUT
+	--    zeroing lift; the player's pitch input overrides this soft restoring tendency. Past
+	--    the stall, add nose-down-toward-airflow so "do nothing" recovers the mush.
+	----------------------------------------------------------------------------
+	if self.velocity.Magnitude > F.CONTROL_AUTHORITY_MIN_SPEED then
+		local vDir = self.velocity.Unit
+		local stabRad = (F.STABILITY_RATE * p.stabilityRate * authority) * dt
+		if self.isStalling then
+			-- Stronger pull toward the airflow the deeper the stall (auto-recovery).
+			local over = (math.abs(self.aoaDeg) - p.stallAngleDeg) / math.max(EPS, p.stallAngleDeg)
+			stabRad = stabRad + (p.recoverNoseDownRate * clamp(over, 0, 2) * authority) * dt
+		end
+		cf = rotateLookToward(cf, vDir, stabRad)
+		look = cf.LookVector
+		up = cf.UpVector
+
+		-- COORDINATED TURN (bank-gated): redirect velocity toward the nose ONLY while banked,
+		-- capped by sustainedTurnRate (eagle wide vs crow tight). Never acts in the pitch plane,
+		-- so it cannot recreate the v1 AoA-killing bug. Wings-level flight preserves AoA -> lift.
+		local bank = 1 - math.abs(up.Y)               -- 0 wings-level .. 1 knife-edge
+		local trackRate = p.sustainedTurnRate * bank * authority
+		if trackRate > EPS then
+			local vMag = self.velocity.Magnitude
+			self.velocity = rotateTowards(self.velocity.Unit, look, trackRate * dt) * vMag
+		end
 	end
 
 	-- Speed caps: dive cap when diving, level cap otherwise. Never exceed terminal.
 	local cap = self.isDiving and p.diveSpeedCap or p.maxLevelSpeed
 	cap = math.min(cap, F.TERMINAL_VELOCITY)
-	-- allow gravity to push past level cap when not thrusting (free-fall dives),
-	-- but always clamp to the dive cap / terminal.
 	local sp = self.velocity.Magnitude
 	local hardCap = self.isDiving and p.diveSpeedCap or F.TERMINAL_VELOCITY
 	if sp > hardCap then
@@ -247,13 +279,13 @@ function FlightPhysics:Update(dt, input)
 	end
 
 	----------------------------------------------------------------------------
-	-- 4. INTEGRATE position & rebuild orientation
+	-- 5. INTEGRATE position & rebuild orientation
 	----------------------------------------------------------------------------
 	local newPos = cf.Position + self.velocity * dt
 	self.orientation = CFrame.fromMatrix(newPos, cf.RightVector, cf.UpVector, -cf.LookVector)
 
 	----------------------------------------------------------------------------
-	-- 5. ENERGY / STAMINA + animation phase
+	-- 6. ENERGY / STAMINA + animation phase
 	----------------------------------------------------------------------------
 	if wantFlap or (wantDive and self.isDiving) then
 		local cost = self.isDiving and p.staminaDiveCost or p.staminaFlapCost

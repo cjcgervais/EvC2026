@@ -48,6 +48,24 @@ A fresh session worked the prioritized queue with no Studio access (build resolv
 
 ---
 
+## Status (2026-06-28) — session 6: FlightPhysics **v2 kernel** rewrite (code-complete, build-green, UNPLAYTESTED)
+
+Addresses the persistent "not enough lift, constantly stalls" complaint at its **root** (the prior `Cl→2.4` / `flapThrust→520` / spawn-speed / soft-stall-floor edits were all symptom patches). A fresh deep-research pass on **game flight-model implementation** (Vazgriz, brihernandez/SimpleWings, gasgiant Aircraft-Physics, Aerofly TMD; archived in `docs/RESEARCH.md` §"v2") confirmed the diagnosis independently and supplied the numbers. The kernel is a **drop-in rewrite** — same API + same readable fields, so `BirdController`, `GameServer` AI loop, `Boids`, and `BirdCollision` are untouched. **Git checkpoint committed before the rewrite** (`git log` → "Checkpoint before FlightPhysics v2 kernel rewrite") — revert `FlightPhysics.luau` + `GameConfig.luau` to roll back.
+
+**Root cause (two flaws fighting each other):** (1) lift was `Cl·q·sin(AoA)` → **zero lift at zero AoA**, forcing the bird to fly permanently nose-high a few degrees from stall just to hold altitude; (2) the per-frame **path-tracker rotated velocity toward the nose**, i.e. drove AoA→0 → the no-lift condition. Any speed dip dropped authority, weakening lift+control+tracking together → self-reinforcing stall spiral.
+
+**What landed (`FlightPhysics.luau` `:Update`, `GameConfig.luau`):**
+1. **Real lift curve with baseline lift** — `CL(α)=cl0+liftSlopePerDeg·α`, capped at `clMax` at the stall angle, then a forgiving lerp to `postStallCl` over `stallPadDeg` (a recoverable mush, never 0). `cl0=0.30` is THE fix: the bird makes lift at zero AoA, so **level cruise is the hands-off trim** (verified calibration: Eagle trims ~0.47° AoA, stall ~65 < spawn 117 < cruise 130; Crow ~0.57° AoA, stall ~45 < spawn 86 < cruise 95).
+2. **Drag polar `CD = CD0 + k·CL²`** (replaces `sin²`) — induced drag ∝ lift² ∝ g-load², so hard turns/climbs bleed energy → Energy-Maneuverability emerges. Drag is mass-normalized (heavier eagle retains energy); **lift is mass-independent** (`liftAccel = CL·AIR_DENSITY·v² / wingLoading`) so `wingLoading` is the stall-speed/turn lever.
+3. **Static aerodynamic stability (weathervane) REPLACES path-tracking** — orientation rotates toward the airflow at `STABILITY_RATE·stabilityRate·authority`; AoA self-limits (anti-stall) **without** zeroing lift, and player pitch overrides it. Past stall, `recoverNoseDownRate` adds nose-down-toward-airflow so "do nothing" recovers. **Coordinated turn is now bank-gated only** (`sustainedTurnRate`, eagle-wide/crow-tight) — never acts in the pitch plane, so it cannot recreate the old bug. `rotateLookToward` preserves position (rotates basis only).
+4. **Free-look hardened (it's LAW):** vertical clamp widened ±1.3→**±1.54 rad (~88°)** so you can look nearly straight up/down (yaw was already unbounded → full 360°); **free-look now survives a crow-swap** (`acquire()` re-arms to whether Space is still held instead of force-off — fixes queue #7 bug); added an in-code invariant note that free-look must never write `inputState`.
+
+**New `GameConfig` keys (contract):** per-profile `cl0`, `liftSlopePerDeg`, `clMax`, `postStallCl`, `stallPadDeg`, `stabilityRate`, `recoverNoseDownRate`; `Flight.STABILITY_RATE`; recalibrated `Flight.AIR_DENSITY = 0.033`. **Removed:** per-profile `liftCoefficient` and the dead `stallRecoverRate`; **replaced** `Flight.PATH_TRACK_RATE` with `Flight.STABILITY_RATE`. (Dead levers `AEROBATIC_MIN_SPEED`/`climbCeilingBonus` still present — wire or delete in the tuning pass.) All numbers **PLAYTEST-PROVISIONAL.**
+
+**MUST validate in Studio (queue #1 checklist applies, plus these):** (a) Eagle **holds altitude on neutral input / no flap** and only stalls when you yank the nose at low speed, then **recovers by easing off** (mush, not spiral); (b) nose-down accelerates, climb bleeds speed, dive reaches `diveSpeedCap`, banking turns (eagle wide / crow tight); (c) **AI crows hold altitude** (same engine — better lift should fix their sink/crash too); (d) **free-look: hold Space → look fully up/down/behind/360° while flying straight; swap crows 1–4 while holding Space → look persists**; release → snap back to chase; (e) no spawn/swap teleport (the `rotateLookToward` position fix), anti-cheat doesn't false-positive. Then **tune the 1-v-4 matchup** (queue #2) — energy-fighter vs angles-fighter feel, turn radii, dive recovery — reasoning about the matchup on every number.
+
+---
+
 ## Status (2026-06-23) — original v1 skeleton notes
 
 A complete v1 skeleton exists as real, version-controlled Luau source under `src/`, wired for [Rojo](https://rojo.space) via `default.project.json`. **It has NOT been run in Roblox Studio yet** — there is no Luau toolchain in this environment, so nothing has been syntax-checked or playtested. Treat "it runs cleanly" as unverified until you open it in Studio.
@@ -128,7 +146,7 @@ The client (`BirdController`) drives the Model whose `OwnerUserId == player.User
 - **Refine incrementally, don't regenerate.** The codebase is modular for exactly this. Change one module/feature at a time and Studio-test it.
 - **Honor the thesis:** any flight-number change is a balance change and vice-versa (`feedback-flight-balance-inseparable` memory). Reason about the 1-eagle-vs-4-crow matchup on every tuning edit.
 - **Keep contracts stable:** `GameConfig` keys, the `FlightPhysics` API, and the Remotes list are consumed across files — grep before renaming. The Remotes contract is documented in `CLAUDE.md`.
-- **Update memory** (`C:\Users\Chad\.claude\projects\D--eaglesvscrows2026\memory\`) when a design question gets resolved or a new constraint appears.
+- **Update memory** (`C:\Users\Chad\.claude\projects\D--EvC2026\memory\`) when a design question gets resolved or a new constraint appears.
 - WebSearch/WebFetch are allowlisted in `.claude/settings.json` (the deep-research workflow needed them).
 
 ## Open desk-check notes (non-blocking — watch on first run, don't pre-fix blind)
@@ -140,7 +158,7 @@ Observations from the static read that are NOT bugs but worth eyeing once it's l
 - **Solo-flight + a joining 2nd player:** when the second team joins mid-solo the new bird flies for the ~8s intermission before the scored round clears & respawns everyone. Expected, not a leak.
 
 ## ▶️ How to continue this work — use the loop-orchestrator skill + deep-research
-`D:\eaglesvscrows2026\loop_skill\` is a self-contained **Claude Code Skill (`loop-orchestrator`)** for running disciplined, externally-verified improvement loops, and it ships a **`profiles/roblox-game.md` profile written for this exact game.** The intended way to develop each module from here is to drive it through that loop rather than ad-hoc edits:
+`D:\EvC2026\loop_skill\` is a self-contained **Claude Code Skill (`loop-orchestrator`)** for running disciplined, externally-verified improvement loops, and it ships a **`profiles/roblox-game.md` profile written for this exact game.** The intended way to develop each module from here is to drive it through that loop rather than ad-hoc edits:
 1. **Read the skill** — `loop_skill/.claude/skills/loop-orchestrator/SKILL.md`, then `references/sops.md` and `profiles/roblox-game.md`. (It's directory-scoped to `loop_skill/`, so read the files directly as guidance for `src/` work, or install globally by copying the skill dir to `~/.claude/skills/`.)
 2. **Research half** — compose the **`deep-research`** skill for each module's open question (flight feel, the lose-lose collision, anti-cheat envelope, raycast collision, parallel-Luau scaling — see the queue). Feed conclusions into the loop's PLAN step. The session-3 multi-agent pass already gathered Roblox SOPs + citations for the big items (see queue #4–6) — start from those.
 3. **Loop per module** — FRAME (measurable "done" + budget) → PLAN one change → ACT → **VERIFY against ground truth (`.\build.ps1` resolves AND a Studio playtest)** → SCORE → REFLECT → DECIDE. One system per iteration (SOP-4); never weaken the verify to pass (SOP-7); checkpoint the place file before risky systemic changes. Ground truth is **pressing Play** — there is no headless Luau toolchain here.

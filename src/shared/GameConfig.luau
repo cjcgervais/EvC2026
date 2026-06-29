@@ -23,7 +23,12 @@ local GameConfig = {}
 --------------------------------------------------------------------------------
 GameConfig.Flight = {
 	GRAVITY = 196.2,            -- studs/s^2; matches Workspace.Gravity
-	AIR_DENSITY = 1.0,          -- abstract scalar folded into lift/drag coefficients
+	-- AIR_DENSITY is the abstract scalar that folds 0.5*rho*wingArea into the lift/drag terms.
+	-- CALIBRATED for the v2 lift curve: with cl0~0.3 and these profiles, level cruise at each
+	-- bird's glideSpeed trims at a few degrees AoA (lift ~= gravity), and stall speed sits well
+	-- below spawn (0.9*glide) and cruise. See FlightPhysics.computeCL and the calibration note
+	-- in project-open-questions. Raising it raises lift everywhere (lower stall speeds).
+	AIR_DENSITY = 0.033,
 	WIND_BASE = Vector3.new(0, 0, 0), -- ambient wind; per-map override allowed
 	-- Control authority scales with airspeed: below MIN you can barely steer
 	-- (this is what makes a stalled/slow bird helpless and gives speed meaning).
@@ -32,12 +37,14 @@ GameConfig.Flight = {
 	-- Aerobatics (loop / barrel roll) unlock above this airspeed.
 	AEROBATIC_MIN_SPEED = 110,
 	TERMINAL_VELOCITY = 400,
-	-- PATH TRACKING (rad/s): base rate at which the flight path (velocity vector) follows the
-	-- nose, in ALL attitudes — this is what makes "point down = accelerate" and "pull up =
-	-- climb / recover from a fall" actually work instead of just piling on angle-of-attack
-	-- until you stall. Per-profile `sustainedTurnRate` ADDS to this when banked (the turn-fight
-	-- lever). Scaled by airspeed authority, so a slow bird still goes mushy and can stall.
-	PATH_TRACK_RATE = 2.2,
+	-- STATIC AERODYNAMIC STABILITY (rad/s base): how fast the airframe weathervanes its
+	-- ORIENTATION toward the airflow. This self-limits angle-of-attack (anti-stall) WITHOUT
+	-- destroying lift — it rotates the nose toward the path, not the path toward the nose, so
+	-- the v2 kernel keeps lift while the player's pitch input still dominates. Per-profile
+	-- `stabilityRate` multiplies this; `recoverNoseDownRate` adds extra pull past the stall.
+	-- (Replaces v1's PATH_TRACK_RATE, which rotated VELOCITY toward the nose and thus drove
+	-- AoA->0->no-lift — the root cause of the old constant-stall spiral.)
+	STABILITY_RATE = 1.5,
 	-- OBSTACLE COLLISION (BirdCollision, queue #4). Birds are CFrame-driven so they have NO
 	-- native Roblox collision — the controllers sweep a Spherecast along each step instead.
 	-- CRASH_SPEED is the CLOSING speed (studs/s, into a surface normal) at or above which a
@@ -60,19 +67,23 @@ GameConfig.Profiles = {
 		displayName = "Eagle",
 
 		-- AERODYNAMICS -------------------------------------------------------
-		mass = 12,              -- heavier
+		mass = 12,              -- heavier (better energy retention: drag/mass is gentle)
 		wingLoading = 1.0,      -- HIGH: fast, wide turns, strong glide/dive (reference = 1.0)
-		-- liftCoefficient sets the lift envelope. With the old 1.35 the eagle's STALL SPEED
-		-- (~75 studs/s) sat right at its spawn speed and below its cruise, so it flew ~1.3°
-		-- from the 18° stall at all times and any climb input stalled it. 2.0 drops the stall
-		-- speed to ~62 studs/s, giving a real margin below the 130 cruise. (Crow left at 1.15:
-		-- it already had a wide margin — stall ~26 vs spawn 57 — so this is an EAGLE-only fix
-		-- and the crow's low-energy angles advantage is preserved.) PLAYTEST-PROVISIONAL.
-		liftCoefficient = 2.4,  -- lift per (airspeed^2 * sin(AoA)); raised again per playtest
+		-- v2 LIFT CURVE: CL(a) = cl0 + liftSlopePerDeg*a, capped at clMax at the stall angle,
+		-- then a forgiving roll-off to postStallCl over stallPadDeg. cl0 > 0 means the eagle
+		-- makes lift at ZERO AoA, so level cruise (~130) is the hands-off trim instead of the
+		-- old knife-edge stall. Calibrated so stall speed (~65) sits below spawn (0.9*glide=117)
+		-- and cruise (130). See FlightPhysics.computeCL. PLAYTEST-PROVISIONAL.
+		cl0 = 0.30,             -- baseline lift at zero AoA (THE fix for "not enough lift")
+		liftSlopePerDeg = 0.11, -- lift-curve slope (~= 2*pi per radian, thin-airfoil theory)
+		clMax = 1.4,            -- peak lift coefficient, reached at stallAngleDeg
+		postStallCl = 0.70,     -- lift retained past the stall (a recoverable mush, not a cliff)
+		stallPadDeg = 6,        -- degrees beyond stallAngle over which lift rolls off
 		parasiticDrag = 0.020,  -- low parasitic drag -> great glide/dive
-		inducedDragK = 0.85,    -- induced drag (cost of generating lift while turning)
-		stallAngleDeg = 20,     -- critical angle of attack before lift collapses (forgiving)
-		stallRecoverRate = 0.9, -- how fast lift returns after AoA drops back (0..1/frame-ish)
+		inducedDragK = 0.85,    -- induced-drag coefficient (cost of lift: drag ~ k*CL^2)
+		stallAngleDeg = 20,     -- critical angle of attack before lift rolls off (forgiving)
+		stabilityRate = 1.0,    -- weathervane strength (stable boom-and-zoom platform)
+		recoverNoseDownRate = 1.5, -- extra nose-down toward airflow past the stall (auto-recovery)
 
 		-- THRUST / SPEED -----------------------------------------------------
 		-- flapThrust must overcome cruise drag so the eagle can hold level flight instead of
@@ -121,12 +132,20 @@ GameConfig.Profiles = {
 
 		-- AERODYNAMICS -------------------------------------------------------
 		mass = 3.0,
-		wingLoading = 0.55,     -- LOW: tight turns, agile
-		liftCoefficient = 1.15,
+		wingLoading = 0.55,     -- LOW: more lift accel -> lower stall speed + tighter turns
+		-- v2 LIFT CURVE (see Eagle for the model). Crow has higher clMax + later stall so it can
+		-- point its nose harder and out-turn the eagle; low wingLoading gives it a very low stall
+		-- speed (~47 < spawn 0.9*glide=85 < cruise 95). PLAYTEST-PROVISIONAL.
+		cl0 = 0.30,             -- baseline lift at zero AoA
+		liftSlopePerDeg = 0.11, -- lift-curve slope
+		clMax = 1.6,            -- higher peak lift -> harder instantaneous turn (angles fighter)
+		postStallCl = 0.90,     -- very forgiving post-stall (twitchy but recoverable)
+		stallPadDeg = 8,        -- gentle, wide stall roll-off
 		parasiticDrag = 0.045,  -- higher drag -> bleeds energy faster, worse glide/dive
-		inducedDragK = 0.55,    -- cheaper to turn (pays less for lift in a turn)
+		inducedDragK = 0.55,    -- cheaper to turn (pays less induced drag per unit lift)
 		stallAngleDeg = 24,     -- stalls later -> can point nose harder without dropping
-		stallRecoverRate = 1.3, -- recovers from stall fast (forgiving, twitchy)
+		stabilityRate = 0.7,    -- LESS weathervaning: holds AoA to point the nose (agile/twitchy)
+		recoverNoseDownRate = 1.2, -- auto-recovery past the stall
 
 		-- THRUST / SPEED -----------------------------------------------------
 		flapThrust = 150,
