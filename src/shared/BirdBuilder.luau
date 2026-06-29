@@ -34,6 +34,12 @@ local IDLE_FREQUENCY = 1.5            -- radians/sec for idle bob (uses dt accum
 local DIVE_SWEEP = math.rad(60)       -- wings swept back/folded while diving
 local SMOOTH = 10                     -- how quickly the wing eases toward its target
 
+-- Per-model idle-bob phase accumulator. Kept in a WEAK-KEYED Lua table (not a model
+-- Attribute) because AnimateWings runs every frame: a SetAttribute every frame replicates
+-- ~180×/s per AI crow to every client — pure network waste for a purely cosmetic local bob.
+-- Weak keys let entries be collected automatically when a bird Model is destroyed.
+local idlePhase = setmetatable({}, { __mode = "k" })
+
 --------------------------------------------------------------------------------
 -- Helpers
 --------------------------------------------------------------------------------
@@ -181,9 +187,6 @@ function BirdBuilder.Build(teamName, profile)
 	buildWing(-1)
 	buildWing(1)
 
-	-- A persistent idle phase accumulator lives on the model (no external state).
-	model:SetAttribute("IdlePhase", 0)
-
 	return model
 end
 
@@ -203,9 +206,10 @@ function BirdBuilder.AnimateWings(model, isFlapping, isDiving, flapPhase, dt)
 	local body = model.PrimaryPart or model:FindFirstChild("Body")
 	if not body then return end
 
-	-- Advance an internal idle phase (used only when not flapping/diving).
-	local idle = (model:GetAttribute("IdlePhase") or 0) + dt * IDLE_FREQUENCY
-	model:SetAttribute("IdlePhase", idle % (math.pi * 2))
+	-- Advance an internal idle phase (used only when not flapping/diving). Stored in a
+	-- weak Lua table keyed by the model — never replicated (see idlePhase declaration).
+	local idle = ((idlePhase[model] or 0) + dt * IDLE_FREQUENCY) % (math.pi * 2)
+	idlePhase[model] = idle
 
 	-- Compute the dihedral (up/down) angle for this frame, shared by both wings.
 	local angle

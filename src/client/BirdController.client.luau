@@ -3,8 +3,9 @@
 	BirdController — Client-side flight, input, camera, and FX handler.
 
 	Runs the FlightPhysics engine locally for zero-latency input response, then
-	writes the result onto the character's HumanoidRootPart (CFrame + assembly
-	velocity) which the server has already given this client network ownership of.
+	writes the result onto its standalone bird Model's PrimaryPart ("Body") — CFrame +
+	assembly velocity — which the server has already given this client network ownership
+	of. There is NO Roblox Character; the bird is found in Workspace.Birds by attribute.
 
 	Control scheme (see GameConfig + project brief):
 	  W / S        -> PITCH  (W nose-down to dive/accelerate, S nose-up to climb)
@@ -17,6 +18,7 @@
 	  Mouse1       -> attack (AttackRequest)
 	  1-4          -> SwapCrow(index)
 	  F            -> toggle formation tight/loose (SetFormation)
+	  R            -> manual respawn / reset (Respawn)
 ]]
 
 --------------------------------------------------------------------------------
@@ -33,6 +35,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local GameConfig    = require(ReplicatedStorage:WaitForChild("GameConfig"))
 local FlightPhysics = require(ReplicatedStorage:WaitForChild("FlightPhysics"))
 local BirdBuilder   = require(ReplicatedStorage:WaitForChild("BirdBuilder"))
+local BirdCollision = require(ReplicatedStorage:WaitForChild("BirdCollision"))
 
 local CAM = GameConfig.Camera
 
@@ -44,6 +47,7 @@ local TeamAssigned = Remotes:WaitForChild("TeamAssigned")
 local AttackRequest = Remotes:WaitForChild("AttackRequest")
 local SwapCrow     = Remotes:WaitForChild("SwapCrow")
 local SetFormation = Remotes:WaitForChild("SetFormation")
+local Respawn      = Remotes:WaitForChild("Respawn")
 local GetThermals  = Remotes:WaitForChild("GetThermals")
 
 --------------------------------------------------------------------------------
@@ -106,10 +110,10 @@ end)
 --------------------------------------------------------------------------------
 -- W = pitch +1 (nose down), S = pitch -1 (nose up). A/D roll, Q/E yaw.
 local keyBindings = {
-	[Enum.KeyCode.W] = { axis = "pitch", value = 1 },
-	[Enum.KeyCode.S] = { axis = "pitch", value = -1 },
-	[Enum.KeyCode.A] = { axis = "roll",  value = -1 },
-	[Enum.KeyCode.D] = { axis = "roll",  value = 1 },
+	[Enum.KeyCode.W] = { axis = "pitch", value = -1 }, -- nose DOWN (dive / accelerate)
+	[Enum.KeyCode.S] = { axis = "pitch", value = 1 },  -- nose UP  (climb)
+	[Enum.KeyCode.A] = { axis = "roll",  value = 1 },  -- bank left
+	[Enum.KeyCode.D] = { axis = "roll",  value = -1 }, -- bank right
 	[Enum.KeyCode.Q] = { axis = "yaw",   value = -1 },
 	[Enum.KeyCode.E] = { axis = "yaw",   value = 1 },
 }
@@ -150,6 +154,10 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	elseif input.KeyCode == Enum.KeyCode.F then
 		formationTight = not formationTight
 		SetFormation:FireServer(formationTight and "tight" or "loose")
+		return
+	elseif input.KeyCode == Enum.KeyCode.R then
+		-- Manual respawn / reset (no Roblox-character reset exists here).
+		Respawn:FireServer()
 		return
 	end
 
@@ -330,11 +338,25 @@ local function pushUI()
 end
 
 --------------------------------------------------------------------------------
+-- COLLISION PARAMS — reused Spherecast filter that ignores all birds (so we only
+-- sweep against the Map). Built lazily once Workspace.Birds exists (it does by the
+-- time we're driving a bird that lives inside it).
+--------------------------------------------------------------------------------
+local collisionParams = nil
+local function getCollisionParams()
+	local birds = workspace:FindFirstChild("Birds")
+	if not birds then return nil end
+	if not collisionParams then
+		collisionParams = BirdCollision.makeParams(birds)
+	end
+	return collisionParams
+end
+
+--------------------------------------------------------------------------------
 -- MAIN FLIGHT STEP
 --------------------------------------------------------------------------------
 local function onFlightStep(dt)
-	if not isAlive or not flightEngine or not rootPart or not rootPart.Parent then
-		isAlive = false
+	if not (isAlive and flightEngine and rootPart and rootPart.Parent) then
 		return
 	end
 
@@ -344,6 +366,24 @@ local function onFlightStep(dt)
 
 	-- 2. Step the simulation with the live input.
 	flightEngine:Update(dt, inputState)
+
+	-- 2b. Obstacle/ground collision (responsive grazing). On a survivable graze we slide the
+	-- bird along the surface locally for zero-latency feel; a lethal head-on impact we do NOT
+	-- clamp — the server's authoritative crash sweep (processCrashes) reads our clean position
+	-- delta and kills us, so client and server never disagree on death.
+	local cparams = getCollisionParams()
+	if cparams then
+		local r = (currentProfile and currentProfile.bodyRadius) or 2.5
+		local target = flightEngine.orientation.Position
+		local newPos, newVel, crashed = BirdCollision.resolve(
+			rootPart.Position, target, flightEngine.velocity, r, cparams, GameConfig.Flight.CRASH_SPEED
+		)
+		if (not crashed) and (newPos - target).Magnitude > 1e-3 then
+			local cf = flightEngine.orientation
+			flightEngine.orientation = (cf - cf.Position) + newPos
+			flightEngine.velocity = newVel
+		end
+	end
 
 	-- 3. Drive the character body from the engine state.
 	rootPart.CFrame = flightEngine.orientation
@@ -369,60 +409,146 @@ local function onFlightStep(dt)
 end
 
 --------------------------------------------------------------------------------
--- CHARACTER SETUP
+-- BIRD ACQUISITION (standalone-model design — there is NO Roblox Character)
+--
+-- The server represents each player's bird(s) as standalone Models in
+-- Workspace.Birds, tagged with attributes (the contract in docs/HANDOFF.md):
+--   OwnerUserId (number) -- which player owns this bird
+--   Possessed   (bool)   -- the single bird the player is actively flying
+-- We find the Model owned by us with Possessed == true, take its PrimaryPart
+-- ("Body") — which the server has handed us network ownership of — and drive it
+-- locally with FlightPhysics. We re-acquire whenever possession moves (manual
+-- SwapCrow, or server auto-repossess after a death) or a bird spawns/despawns.
 --------------------------------------------------------------------------------
-local function onCharacterAdded(character)
-	if not character then return end
+local birdsFolder = nil -- set once Workspace.Birds exists (server creates it on first spawn)
+local attrConns  = {}   -- [model] = connection watching its "Possessed" attribute
+local acquireGen = 0    -- guards against overlapping async acquisitions
 
-	-- Tear down any prior loop and reset transient state.
-	if renderConn then
-		renderConn:Disconnect()
-		renderConn = nil
-	end
+local function resetInput()
+	inputState.pitch, inputState.roll, inputState.yaw = 0, 0, 0
+	inputState.flap, inputState.dive = false, false
+end
+
+local function teardownDrive()
 	isAlive = false
 	flightEngine = nil
 	birdModel = nil
 	rootPart = nil
-	inputState.pitch, inputState.roll, inputState.yaw = 0, 0, 0
-	inputState.flap, inputState.dive = false, false
+end
+
+local function findMyPossessedBird()
+	if not birdsFolder then return nil end
+	for _, model in ipairs(birdsFolder:GetChildren()) do
+		if model:IsA("Model")
+			and model:GetAttribute("OwnerUserId") == player.UserId
+			and model:GetAttribute("Possessed") == true then
+			return model
+		end
+	end
+	return nil
+end
+
+-- (Re)acquire the bird we should be flying. Safe to call repeatedly: no-ops if we
+-- are already driving the right Model. Runs in its own thread (via reacquire) so it
+-- can WaitForChild the Body part while the Model is still replicating in.
+local function acquire()
+	if not currentProfile then return end
+	local target = findMyPossessedBird()
+	if target == birdModel and isAlive then return end
+
+	acquireGen += 1
+	local myGen = acquireGen
+	teardownDrive()
+	resetInput()
 	setFreeLook(false)
 
-	-- Wait for the server-built character pieces.
-	local hrp = character:WaitForChild("HumanoidRootPart", 20)
-	local humanoid = character:WaitForChild("Humanoid", 20)
-	if not hrp or not humanoid then return end
-	rootPart = hrp
+	if not target then return end
 
-	-- Wait for team assignment: TeamAssigned fires (teamName, profile).
-	local teamName, profile = TeamAssigned.OnClientEvent:Wait()
-	currentTeam = teamName
-	currentProfile = profile
-	if not currentProfile then return end
+	local body = target.PrimaryPart or target:WaitForChild("Body", 5)
+	-- A newer acquire() superseded us, or the Model despawned while we waited.
+	if myGen ~= acquireGen then return end
+	if not body or not target.Parent then return end
 
-	-- Find the bird Model the server welded into the character.
-	birdModel = character:FindFirstChildWhichIsA("Model")
+	-- Wait for the server to confirm it handed us network ownership (NetOwner attribute set
+	-- in GameServer.trySetNetworkOwner). Driving the Body before ownership lands makes our
+	-- CFrame writes fight the server's sim → the spawn/swap rubber-band. Best-effort: if the
+	-- signal never arrives within the timeout we proceed anyway (better to fly than be stuck).
+	local timeout = 5
+	while body:GetAttribute("NetOwner") ~= player.UserId
+		and myGen == acquireGen and target.Parent and timeout > 0 do
+		timeout -= task.wait()
+	end
+	if myGen ~= acquireGen or not target.Parent then return end
 
-	-- Disable default Roblox locomotion; the flight engine drives the body.
-	humanoid.PlatformStand = true
+	birdModel = target
+	rootPart  = body
 
-	-- Spin up the local flight engine seeded from the spawn CFrame.
-	flightEngine = FlightPhysics.new(currentProfile, rootPart.Position)
-	flightEngine.orientation = rootPart.CFrame
+	-- Seed the engine from the body's LIVE state so swapping crows (or taking over a
+	-- bird the server was flying) does not snap position/heading/velocity.
+	flightEngine = FlightPhysics.new(currentProfile, body.Position)
+	flightEngine.orientation   = body.CFrame
+	flightEngine.velocity      = body.AssemblyLinearVelocity
+	flightEngine.speed         = body.AssemblyLinearVelocity.Magnitude
+	flightEngine.verticalSpeed = body.AssemblyLinearVelocity.Y
 
 	isAlive = true
-	renderConn = RunService.RenderStepped:Connect(onFlightStep)
 end
 
-player.CharacterAdded:Connect(onCharacterAdded)
-if player.Character then
-	task.spawn(onCharacterAdded, player.Character)
+local function reacquire()
+	task.spawn(acquire)
 end
 
-player.CharacterRemoving:Connect(function()
-	isAlive = false
-	if renderConn then
-		renderConn:Disconnect()
-		renderConn = nil
-	end
+-- Watch Possessed flips on every Model we own so swaps / auto-repossess re-acquire.
+local function trackModel(model)
+	if not model:IsA("Model") or attrConns[model] then return end
+	if model:GetAttribute("OwnerUserId") ~= player.UserId then return end
+	attrConns[model] = model:GetAttributeChangedSignal("Possessed"):Connect(reacquire)
+end
+
+-- TeamAssigned carries our profile (Eagle/Crow). Connected SYNCHRONOUSLY (before any
+-- yield) so we never miss the round-start event. Birds may already exist (joined
+-- mid-round) or arrive afterward; either way, (re)acquire once we know the profile.
+TeamAssigned.OnClientEvent:Connect(function(teamName, profile)
+	currentTeam = teamName
+	if profile then currentProfile = profile end
+	reacquire()
+end)
+
+-- Roblox does not deliver InputEnded for keys still held when the window loses focus
+-- (alt-tab, menu, click-out). Without this the bird keeps flapping/pitching with no key
+-- down and flies off. Neutralize all held input and drop free-look on focus loss.
+UserInputService.WindowFocusReleased:Connect(function()
+	resetInput()
 	setFreeLook(false)
+end)
+
+-- One persistent flight loop: it drives whichever bird we currently hold and idles
+-- when we hold none (between deaths / round resets).
+renderConn = RunService.RenderStepped:Connect(onFlightStep)
+
+-- Wire the bird folder once the server has created it (it does so on first spawn).
+-- Deferred so the WaitForChild yield can't delay the TeamAssigned connection above.
+task.spawn(function()
+	birdsFolder = workspace:WaitForChild("Birds")
+
+	birdsFolder.ChildAdded:Connect(function(child)
+		trackModel(child)
+		reacquire()
+	end)
+	birdsFolder.ChildRemoved:Connect(function(child)
+		if attrConns[child] then
+			attrConns[child]:Disconnect()
+			attrConns[child] = nil
+		end
+		if child == birdModel then
+			teardownDrive()
+		end
+		reacquire()
+	end)
+	for _, child in ipairs(birdsFolder:GetChildren()) do
+		trackModel(child)
+	end
+
+	-- Acquire now in case TeamAssigned already fired and our birds already exist.
+	reacquire()
 end)

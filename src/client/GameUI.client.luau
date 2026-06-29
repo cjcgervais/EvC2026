@@ -1,9 +1,14 @@
 --!nonstrict
 --[[
-	GameUI — Polished HUD for Eagles vs Crows (LocalScript in StarterGui)
+	GameUI — Polished HUD for Eagles vs Crows (LocalScript in StarterPlayerScripts)
 
 	Builds the entire HUD in code (no Studio assets) using GameConfig.UI for all
 	colors/fonts/transparency. Runs safely before TeamAssigned fires.
+
+	NOTE: lives in StarterPlayerScripts, NOT StarterGui. With CharacterAutoLoads=false
+	(standalone-bird-model design) StarterGui is never copied to PlayerGui, so a HUD
+	script there would never run. From StarterPlayerScripts it runs on join and parents
+	its own ScreenGui to PlayerGui directly.
 
 	Exposed hooks (called by BirdController):
 		_G.UpdateStaminaUI(ratio)   -- 0..1 stamina fill
@@ -347,48 +352,59 @@ end)
 
 --------------------------------------------------------------------------------
 -- PER-FRAME UPDATE (Health / Speed / Altitude / stall blink)
+--
+-- No Roblox Character (standalone-model design): read the possessed bird's Body
+-- from Workspace.Birds. Health/MaxHealth live as Attributes on the Body; speed and
+-- altitude come from its AssemblyLinearVelocity / Position. (See docs/HANDOFF.md.)
 --------------------------------------------------------------------------------
+local birdsFolder = workspace:WaitForChild("Birds")
+
+-- The bird this HUD reflects: prefer the possessed one, else any bird we own (so
+-- HP still shows in the brief gap between a death and an auto-repossess).
+local function findMyBird()
+	local anyOwned
+	for _, model in ipairs(birdsFolder:GetChildren()) do
+		if model:IsA("Model") and model:GetAttribute("OwnerUserId") == player.UserId then
+			if model:GetAttribute("Possessed") == true then
+				return model
+			end
+			anyOwned = anyOwned or model
+		end
+	end
+	return anyOwned
+end
+
 RunService.RenderStepped:Connect(function()
 	-- Blink the stall warning while visible.
 	if stallWarning.Visible then
 		stallWarning.TextTransparency = math.abs(math.sin(tick() * 8)) * 0.6
 	end
 
-	local character = player.Character
-	if not character then
+	local model = findMyBird()
+	local body = model and (model.PrimaryPart or model:FindFirstChild("Body"))
+	if not body then
+		-- No living/possessed bird (death → respawn gap): empty the readouts instead of
+		-- freezing the last pre-death values, which read as a still-alive bird.
+		healthBarFill.Size = UDim2.new(0, 0, 1, 0)
+		staminaBarFill.Size = UDim2.new(0, 0, 1, 0)
+		speedLabel.Text = "SPD: 0"
+		altLabel.Text = "ALT: 0"
+		stallWarning.Visible = false
 		return
 	end
 
-	local root = character:FindFirstChild("HumanoidRootPart")
-	local primary = character.PrimaryPart
-
-	-- Health: prefer PrimaryPart "Health" Attribute, else Humanoid.Health.
-	local hpRatio
-	if primary then
-		local hpAttr = primary:GetAttribute("Health")
-		if typeof(hpAttr) == "number" then
-			-- Derive a max from a MaxHealth attribute if present, else assume 0..100.
-			local maxAttr = primary:GetAttribute("MaxHealth")
-			local maxHp = (typeof(maxAttr) == "number" and maxAttr > 0) and maxAttr or 100
-			hpRatio = hpAttr / maxHp
-		end
-	end
-	if hpRatio == nil then
-		local humanoid = character:FindFirstChildOfClass("Humanoid")
-		if humanoid and humanoid.MaxHealth > 0 then
-			hpRatio = humanoid.Health / humanoid.MaxHealth
-		end
-	end
-	if hpRatio ~= nil then
-		healthBarFill.Size = UDim2.new(math.clamp(hpRatio, 0, 1), 0, 1, 0)
+	-- Health from the Body's "Health" / "MaxHealth" Attributes.
+	local hpAttr = body:GetAttribute("Health")
+	if typeof(hpAttr) == "number" then
+		local maxAttr = body:GetAttribute("MaxHealth")
+		local maxHp = (typeof(maxAttr) == "number" and maxAttr > 0) and maxAttr or 100
+		healthBarFill.Size = UDim2.new(math.clamp(hpAttr / maxHp, 0, 1), 0, 1, 0)
 	end
 
-	-- Flight data from HumanoidRootPart.
-	if root then
-		local speed = root.AssemblyLinearVelocity.Magnitude
-		speedLabel.Text = "SPD: " .. tostring(math.floor(speed + 0.5))
-		altLabel.Text = "ALT: " .. tostring(math.floor(root.Position.Y + 0.5))
-	end
+	-- Flight data from the Body.
+	local speed = body.AssemblyLinearVelocity.Magnitude
+	speedLabel.Text = "SPD: " .. tostring(math.floor(speed + 0.5))
+	altLabel.Text = "ALT: " .. tostring(math.floor(body.Position.Y + 0.5))
 end)
 
 --------------------------------------------------------------------------------

@@ -32,6 +32,20 @@ GameConfig.Flight = {
 	-- Aerobatics (loop / barrel roll) unlock above this airspeed.
 	AEROBATIC_MIN_SPEED = 110,
 	TERMINAL_VELOCITY = 400,
+	-- PATH TRACKING (rad/s): base rate at which the flight path (velocity vector) follows the
+	-- nose, in ALL attitudes — this is what makes "point down = accelerate" and "pull up =
+	-- climb / recover from a fall" actually work instead of just piling on angle-of-attack
+	-- until you stall. Per-profile `sustainedTurnRate` ADDS to this when banked (the turn-fight
+	-- lever). Scaled by airspeed authority, so a slow bird still goes mushy and can stall.
+	PATH_TRACK_RATE = 2.2,
+	-- OBSTACLE COLLISION (BirdCollision, queue #4). Birds are CFrame-driven so they have NO
+	-- native Roblox collision — the controllers sweep a Spherecast along each step instead.
+	-- CRASH_SPEED is the CLOSING speed (studs/s, into a surface normal) at or above which a
+	-- map impact is lethal; below it the bird slides along the surface (graze a spire, brush
+	-- the ground) instead of dying. This is a flight==balance lever: low value = terrain is a
+	-- deadly hazard the agile crow can thread but the fast wide-turning eagle clips in a turn
+	-- fight. PLAYTEST-PROVISIONAL.
+	CRASH_SPEED = 45,
 }
 
 --------------------------------------------------------------------------------
@@ -48,14 +62,25 @@ GameConfig.Profiles = {
 		-- AERODYNAMICS -------------------------------------------------------
 		mass = 12,              -- heavier
 		wingLoading = 1.0,      -- HIGH: fast, wide turns, strong glide/dive (reference = 1.0)
-		liftCoefficient = 1.35, -- lift per (airspeed^2 * sin(AoA))
+		-- liftCoefficient sets the lift envelope. With the old 1.35 the eagle's STALL SPEED
+		-- (~75 studs/s) sat right at its spawn speed and below its cruise, so it flew ~1.3°
+		-- from the 18° stall at all times and any climb input stalled it. 2.0 drops the stall
+		-- speed to ~62 studs/s, giving a real margin below the 130 cruise. (Crow left at 1.15:
+		-- it already had a wide margin — stall ~26 vs spawn 57 — so this is an EAGLE-only fix
+		-- and the crow's low-energy angles advantage is preserved.) PLAYTEST-PROVISIONAL.
+		liftCoefficient = 2.4,  -- lift per (airspeed^2 * sin(AoA)); raised again per playtest
 		parasiticDrag = 0.020,  -- low parasitic drag -> great glide/dive
 		inducedDragK = 0.85,    -- induced drag (cost of generating lift while turning)
-		stallAngleDeg = 18,     -- critical angle of attack before lift collapses
+		stallAngleDeg = 20,     -- critical angle of attack before lift collapses (forgiving)
 		stallRecoverRate = 0.9, -- how fast lift returns after AoA drops back (0..1/frame-ish)
 
 		-- THRUST / SPEED -----------------------------------------------------
-		flapThrust = 380,       -- forward force from a flap
+		-- flapThrust must overcome cruise drag so the eagle can hold level flight instead of
+		-- decaying into a stall. At 130 cruise, drag decel ≈ 41 studs/s²; old 380/mass≈32 was
+		-- short, so level flight bled speed until it stalled. 520/12≈43 lets it sustain/slowly
+		-- gain at cruise. It still trades altitude for top speed (energy fighter) — the dive,
+		-- not the flap, is its speed source. PLAYTEST-PROVISIONAL.
+		flapThrust = 520,       -- forward force from a flap
 		glideSpeed = 130,       -- comfortable cruise (high)
 		maxLevelSpeed = 170,
 		diveThrustBonus = 1.6,  -- thrust multiplier while diving (gravity also assists)
@@ -81,8 +106,12 @@ GameConfig.Profiles = {
 		talonDamage = 34,       -- grab/strike, the bread-and-butter eagle kill
 		diveAttackMultiplier = 3.46, -- RESEARCH: stoop ~3.46x level-flight lethality
 		-- Collision: eagle is the heavy body; it survives trades better than a crow.
-		collisionDamageDealt = 60,  -- to the other bird at full relative speed
-		collisionDamageTaken = 0.45,-- fraction of its own collisionDamageDealt it suffers
+		collisionDamageDealt = 60,   -- damage IT inflicts on whatever bird it rams (full-speed)
+		-- Vulnerability multiplier applied to the OTHER bird's incoming ram
+		-- (see GameServer.processCollisions). Eagle is the heavy body: a full-speed crow
+		-- ram (crow dealt 30) does 30*0.85 ≈ 26 to it, so ~4 rams kill the 100-HP eagle —
+		-- the documented trade. PLAYTEST-PROVISIONAL (collision tuning = queue item #3).
+		collisionDamageTaken = 0.85,
 		bodyRadius = 4.5,           -- collision/attack reach (studs)
 	},
 
@@ -125,11 +154,12 @@ GameConfig.Profiles = {
 		beakDamage = 9,
 		talonDamage = 12,
 		diveAttackMultiplier = 2.0,  -- crows dive too, but it is not their identity
-		-- The SACRIFICE: a crow ramming at full speed deals heavy damage and dies.
-		-- ~30 to the eagle (see Eagle.health) => ~4 successful rams kill an eagle,
-		-- i.e. a true mutual-destruction race the eagle avoids by out-positioning.
+		-- The SACRIFICE: a crow ramming at full speed deals 30 to whatever it hits, and dies.
+		-- It absorbs the eagle's heavy body (eagle dealt 60) * 1.4 = 84 >> 25 HP, so a ram is
+		-- a true trade — ~4 crow rams down an eagle, and each ramming crow dies in the process.
+		-- The eagle avoids the math by out-positioning and picking off stragglers.
 		collisionDamageDealt = 30,
-		collisionDamageTaken = 1.4,  -- >1: a crow takes MORE than it deals = it dies/trades
+		collisionDamageTaken = 1.4,  -- >1: fragile body; a full-speed hit is fatal (it trades)
 		bodyRadius = 2.2,
 	},
 }
@@ -171,6 +201,44 @@ GameConfig.Thermals = {
 	minHeight = 20,
 	maxHeight = 480,
 	strength = 140,   -- upward force at the core (studs/s^2-ish)
+}
+
+--------------------------------------------------------------------------------
+-- DEBUG — development aids. `soloFlight` lets ONE player spawn and fly for a smoke
+-- test WITHOUT a full Eagle-vs-Crow match (no scored round; AI crows + possession
+-- still run so a solo crow can exercise the squad). It transitions cleanly into a
+-- real scored match the moment a second team joins. Set false for production.
+-- (Consumed by GameServer.RoundLoop.)
+--------------------------------------------------------------------------------
+GameConfig.Debug = {
+	soloFlight = true,
+}
+
+--------------------------------------------------------------------------------
+-- SECURITY — server-side anti-cheat envelope (GameServer.processAntiCheat). The client
+-- OWNS its bird's physics (SetNetworkOwner) for latency-free flight, so the server cannot
+-- trust the CFrame/velocity it reads. It instead measures SERVER-OBSERVED speed from
+-- position deltas and validates against a generous envelope, using a leaky bucket so honest
+-- dives/loops/lag spikes never false-positive. Response ladder: rubber-band → reclaim
+-- ownership → kick, with strikes that decay over time. Tune conservatively — a false
+-- positive on an honest player feels awful. See docs/HANDOFF.md queue #5.
+--------------------------------------------------------------------------------
+GameConfig.Security = {
+	enabled = true,
+	-- Sustained-speed ceiling = Flight.TERMINAL_VELOCITY × this. We base it on TERMINAL (not a
+	-- profile's diveSpeedCap) because the honest FlightPhysics engine clamps top speed to
+	-- TERMINAL, so an honest bird FREE-FALLING (not diving — diveSpeedCap doesn't apply) can
+	-- legitimately approach TERMINAL. Basing the ceiling on diveSpeedCap would false-positive a
+	-- plummeting crow. A real speed hack still blows past TERMINAL×1.25.
+	speedAllowMult = 1.25,    -- => ~500 studs/s sustained ceiling at TERMINAL 400
+	teleportMult = 1.5,       -- per-frame teleport gate = TERMINAL × this (~600); single-frame jump
+	pingPadStuds = 30,        -- extra teleport-gate slack for replication jitter/lag
+	bucketCapacity = 120,     -- accumulated overshoot (studs) before a strike is issued
+	bucketLeak = 200,         -- bucket drains this many studs/sec (transient spikes forgiven)
+	graceSeconds = 0.5,       -- ignore window right after a legit server move (spawn/swap/respawn)
+	reclaimStrikes = 3,       -- strikes before the server reclaims network ownership
+	kickStrikes = 6,          -- strikes before the player is kicked
+	strikeDecaySeconds = 12,  -- one strike forgiven per this many seconds of clean flight
 }
 
 --------------------------------------------------------------------------------

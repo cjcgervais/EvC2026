@@ -57,8 +57,11 @@ function FlightPhysics.new(profile, position)
 
 	-- Kinematic state
 	self.orientation = CFrame.new(position or Vector3.new(0, 200, 0))
-	-- Start with a little forward speed so the bird flies rather than drops.
-	self.velocity = self.orientation.LookVector * (profile.glideSpeed * 0.6)
+	-- Start with cruise-ish forward speed so the bird flies rather than drops. Must be
+	-- comfortably ABOVE the profile's stall speed or it spawns on the edge of a stall
+	-- (this bit the eagle, whose stall speed was ~spawn speed). GameServer seeds the live
+	-- Body velocity with the same factor; the client re-seeds from it on acquire.
+	self.velocity = self.orientation.LookVector * (profile.glideSpeed * 0.9)
 
 	-- Energy / status
 	self.stamina = profile.maxStamina
@@ -114,9 +117,15 @@ function FlightPhysics:Update(dt, input)
 	-- 1. ROTATIONAL CONTROL (with inertia). Produces banking, pitch, yaw; no
 	--    auto-leveling, so loops & barrel rolls are possible at speed.
 	----------------------------------------------------------------------------
+	-- Frame-rate-INDEPENDENT control smoothing. The old `(1 - inertia)` was a fixed
+	-- per-frame blend, so a 144 FPS player spooled up roll/pitch/yaw far faster (in seconds)
+	-- than a 30 FPS player — and control feel is also a balance number. `inertia^(dt*60)`
+	-- equals the original blend exactly at 60 FPS but keeps the spool-up TIME constant at any
+	-- framerate. (inertia is in (0,1) for both profiles, so the power is well-defined.)
 	local inertia = p.rollInertia
+	local blend = 1 - inertia ^ (dt * 60)
 	local function smooth(cur, target)
-		return cur + (target - cur) * (1 - inertia)
+		return cur + (target - cur) * blend
 	end
 	self._rollVel  = smooth(self._rollVel,  inRoll  * p.rollRate  * authority)
 	self._pitchVel = smooth(self._pitchVel, inPitch * p.pitchRate * authority)
@@ -154,7 +163,11 @@ function FlightPhysics:Update(dt, input)
 		if math.abs(aoa) > stallRad then
 			self.isStalling = true
 			local over = (math.abs(aoa) - stallRad) / stallRad
-			stallFactor = math.max(0, 1 - over * 1.6) -- collapses quickly past stall
+			-- Soft stall: lift bleeds off past the critical AoA but never vanishes (floor 0.3),
+			-- so a stall is a recoverable mush (ease off, regain speed) rather than an
+			-- unrecoverable death spiral. Path tracking (below) redirects velocity regardless of
+			-- lift, so pulling out of a fall works even mid-stall. Still costs you altitude/speed.
+			stallFactor = math.max(0.3, 1 - over * 0.8)
 		else
 			self.isStalling = false
 		end
@@ -179,11 +192,15 @@ function FlightPhysics:Update(dt, input)
 		self.aoaDeg = 0
 	end
 
-	-- THRUST from flapping (forward along nose), plus dive bonus.
+	-- THRUST. A DIVE is now detected purely from nose attitude (nosed down) — you no longer
+	-- need to hold the dive key to convert nose-down into acceleration, which is what players
+	-- expect ("point down = speed up"; the level-speed cap lifts to diveSpeedCap while diving).
+	-- Flapping pushes along the nose (amplified in a dive); the dive key (wantDive) adds a
+	-- powered tuck so you can actively drive the dive even without flapping.
 	self.isFlapping = wantFlap and true or false
-	self.isDiving = wantDive and (look.Y < -0.15) -- only a "dive" if nosed downward
-	if wantFlap then
-		local thrust = p.flapThrust
+	self.isDiving = look.Y < -0.2
+	if wantFlap or (wantDive and self.isDiving) then
+		local thrust = wantFlap and p.flapThrust or (p.flapThrust * 0.5)
 		if self.isDiving then thrust = thrust * p.diveThrustBonus end
 		accel = accel + look * (thrust / p.mass)
 	end
@@ -203,8 +220,15 @@ function FlightPhysics:Update(dt, input)
 	local vMag = v.Magnitude
 	if vMag > F.CONTROL_AUTHORITY_MIN_SPEED then
 		local bank = 1 - math.abs(up.Y)         -- 0 wings-level .. 1 knife-edge
-		local turnRate = p.sustainedTurnRate * authority * (0.25 + 0.75 * bank)
-		local newDir = rotateTowards(v.Unit, look, turnRate * dt)
+		-- PATH TRACKING: rotate the velocity vector toward the nose. A base rate
+		-- (F.PATH_TRACK_RATE) makes pitch responsive in EVERY attitude, so nosing down
+		-- accelerates you along the dive and pulling up actually redirects your motion upward
+		-- (you can recover from a fall) — the old model only tracked ~25% unless banked, which
+		-- is why diving stalled and recovery felt impossible. sustainedTurnRate adds tightness
+		-- when BANKED (eagle wide vs crow tight — the turn-fight lever). Authority-scaled so a
+		-- slow bird still mushes out and can stall (energy management preserved).
+		local trackRate = (F.PATH_TRACK_RATE + p.sustainedTurnRate * bank) * authority
+		local newDir = rotateTowards(v.Unit, look, trackRate * dt)
 		self.velocity = newDir * vMag
 	end
 
@@ -231,7 +255,7 @@ function FlightPhysics:Update(dt, input)
 	----------------------------------------------------------------------------
 	-- 5. ENERGY / STAMINA + animation phase
 	----------------------------------------------------------------------------
-	if wantFlap then
+	if wantFlap or (wantDive and self.isDiving) then
 		local cost = self.isDiving and p.staminaDiveCost or p.staminaFlapCost
 		self.stamina = math.max(0, self.stamina - cost * dt)
 	else

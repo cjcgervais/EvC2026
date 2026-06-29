@@ -7,11 +7,17 @@ build/
 *.rbxm
 *.rbxmx
 
+# Downloaded Rojo binary (bootstrapped by tools/Bootstrap-Rojo.ps1; not committed)
+tools/bin/
+
 # Editor / OS
 .DS_Store
 Thumbs.db
-.vscode/
 .idea/
+# Ignore local VS Code state but keep the shared Rojo tasks/recommended extensions.
+.vscode/*
+!.vscode/tasks.json
+!.vscode/extensions.json
 
 # Roblox LSP / tooling
 sourcemap.json

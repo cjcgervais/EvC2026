@@ -109,8 +109,13 @@ function Boids.computeSteering(self, neighbors, goalPoint, formationCfg)
 		end
 	end
 
-	-- Build each steering component as a direction (desired velocity - relative bias).
-	local separation = sep -- already a desired direction scaled by closeness/spacing
+	-- Build each steering component as a UNIT direction so the GameConfig weights actually
+	-- govern the blend. `sep` was accumulated at physical magnitude (spacing/dist per
+	-- neighbor), so without this it dwarfed the unit alignment/cohesion/goal terms by ~5-10x
+	-- whenever crows neared formation spacing — pinning steering to "flee neighbors" and
+	-- making separationWeight/alignmentWeight/cohesionWeight inert. The closeness-weighted
+	-- accumulation still biases the DIRECTION toward avoiding the nearest crow.
+	local separation = safeUnit(sep)
 
 	local alignment = Vector3.new()
 	if aliCount > 0 then

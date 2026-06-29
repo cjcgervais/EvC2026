@@ -1,0 +1,40 @@
+{
+  // Rojo automation for Eagles vs Crows. Run via Terminal > Run Task… (Ctrl+Shift+P).
+  // All tasks self-bootstrap Rojo (tools/Bootstrap-Rojo.ps1) on first use.
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Rojo: Serve (live-sync)",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}/serve.ps1"],
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": { "panel": "dedicated", "reveal": "always" }
+    },
+    {
+      "label": "Rojo: Build place file",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}/build.ps1"],
+      "problemMatcher": [],
+      "group": { "kind": "build", "isDefault": true }
+    },
+    {
+      "label": "Rojo: Build + watch",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}/build.ps1", "-Watch"],
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": { "panel": "dedicated", "reveal": "always" }
+    },
+    {
+      "label": "Rojo: Install Studio plugin",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}/rojo.ps1", "plugin", "install"],
+      "problemMatcher": []
+    }
+  ]
+}

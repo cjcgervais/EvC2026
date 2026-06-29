@@ -16,6 +16,12 @@
       },
       "Boids": {
         "$path": "src/shared/Boids.luau"
+      },
+      "BirdCollision": {
+        "$path": "src/shared/BirdCollision.luau"
+      },
+      "SpatialHash": {
+        "$path": "src/shared/SpatialHash.luau"
       }
     },
 
@@ -32,14 +38,10 @@
         "$className": "StarterPlayerScripts",
         "BirdController": {
           "$path": "src/client/BirdController.client.luau"
+        },
+        "GameUI": {
+          "$path": "src/client/GameUI.client.luau"
         }
-      }
-    },
-
-    "StarterGui": {
-      "$className": "StarterGui",
-      "GameUI": {
-        "$path": "src/client/GameUI.client.luau"
       }
     },
 

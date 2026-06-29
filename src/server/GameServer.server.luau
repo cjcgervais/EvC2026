@@ -40,6 +40,8 @@ local GameConfig    = require(ReplicatedStorage:WaitForChild("GameConfig"))
 local FlightPhysics  = require(ReplicatedStorage:WaitForChild("FlightPhysics"))
 local BirdBuilder    = require(ReplicatedStorage:WaitForChild("BirdBuilder"))
 local Boids          = require(ReplicatedStorage:WaitForChild("Boids"))
+local BirdCollision  = require(ReplicatedStorage:WaitForChild("BirdCollision"))
+local SpatialHash    = require(ReplicatedStorage:WaitForChild("SpatialHash"))
 
 --------------------------------------------------------------------------------
 -- TUNING CONSTANTS local to the server (combat/collision feel knobs)
@@ -58,6 +60,12 @@ local ATTACK_COOLDOWN        = 0.6    -- s; per-attacker melee debounce
 
 local AI_HEARTBEAT_DT_CAP    = 1 / 30 -- clamp dt fed to the AI flight engine
 local SPAWN_HEIGHT           = 250    -- default spawn altitude
+-- Real obstacle/ground collision now goes through BirdCollision (swept Spherecast) — see
+-- processCrashes / updateAICrows. This Y is only a DEEP FAILSAFE: anything that somehow
+-- tunnels far below the world (baseplate top sits at Y=0) is killed unconditionally so it
+-- can't sink forever and stall the respawn loop.
+local GROUND_FAILSAFE_Y      = -40
+local RESPAWN_COOLDOWN       = 1.5    -- s; debounce manual self-respawn requests
 
 --------------------------------------------------------------------------------
 -- STATE
@@ -87,6 +95,7 @@ local Scores = { Eagles = 0, Crows = 0 }
 local lastAttackAt = {}     -- [player] = os.clock()
 local lastCollisionAt = {}  -- ["modelA|modelB"] = os.clock()
 local lastSwapAt = {}       -- [player] = os.clock()
+local lastRespawnAt = {}    -- [player] = os.clock()
 
 local roundActive = false
 
@@ -117,7 +126,11 @@ local function isBirdAlive(entry)
 		and getHealth(entry.body) > 0
 end
 
--- The "active"/possessed bird Model a player currently controls (for attacks).
+-- The possessed bird Model a player currently controls (for attacks). Strictly the
+-- POSSESSED bird — no "first living bird" fallback. The old fallback let a crow player
+-- whose possessed bird had died (before autoRepossess promoted a survivor) fire an attack
+-- that resolved from a server-simulated AI crow they weren't actually flying. Attacks must
+-- only originate from the bird the player is in control of.
 local function getActiveBird(player)
 	local rec = PlayerData[player]
 	if not rec then return nil end
@@ -126,11 +139,6 @@ local function getActiveBird(player)
 		if entry and entry.possessed and isBirdAlive(entry) then
 			return entry
 		end
-	end
-	-- Fallback: first living bird.
-	for _, model in ipairs(rec.birds) do
-		local entry = Birds[model]
-		if isBirdAlive(entry) then return entry end
 	end
 	return nil
 end
@@ -142,6 +150,10 @@ local function trySetNetworkOwner(body, player)
 		if body.Anchored then return end
 		if player and body:CanSetNetworkOwnership() then
 			body:SetNetworkOwner(player)
+			-- Definitive handoff signal for the client: it must NOT drive the Body until it
+			-- sees this == its UserId, or its CFrame writes fight the server during the
+			-- async ownership-transfer window (the spawn/swap rubber-band). Replicates.
+			body:SetAttribute("NetOwner", player.UserId)
 		end
 	end)
 end
@@ -152,8 +164,20 @@ local function setServerOwned(body)
 	pcall(function()
 		if not body.Anchored and body:CanSetNetworkOwnership() then
 			body:SetNetworkOwner(nil) -- nil = server authority
+			body:SetAttribute("NetOwner", 0) -- 0 = server; clients stop driving it
 		end
 	end)
+end
+
+-- Reset the anti-cheat kinematic baseline after a LEGITIMATE server move (spawn / respawn /
+-- swap / repossess). Without this the teleport gate would fire on the server's own reposition
+-- or ownership handoff. Strikes (on the player record) deliberately persist — only the
+-- per-bird position baseline and leaky bucket are cleared, with a short grace window.
+local function markServerMove(entry)
+	if not entry then return end
+	entry._acLastPos = nil
+	entry._acBucket = 0
+	entry._acGraceUntil = os.clock() + (GameConfig.Security.graceSeconds or 0.5)
 end
 
 --------------------------------------------------------------------------------
@@ -283,6 +307,7 @@ local function CreateRemotes()
 	event("GameNotification") -- S->C: text, color
 	event("SwapCrow")         -- C->S: index
 	event("SetFormation")     -- C->S: formationName
+	event("Respawn")          -- C->S: request a fresh bird (manual reset; debounced)
 
 	local getThermals = Instance.new("RemoteFunction") -- C->S -> thermal array
 	getThermals.Name = "GetThermals"
@@ -346,6 +371,17 @@ local function ensureBirdContainer()
 	return f
 end
 
+-- Reusable RaycastParams for obstacle sweeps: ignore the entire Birds folder (a bird must
+-- not "collide" with itself or other birds here — bird-vs-bird is processCollisions) so only
+-- the Map (baseplate / spires / perches) reports. Built once the container exists.
+local collisionParams
+local function getCollisionParams()
+	if not collisionParams then
+		collisionParams = BirdCollision.makeParams(ensureBirdContainer())
+	end
+	return collisionParams
+end
+
 -- Build one bird model, register it, and position it at `spawnPos`.
 local function spawnBird(player, team, profileName, spawnPos, isAI)
 	local profile = GameConfig.Profiles[profileName]
@@ -361,10 +397,19 @@ local function spawnBird(player, team, profileName, spawnPos, isAI)
 	-- Position & initial velocity (a little forward push so it starts flying).
 	model:PivotTo(CFrame.new(spawnPos) * CFrame.Angles(0, math.random() * math.pi * 2, 0))
 	pcall(function()
-		body.AssemblyLinearVelocity = body.CFrame.LookVector * (profile.glideSpeed * 0.6)
+		-- Spawn with cruise-ish energy, comfortably above stall speed (see FlightPhysics.new).
+		body.AssemblyLinearVelocity = body.CFrame.LookVector * (profile.glideSpeed * 0.9)
 	end)
 
 	setHealth(body, profile.health)
+	body:SetAttribute("MaxHealth", profile.health) -- lets the HUD compute a health ratio
+
+	-- CLIENT CONTRACT (docs/HANDOFF.md): there is no Roblox Character, so the client
+	-- finds and drives its bird by these attributes. Set them BEFORE parenting so they
+	-- replicate together with the Model (the client's ChildAdded sees them immediately).
+	model:SetAttribute("OwnerUserId", player and player.UserId or 0)
+	model:SetAttribute("Team", team)
+	model:SetAttribute("Possessed", not isAI)
 
 	model.Parent = ensureBirdContainer()
 
@@ -379,6 +424,7 @@ local function spawnBird(player, team, profileName, spawnPos, isAI)
 		possessed = not isAI,
 		squad = nil,
 		engine = nil,
+		_lastPos = spawnPos, -- previous-frame position, for the authoritative crash sweep
 	}
 
 	-- AI birds are server-simulated: build a flight engine and take server ownership.
@@ -389,6 +435,7 @@ local function spawnBird(player, team, profileName, spawnPos, isAI)
 	else
 		-- Possessed bird: hand ownership to the controlling client.
 		trySetNetworkOwner(body, player)
+		markServerMove(entry)
 	end
 
 	Birds[model] = entry
@@ -472,19 +519,69 @@ end
 --------------------------------------------------------------------------------
 -- COMBAT (server-authoritative)
 --------------------------------------------------------------------------------
--- Find the nearest living ENEMY bird to `attackerEntry` within `maxRange`.
-local function findNearestEnemy(attackerEntry, maxRange)
-	local best, bestDist
-	local aPos = attackerEntry.body.Position
-	for model, entry in pairs(Birds) do
-		if entry.team ~= attackerEntry.team and isBirdAlive(entry) then
-			local d = (entry.body.Position - aPos).Magnitude
-			if d <= maxRange and (not bestDist or d < bestDist) then
-				best, bestDist = entry, d
-			end
+-- Spatial broad-phase shared by every proximity consumer (findNearestEnemy + processCollisions).
+-- Rebuilt once per Heartbeat from living birds, so the per-pair sweep stays near-linear as the
+-- swarm grows (queue #6a). Cell is much larger than any touch/engage radius, so a 3×3 cell scan
+-- always covers the query — the callers still do the exact distance test (broad phase only).
+local SPATIAL_CELL = 64
+local birdIndex = SpatialHash.new(SPATIAL_CELL)
+
+-- Largest body radius across profiles — the slack a collision broad-phase query needs so it
+-- can't miss a large enemy at the edge of contact range.
+local MAX_BODY_RADIUS = 0
+for _, prof in pairs(GameConfig.Profiles) do
+	MAX_BODY_RADIUS = math.max(MAX_BODY_RADIUS, prof.bodyRadius or 0)
+end
+
+local function rebuildBirdIndex()
+	birdIndex:clear()
+	for _, entry in pairs(Birds) do
+		if isBirdAlive(entry) then
+			birdIndex:insert(entry.body.Position, entry)
 		end
 	end
-	return best, bestDist
+end
+
+-- Lazy fallback so a player-triggered query (AttackRequest) before the first Heartbeat still
+-- works. After the first populated Heartbeat the index is reused as-is (sub-frame staleness).
+local function ensureBirdIndex()
+	if next(birdIndex.buckets) == nil then
+		rebuildBirdIndex()
+	end
+end
+
+-- Find the nearest living ENEMY bird to `attackerEntry` within `maxRange` (grid broad-phase
+-- + exact distance test inside SpatialHash:nearest).
+local function findNearestEnemy(attackerEntry, maxRange)
+	ensureBirdIndex()
+	local team = attackerEntry.team
+	return birdIndex:nearest(attackerEntry.body.Position, maxRange, function(entry)
+		return entry.team ~= team and isBirdAlive(entry)
+	end)
+end
+
+-- If a squad has no living possessed crow, promote the next living member so the
+-- crow player keeps flying without a manual swap (also the seam for queue item #5).
+-- The client re-acquires automatically off the "Possessed" attribute flip.
+local function autoRepossess(squad)
+	if not squad then return end
+	local curModel = squad.members[squad.possessedIndex]
+	local curEntry = curModel and Birds[curModel]
+	if curEntry and curEntry.possessed and isBirdAlive(curEntry) then return end
+
+	for idx, model in ipairs(squad.members) do
+		local entry = Birds[model]
+		if isBirdAlive(entry) then
+			entry.possessed = true
+			entry.isAI = false
+			entry.engine = nil
+			model:SetAttribute("Possessed", true)
+			squad.possessedIndex = idx
+			trySetNetworkOwner(entry.body, squad.player)
+			markServerMove(entry)
+			return
+		end
+	end
 end
 
 -- Apply damage to a bird; handle death + notifications. `attackerEntry` may be nil.
@@ -504,10 +601,32 @@ local function applyDamage(targetEntry, amount, attackerEntry, cause)
 		local victimName = targetEntry.player and targetEntry.player.Name or "A bird"
 		local killerName = attackerEntry and attackerEntry.player and attackerEntry.player.Name or nil
 
-		Birds[targetEntry.model] = nil
-		pcall(function() targetEntry.model:Destroy() end)
+		local deadSquad = targetEntry.squad
+		local deadModel = targetEntry.model
+		local deadPlayer = targetEntry.player
+		Birds[deadModel] = nil
+		pcall(function() deadModel:Destroy() end)
 
-		if cause == "collision" then
+		-- Prune the dead model from the owner's birds list. Without this, rec.birds keeps a
+		-- stale (destroyed) ref forever, so the solo-flight respawn check (#rec.birds == 0)
+		-- never fires and the player is stuck unable to respawn — the reported bug.
+		if deadPlayer then
+			local rec = PlayerData[deadPlayer]
+			if rec then
+				for i = #rec.birds, 1, -1 do
+					if rec.birds[i] == deadModel then table.remove(rec.birds, i) end
+				end
+			end
+		end
+
+		-- If a crow's possessed bird just died, hand control to a surviving squadmate.
+		if deadSquad then
+			autoRepossess(deadSquad)
+		end
+
+		if cause == "crash" then
+			notify(victimName .. " crashed!", Color3.fromRGB(255, 140, 60))
+		elseif cause == "collision" then
 			notify(victimName .. " went down in a collision!", Color3.fromRGB(255, 140, 60))
 		elseif killerName then
 			notify(killerName .. " struck down a " .. targetEntry.profileName .. "!", Color3.fromRGB(255, 90, 90))
@@ -558,62 +677,201 @@ end
 --------------------------------------------------------------------------------
 -- COLLISIONS (the signature lose-lose mechanic)
 --------------------------------------------------------------------------------
--- Heartbeat proximity check between ENEMY birds. When two enemy bodies overlap at
--- high RELATIVE speed, each deals collisionDamageDealt (scaled by relative speed) to
--- the other, and each also suffers collisionDamageTaken * (its own dealt) of self-harm.
--- TODO: deep balance tuning — the exact scaling curve below is a first pass. Target:
--- ~4 full-speed crow rams kill an eagle while each ramming crow dies (a true trade).
+-- Heartbeat proximity check between ENEMY birds. When two enemy bodies overlap at high
+-- RELATIVE speed each bird RECEIVES the other's `collisionDamageDealt` (scaled by relative
+-- speed), modified by its OWN `collisionDamageTaken` vulnerability multiplier. So a heavy
+-- eagle shrugs off a single crow but four rams down it, while the fragile crow that rams it
+-- dies in the trade — see the matchup math in GameConfig's collision comments.
+-- TODO: deep balance tuning — the speed-scaling curve is still a first pass (queue item #3).
+-- Target: ~4 full-speed crow rams kill an eagle while each ramming crow dies (a true trade).
 local function processCollisions()
-	-- Snapshot living birds so we can index pairwise.
+	local now = os.clock()
+
+	-- Snapshot the outer set so applyDamage (which removes entries from Birds) can't corrupt a
+	-- live `pairs(Birds)` iteration. The inner neighbor lookup uses the spatial grid built this
+	-- Heartbeat — only birds in the few cells around `a` are considered, not every other bird.
 	local list = {}
 	for _, entry in pairs(Birds) do
 		if isBirdAlive(entry) then
-			table.insert(list, entry)
+			list[#list + 1] = entry
 		end
 	end
 
-	local now = os.clock()
-	for i = 1, #list do
-		local a = list[i]
+	for _, a in ipairs(list) do
 		if isBirdAlive(a) then
-			for j = i + 1, #list do
-				local b = list[j]
-				if isBirdAlive(a) and isBirdAlive(b) and a.team ~= b.team then
-					local apos = a.body.Position
-					local bpos = b.body.Position
-					local sep = (apos - bpos).Magnitude
-					local touchDist = a.profile.bodyRadius + b.profile.bodyRadius
-					if sep <= touchDist then
-						local key = pairKey(a.model, b.model)
-						local last = lastCollisionAt[key]
-						if not last or (now - last) >= COLLISION_COOLDOWN then
-							-- Relative speed between the two bodies.
-							local av = a.body.AssemblyLinearVelocity
-							local bv = b.body.AssemblyLinearVelocity
-							local relSpeed = (av - bv).Magnitude
-							if relSpeed >= COLLISION_SPEED_MIN then
-								lastCollisionAt[key] = now
-								-- Scale 0..1 from min->ref relative speed.
-								local scale = math.clamp(
-									(relSpeed - COLLISION_SPEED_MIN)
-										/ math.max(1, (COLLISION_SPEED_REF - COLLISION_SPEED_MIN)),
-									0, 1
-								)
-								-- Each deals its profile's collision damage * scale to the other.
-								local aDeals = a.profile.collisionDamageDealt * scale
-								local bDeals = b.profile.collisionDamageDealt * scale
-								-- Each also takes a fraction of its OWN dealt damage (self-harm).
-								local aSelf = aDeals * a.profile.collisionDamageTaken
-								local bSelf = bDeals * b.profile.collisionDamageTaken
+			local apos = a.body.Position
+			local queryR = a.profile.bodyRadius + MAX_BODY_RADIUS
+			birdIndex:forEachInRadius(apos, queryR, function(b)
+				-- a may have died from an earlier pair this pass; bail if so.
+				if not isBirdAlive(a) then return end
+				if b == a or b.team == a.team or not isBirdAlive(b) then return end
+				-- Handle each unordered pair exactly once per pass (replaces the old i<j guard):
+				-- both `a` finding `b` and `b` finding `a` reach here, so let only one through.
+				if tostring(a.model) >= tostring(b.model) then return end
 
-								-- Apply: A receives B's dealt + A's self; B receives A's dealt + B's self.
-								applyDamage(a, bDeals + aSelf, b, "collision")
-								if isBirdAlive(b) then
-									applyDamage(b, aDeals + bSelf, a, "collision")
-								end
-							end
+				local bpos = b.body.Position
+				local sep = (apos - bpos).Magnitude
+				local touchDist = a.profile.bodyRadius + b.profile.bodyRadius
+				if sep > touchDist then return end
+
+				local key = pairKey(a.model, b.model)
+				local last = lastCollisionAt[key]
+				if last and (now - last) < COLLISION_COOLDOWN then return end
+
+				-- Relative speed between the two bodies.
+				local relSpeed = (a.body.AssemblyLinearVelocity - b.body.AssemblyLinearVelocity).Magnitude
+				if relSpeed < COLLISION_SPEED_MIN then return end
+
+				lastCollisionAt[key] = now
+				-- Scale 0..1 from min->ref relative speed.
+				local scale = math.clamp(
+					(relSpeed - COLLISION_SPEED_MIN)
+						/ math.max(1, (COLLISION_SPEED_REF - COLLISION_SPEED_MIN)),
+					0, 1
+				)
+				-- Each bird RECEIVES the OTHER's collisionDamageDealt (scaled by relative speed),
+				-- then modified by its OWN collisionDamageTaken vulnerability multiplier:
+				--   eagle hit by crow:  30 * scale * 0.85  (≈26 full-speed -> ~4 rams kill it)
+				--   crow  hit by eagle:  60 * scale * 1.40  (≈84 full-speed -> the crow dies)
+				local aDmg = (b.profile.collisionDamageDealt * scale) * a.profile.collisionDamageTaken
+				local bDmg = (a.profile.collisionDamageDealt * scale) * b.profile.collisionDamageTaken
+
+				-- Apply to both; re-check B is alive in case A's hit cascaded a despawn.
+				applyDamage(a, aDmg, b, "collision")
+				if isBirdAlive(b) then
+					applyDamage(b, bDmg, a, "collision")
+				end
+			end)
+		end
+	end
+end
+
+-- Authoritative crash detection. AI crows resolve their own collisions inline (updateAICrows),
+-- but the possessed/eagle birds are CLIENT-owned — the server can't run their flight engine, so
+-- it sweeps their replicated position delta each frame (Spherecast over last->current) and kills
+-- on a high-speed map impact. Closing speed is measured from the SERVER-OBSERVED delta, not the
+-- client's velocity (it's untrusted — ties into the anti-cheat philosophy). Plus a deep failsafe
+-- so any bird that tunnels far below the world dies regardless.
+local function processCrashes(dt)
+	local params = getCollisionParams()
+	local crashSpeed = GameConfig.Flight.CRASH_SPEED
+	local invDt = 1 / math.max(dt, 1e-3)
+	local doomed = {}
+	for _, entry in pairs(Birds) do
+		if isBirdAlive(entry) then
+			local pos = entry.body.Position
+			if pos.Y < GROUND_FAILSAFE_Y then
+				table.insert(doomed, entry)
+			elseif not entry.isAI and entry._lastPos then
+				local observedVel = (pos - entry._lastPos) * invDt
+				local _, _, crashed = BirdCollision.resolve(
+					entry._lastPos, pos, observedVel, entry.profile.bodyRadius, params, crashSpeed
+				)
+				if crashed then table.insert(doomed, entry) end
+			end
+			entry._lastPos = pos
+		end
+	end
+	for _, entry in ipairs(doomed) do
+		if isBirdAlive(entry) then
+			applyDamage(entry, getHealth(entry.body) + 1, nil, "crash")
+		end
+	end
+end
+
+--------------------------------------------------------------------------------
+-- ANTI-CHEAT ENVELOPE (server-authoritative movement validation)
+--------------------------------------------------------------------------------
+-- The client OWNS its possessed bird's physics (SetNetworkOwner) for latency-free flight, so
+-- the server cannot trust the CFrame/velocity it reads — a tampered client could fly at any
+-- speed, teleport, or feed fake dive speeds to inflate stoop damage. We validate SERVER-OBSERVED
+-- motion (position deltas, never client velocity) against a generous envelope:
+--   • Teleport gate: a single-frame jump beyond TERMINAL×teleportMult (+ ping pad) → instant strike.
+--   • Sustained-speed leaky bucket: observed speed over TERMINAL×speedAllowMult accumulates;
+--     transient dive/lag spikes drain away, only a sustained hack overflows → strike.
+-- Response ladder per player: rubber-band (snap to last good pos) every violation; reclaim
+-- network ownership at reclaimStrikes; kick at kickStrikes. Strikes decay over clean time.
+-- AI crows are server-simulated (trusted) and skipped. Legit server moves are whitelisted via
+-- markServerMove (grace window + baseline reset). All knobs live in GameConfig.Security.
+local function processAntiCheat(dt)
+	local sec = GameConfig.Security
+	if not sec or not sec.enabled then return end
+
+	local now = os.clock()
+	local invDt = 1 / math.max(dt, 1e-3)
+	local terminal = GameConfig.Flight.TERMINAL_VELOCITY or 400
+	local speedCeil = terminal * (sec.speedAllowMult or 1.25)
+	local teleportStep = terminal * (sec.teleportMult or 1.5) * dt + (sec.pingPadStuds or 30)
+
+	for _, entry in pairs(Birds) do
+		if (not entry.isAI) and entry.player and isBirdAlive(entry) then
+			local body = entry.body
+			local pos = body.Position
+			local rec = PlayerData[entry.player]
+
+			-- Decay strikes after clean flight so an honest blip doesn't accrete to a kick.
+			if rec and rec._acStrikes and rec._acStrikes > 0 then
+				local elapsed = now - (rec._acStrikeAt or now)
+				local forgive = math.floor(elapsed / (sec.strikeDecaySeconds or 12))
+				if forgive >= 1 then
+					rec._acStrikes = math.max(0, rec._acStrikes - forgive)
+					rec._acStrikeAt = now
+				end
+			end
+
+			if now < (entry._acGraceUntil or 0) or not entry._acLastPos then
+				-- Whitelisted window or no baseline yet: (re)seed and skip checks this frame.
+				entry._acLastPos = pos
+				entry._acBucket = 0
+			else
+				local last = entry._acLastPos
+				local moved = (pos - last).Magnitude
+				local observed = moved * invDt
+				local violated, reason = false, nil
+
+				if moved > teleportStep then
+					violated, reason = true, "teleport"
+				else
+					-- Leaky bucket on sustained over-speed.
+					local over = observed - speedCeil
+					local bucket = entry._acBucket or 0
+					if over > 0 then
+						bucket = bucket + over * dt
+					else
+						bucket = math.max(0, bucket - (sec.bucketLeak or 200) * dt)
+					end
+					entry._acBucket = bucket
+					if bucket > (sec.bucketCapacity or 120) then
+						violated, reason = true, "speed"
+						entry._acBucket = 0
+					end
+				end
+
+				if violated then
+					-- RUBBER-BAND: snap back to the last good position (preserve orientation),
+					-- zero velocity. Do NOT accept the bad position as the new baseline.
+					pcall(function()
+						local cf = body.CFrame
+						body.CFrame = (cf - cf.Position) + last
+						body.AssemblyLinearVelocity = Vector3.new()
+					end)
+
+					if rec then
+						rec._acStrikes = (rec._acStrikes or 0) + 1
+						rec._acStrikeAt = now
+						local s = rec._acStrikes
+						warn(string.format(
+							"[AntiCheat] %s strike %d (%s): observed %.0f studs/s (ceil %.0f)",
+							entry.player.Name, s, reason, observed, speedCeil))
+						if s >= (sec.kickStrikes or 6) then
+							pcall(function() entry.player:Kick("Movement validation failed.") end)
+						elseif s >= (sec.reclaimStrikes or 3) then
+							-- Reclaim authority: the client can no longer drive this body.
+							setServerOwned(body)
 						end
 					end
+				else
+					entry._acLastPos = pos
 				end
 			end
 		end
@@ -623,6 +881,29 @@ end
 --------------------------------------------------------------------------------
 -- AI CROWS (server-simulated; the 3 non-possessed members of each squad)
 --------------------------------------------------------------------------------
+-- Thermal lift at a position, sampled from ThermalList. MUST match BirdController's client
+-- computeThermalForce so AI crows ride thermals identically to the possessed (client-driven)
+-- crow — otherwise the server-simulated squadmates can't recover energy, sink, and crash,
+-- skewing the 1-eagle-vs-4-crow matchup (flight == balance).
+local function thermalForceAt(position)
+	local force = Vector3.new()
+	for _, t in ipairs(ThermalList) do
+		if t and t.position then
+			local dist = (Vector3.new(position.X, 0, position.Z)
+				- Vector3.new(t.position.X, 0, t.position.Z)).Magnitude
+			local minH, maxH, radius = t.minHeight or 0, t.maxHeight or math.huge, t.radius or 0
+			if radius > 0 and dist < radius and position.Y > minH and position.Y < maxH then
+				local centerFactor = 1 - (dist / radius)
+				local mid = (minH + maxH) * 0.5
+				local span = math.max(1, maxH - minH)
+				local heightFactor = math.clamp(1 - math.abs((position.Y - mid) / span), 0, 1)
+				force = force + Vector3.new(0, (t.strength or 0) * centerFactor * heightFactor, 0)
+			end
+		end
+	end
+	return force
+end
+
 -- Find the squad's goal point: the possessed crow, or its nearest enemy when engaging.
 local function squadGoal(squad)
 	local possessedModel = squad.members[squad.possessedIndex]
@@ -688,15 +969,36 @@ local function updateAICrows(dt)
 
 				-- Run the SAME flight engine the player uses, then write the result back
 				-- to the server-owned part (server simulates these birds).
+				entry.engine:SetThermalForce(thermalForceAt(body.Position))
+				local fromPos = body.Position
 				entry.engine:Update(fdt, input)
-				pcall(function()
-					body.CFrame = entry.engine.orientation
-					body.AssemblyLinearVelocity = entry.engine.velocity
-					body.AssemblyAngularVelocity = Vector3.new()
-				end)
 
-				-- Animate wings to match the AI state.
-				BirdBuilder.AnimateWings(entry.model, entry.engine.isFlapping, entry.engine.isDiving, entry.engine.flapPhase, fdt)
+				-- Obstacle/ground collision: sweep the step. AI crows are server-owned, so we
+				-- resolve here directly — a head-on map impact crashes the crow, a graze slides
+				-- it along the surface (engine velocity is server-trusted; use it for the gate).
+				local toPos = entry.engine.orientation.Position
+				local newPos, newVel, crashed = BirdCollision.resolve(
+					fromPos, toPos, entry.engine.velocity, entry.profile.bodyRadius,
+					getCollisionParams(), GameConfig.Flight.CRASH_SPEED
+				)
+				if crashed then
+					applyDamage(entry, getHealth(body) + 1, nil, "crash")
+				else
+					if (newPos - toPos).Magnitude > 1e-3 then
+						-- Re-seat the engine at the slid position (keep its rotation) + slid velocity.
+						local cf = entry.engine.orientation
+						entry.engine.orientation = (cf - cf.Position) + newPos
+						entry.engine.velocity = newVel
+					end
+					pcall(function()
+						body.CFrame = entry.engine.orientation
+						body.AssemblyLinearVelocity = entry.engine.velocity
+						body.AssemblyAngularVelocity = Vector3.new()
+					end)
+
+					-- Animate wings to match the AI state.
+					BirdBuilder.AnimateWings(entry.model, entry.engine.isFlapping, entry.engine.isDiving, entry.engine.flapPhase, fdt)
+				end
 			end
 		end
 	end
@@ -738,16 +1040,36 @@ local function onSwapCrow(player, index)
 		prevEntry.engine.orientation = prevEntry.body.CFrame
 		prevEntry.engine.velocity = prevEntry.body.AssemblyLinearVelocity
 		setServerOwned(prevEntry.body)
+		prevModel:SetAttribute("Possessed", false)
 	end
 
 	-- Promote the target -> possessed/client-owned.
 	targetEntry.possessed = true
 	targetEntry.isAI = false
 	targetEntry.engine = nil
+	targetModel:SetAttribute("Possessed", true)
 	squad.possessedIndex = index
 	trySetNetworkOwner(targetEntry.body, player)
+	markServerMove(targetEntry)
+
+	-- The demoted crow is now server-simulated; reset its AC baseline too (it changed owner).
+	if prevEntry then markServerMove(prevEntry) end
 
 	notify(player.Name .. " swapped crow", GameConfig.UI and GameConfig.UI.crowAccent)
+end
+
+-- Manual self-respawn: clear the player's birds and spawn a fresh set. Lets a player who
+-- crashed or got stuck reset without leaving the game (there is no Roblox-character reset
+-- because CharacterAutoLoads=false). Debounced. In a live scored round this is effectively a
+-- free reset — fine for v1 testing; gate or cost it once competitive rounds matter (TODO).
+local function onRespawn(player)
+	local rec = PlayerData[player]
+	if not rec then return end
+	local now = os.clock()
+	if lastRespawnAt[player] and (now - lastRespawnAt[player]) < RESPAWN_COOLDOWN then return end
+	lastRespawnAt[player] = now
+	clearBirds(player)
+	spawnFor(player)
 end
 
 -- Store the squad's formation (tight/loose). Validated against config.
@@ -800,6 +1122,29 @@ local function crowsExist()
 	return false
 end
 
+-- Keep exactly one Eagle in the match. If the lone Eagle player leaves, the round loop
+-- would otherwise wait forever (eaglesExist() == false) even with a full lobby of crows —
+-- the match dead-ends. Promote a crow player to the Eagle so play continues. Re-fires their
+-- TeamAssigned (new profile) and re-spawns them as an eagle if a round is live.
+local function promoteToEagleIfNeeded()
+	if eaglesExist() then return end
+	for _, rec in pairs(PlayerData) do
+		if rec.team == "Crows" then
+			clearBirds(rec.player)
+			rec.team = "Eagles"
+			rec.profileName = "Eagle"
+			rec.profile = GameConfig.Profiles.Eagle
+			if roundActive then
+				spawnFor(rec.player) -- spawnFor also re-fires TeamAssigned
+			elseif Remotes then
+				Remotes.TeamAssigned:FireClient(rec.player, rec.team, rec.profile)
+			end
+			notify(rec.player.Name .. " is now the Eagle!", GameConfig.UI and GameConfig.UI.eagleAccent)
+			return
+		end
+	end
+end
+
 --------------------------------------------------------------------------------
 -- ROUND LOOP
 --------------------------------------------------------------------------------
@@ -832,14 +1177,19 @@ end
 local function RoundLoop()
 	local R = GameConfig.Round
 	while true do
-		-- INTERMISSION
-		roundActive = false
-		notify("Intermission…", Color3.fromRGB(200, 200, 200))
-		pushScore()
-		task.wait(R.intermission or 8)
-
-		-- Only run a round if both sides can be fielded.
+		-- Only run a scored round when both sides can actually be fielded.
 		if eaglesExist() and crowsExist() then
+			-- INTERMISSION before the round.
+			roundActive = false
+			notify("Intermission…", Color3.fromRGB(200, 200, 200))
+			pushScore()
+			task.wait(R.intermission or 8)
+
+			-- A player may have left during intermission — re-check before spawning.
+			if not (eaglesExist() and crowsExist()) then
+				continue
+			end
+
 			startRound()
 
 			-- ROUND: run until a win condition or the timer expires.
@@ -861,7 +1211,24 @@ local function RoundLoop()
 			for _, rec in pairs(PlayerData) do
 				clearBirds(rec.player)
 			end
+		elseif GameConfig.Debug and GameConfig.Debug.soloFlight and next(PlayerData) ~= nil then
+			-- DEBUG free-flight: not enough players for a scored match, but let whoever is
+			-- present spawn and fly (AI crows + possession included) so the whole stack can be
+			-- smoke-tested with a single client. Transitions into a real match when a second
+			-- team joins (the both-exist branch above then clears & respawns everyone).
+			for _, rec in pairs(PlayerData) do
+				-- Respawn anyone with no LIVING bird (first spawn, or after a crash/death).
+				-- Keying off isPlayerAlive (not #rec.birds) is what makes solo respawn actually
+				-- fire — a dead crow squad has all members destroyed; a crashed eagle has none.
+				if not isPlayerAlive(rec.player) then
+					clearBirds(rec.player) -- purge any leftover/destroyed refs first
+					spawnFor(rec.player)
+				end
+			end
+			roundActive = true -- enable AI-crow sim + collisions for solo testing
+			task.wait(2)
 		else
+			roundActive = false
 			notify("Waiting for an Eagle and a Crow…", Color3.fromRGB(220, 220, 120))
 			task.wait(2)
 		end
@@ -899,11 +1266,19 @@ local function onPlayerAdded(player)
 end
 
 local function onPlayerRemoving(player)
+	local wasEagle = PlayerData[player] and PlayerData[player].team == "Eagles"
 	clearBirds(player)
 	PlayerData[player] = nil
 	lastAttackAt[player] = nil
 	lastSwapAt[player] = nil
+	lastRespawnAt[player] = nil
 	Squads[player] = nil
+
+	-- If the Eagle just left, hand the role to a remaining crow so the match continues
+	-- instead of stalling on "Waiting for an Eagle…" with a full lobby of crows.
+	if wasEagle then
+		promoteToEagleIfNeeded()
+	end
 end
 
 --------------------------------------------------------------------------------
@@ -919,6 +1294,9 @@ local function connectRemotes()
 	Remotes.SetFormation.OnServerEvent:Connect(function(player, formationName)
 		pcall(onSetFormation, player, formationName)
 	end)
+	Remotes.Respawn.OnServerEvent:Connect(function(player)
+		pcall(onRespawn, player)
+	end)
 end
 
 --------------------------------------------------------------------------------
@@ -926,10 +1304,18 @@ end
 --------------------------------------------------------------------------------
 local function onHeartbeat(dt)
 	if not roundActive then return end
+	-- Rebuild the spatial broad-phase once, up front, so every proximity consumer this frame
+	-- (squad targeting in updateAICrows, processCollisions) shares one near-linear index.
+	rebuildBirdIndex()
 	-- AI flight for server-owned crows.
 	pcall(updateAICrows, dt)
+	-- Anti-cheat movement validation (before crash sweep, so a rubber-band corrects the
+	-- position the crash check then reads).
+	pcall(processAntiCheat, dt)
 	-- Signature collisions.
 	pcall(processCollisions)
+	-- Obstacle/ground crash deaths (feeds the respawn loop).
+	pcall(processCrashes, dt)
 end
 
 --------------------------------------------------------------------------------

@@ -1,0 +1,6 @@
+# Runtime loop state created by the loop-orchestrator skill (per-run, not source)
+.loop/
+
+# OS / editor cruft
+Thumbs.db
+.DS_Store
