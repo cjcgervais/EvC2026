@@ -44,7 +44,19 @@ GameConfig.Flight = {
 	-- `stabilityRate` multiplies this; `recoverNoseDownRate` adds extra pull past the stall.
 	-- (Replaces v1's PATH_TRACK_RATE, which rotated VELOCITY toward the nose and thus drove
 	-- AoA->0->no-lift — the root cause of the old constant-stall spiral.)
-	STABILITY_RATE = 1.5,
+	-- Auto-leveling weathervane, now a WHISPER (was 1.5 -> 0.7 -> 0.15). The player asked to
+	-- "eliminate auto-leveling"; the grip assist below (velocity follows the nose) is what now
+	-- keeps AoA low / prevents stall, so the nose no longer needs to be dragged back to the
+	-- airflow. A tiny residual keeps the craft from drifting weirdly at very low speed; the
+	-- past-stall recoverNoseDownRate term still fires for stall safety. PLAYTEST-PROVISIONAL.
+	STABILITY_RATE = 0.15,
+	-- GRIP / ALIGNMENT ASSIST (rad/s base, airspeed-scaled). Research §v2: great arcade-sim
+	-- flight = "force-based core + a grip/alignment assist". This rotates VELOCITY toward the
+	-- nose in EVERY attitude so the bird flies where it points — point up, you climb (with lift),
+	-- not stall. THE fix for the recurring "not enough lift / too much stall". Per-profile
+	-- sustainedTurnRate adds the eagle-wide/crow-tight turn tightness ON TOP in banked turns.
+	-- Higher = more "on rails" (toward noclip); lower = more loose/aerodynamic. PLAYTEST-PROVISIONAL.
+	GRIP_RATE = 2.2,
 	-- PHUGOID DAMPING (vertical-motion stabilizer, studs/s of vertical accel per stud/s of
 	-- climb rate). A high-L/D wing (the eagle glides at L/D ~34) has an almost UNDAMPED
 	-- phugoid: lift responds to speed, so the bird slowly trades altitude<->speed in a ~3s
@@ -68,7 +80,7 @@ GameConfig.Flight = {
 	-- the very top. PLAYTEST-PROVISIONAL.
 	SERVICE_CEILING = 520,      -- studs; envelope top for climbCeilingBonus = 1.0 (the eagle)
 	CEILING_BAND = 140,         -- studs below the ceiling over which flap power fades to 0
-	FLAP_AUTHORITY_FLOOR = 0.5, -- min control authority while flapping (lets you hold a slow climb)
+	FLAP_AUTHORITY_FLOOR = 0.6, -- min control authority while flapping (lets you hold a slow climb without tumbling)
 	FLAP_LIFT_FLOOR = 0.55,     -- fraction of clMax lift retained past stall WHILE FLAPPING (anti-mush)
 	-- AEROBATIC FREEDOM: above AEROBATIC_MIN_SPEED, an aggressive pitch/roll command suppresses the
 	-- weathervane so the nose can swing away from the airflow — this is what lets a fast eagle pull a
@@ -98,7 +110,7 @@ GameConfig.Profiles = {
 		displayName = "Eagle",
 
 		-- AERODYNAMICS -------------------------------------------------------
-		mass = 12,              -- heavier (better energy retention: drag/mass is gentle)
+		mass = 16,              -- raised session 7: speed accel/decel felt too twitchy; mass = momentum (thrust/mass & drag/mass both gentler -> energy fighter retains energy). Lift is mass-independent so trim/stall unchanged.
 		wingLoading = 1.0,      -- HIGH: fast, wide turns, strong glide/dive (reference = 1.0)
 		-- v2 LIFT CURVE: CL(a) = cl0 + liftSlopePerDeg*a, capped at clMax at the stall angle,
 		-- then a forgiving roll-off to postStallCl over stallPadDeg. cl0 > 0 means the eagle
@@ -107,12 +119,12 @@ GameConfig.Profiles = {
 		-- and cruise (130). See FlightPhysics.computeCL. PLAYTEST-PROVISIONAL.
 		cl0 = 0.30,             -- baseline lift at zero AoA (THE fix for "not enough lift")
 		liftSlopePerDeg = 0.11, -- lift-curve slope (~= 2*pi per radian, thin-airfoil theory)
-		clMax = 1.4,            -- peak lift coefficient, reached at stallAngleDeg
+		clMax = 1.6,            -- peak lift (raised session 7: more lift, more forgiving high-AoA, stall speed ~65->61)
 		postStallCl = 0.70,     -- lift retained past the stall (a recoverable mush, not a cliff)
 		stallPadDeg = 6,        -- degrees beyond stallAngle over which lift rolls off
 		parasiticDrag = 0.020,  -- low parasitic drag -> great glide/dive
 		inducedDragK = 0.85,    -- induced-drag coefficient (cost of lift: drag ~ k*CL^2)
-		stallAngleDeg = 20,     -- critical angle of attack before lift rolls off (forgiving)
+		stallAngleDeg = 24,     -- critical AoA before lift rolls off (widened session 7: stalled too easily climbing)
 		stabilityRate = 1.0,    -- weathervane strength (stable boom-and-zoom platform)
 		recoverNoseDownRate = 1.5, -- extra nose-down toward airflow past the stall (auto-recovery)
 
@@ -123,6 +135,11 @@ GameConfig.Profiles = {
 		-- gain at cruise. It still trades altitude for top speed (energy fighter) — the dive,
 		-- not the flap, is its speed source. PLAYTEST-PROVISIONAL.
 		flapThrust = 520,       -- forward force from a flap
+		flapClimbForce = 300,   -- session 7: upward climb accel while flapping with the nose up. Set
+		                        -- ABOVE gravity (196) so a flapping eagle keeps climbing even after a
+		                        -- steep climb has bled its airspeed (lift ~0) — a real eagle muscles up
+		                        -- on wingbeats, not airspeed. "Flap = climb" until stamina/ceiling. THE
+		                        -- climb-rate knob; mass-independent so the momentum tuning doesn't sap it.
 		glideSpeed = 130,       -- comfortable cruise (high)
 		maxLevelSpeed = 170,
 		diveThrustBonus = 1.6,  -- thrust multiplier while diving (gravity also assists)
@@ -130,7 +147,7 @@ GameConfig.Profiles = {
 
 		-- TURN / CONTROL (TWO turn params — see RESEARCH caveat) -------------
 		rollRate = 3.2,         -- rad/s instantaneous roll authority (banking)
-		pitchRate = 2.4,        -- rad/s pitch (wing-angle / tail)
+		pitchRate = 2.0,        -- rad/s pitch (lowered session 7: nose-down felt too fast; mouse adds analog fine control)
 		yawRate = 1.1,          -- rad/s head-led yaw (slow; turns are made by banking)
 		sustainedTurnRate = 1.0,-- rad/s sustained level turn ceiling (LOW: wide turns)
 		rollInertia = 0.55,     -- 0..1 sluggishness; higher = heavier-feeling controls
@@ -180,6 +197,7 @@ GameConfig.Profiles = {
 
 		-- THRUST / SPEED -----------------------------------------------------
 		flapThrust = 150,
+		flapClimbForce = 200,   -- lower than the eagle: the crow is less of a climber (lower ceiling via climbCeilingBonus)
 		glideSpeed = 95,
 		maxLevelSpeed = 140,    -- slightly slower top end than eagle in level flight
 		diveThrustBonus = 1.25,
@@ -316,6 +334,27 @@ GameConfig.Camera = {
 	shakeMagnitude = 0.6,
 	-- Spacebar free-look: orbit the camera while the bird holds its flight path.
 	freeLookSensitivity = 0.35,
+}
+
+--------------------------------------------------------------------------------
+-- CONTROLS — input scheme (consumed by BirdController). MOUSE STEERING: the mouse is locked
+-- to screen center and drives a VIRTUAL STICK (mouse movement deflects it; it springs back
+-- toward center at mouseReturn). The stick = analog pitch/roll, SUMMED with W/S/A/D. It starts
+-- at exactly zero every life (NOT absolute cursor position — that spawned a spiral crash when
+-- the real cursor wasn't centered). Free-look (hold Space) suspends steering and orbits the
+-- camera. The lowered STABILITY_RATE is what lets your aim actually hold. PLAYTEST-PROVISIONAL.
+--------------------------------------------------------------------------------
+GameConfig.Controls = {
+	mouseSteer      = false, -- DISABLED for now (session 7) — keyboard-only control while we tune flight feel. Flip back to true to re-enable mouse nose-aim.
+	mouseSensitivity= 1.0,   -- mouse-delta -> virtual-stick gain (higher = nose moves more per mouse inch)
+	-- Spring of the stick back to center (per-sec) when you stop moving the mouse. SPLIT by axis:
+	-- ROLL self-centers fast (wings level themselves -> anti-spiral, arcade-friendly), but PITCH
+	-- barely returns so you can HOLD a climb or dive without continuously feeding the mouse. Pitch
+	-- ~0 = the nose stays where you aim it (this is what makes sustained climbing possible).
+	mouseReturnRoll  = 3.0,
+	mouseReturnPitch = 0.4,
+	mouseExpo       = 1.7,   -- response curve: 1 = linear, >1 = finer control near center
+	invertPitch     = false, -- false = mouse UP pitches nose UP (FPS-style). Set true for stick-style (pull back = up).
 }
 
 --------------------------------------------------------------------------------

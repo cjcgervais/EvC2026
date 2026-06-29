@@ -13,6 +13,9 @@
 	  Q / E        -> YAW    (head-led)
 	  Left Shift   -> FLAP   (hold, thrust)
 	  Left Ctrl    -> DIVE   (hold, dive intent)
+	  Mouse (move) -> STEER the nose: cursor offset from screen center = analog pitch/roll,
+	                  SUMMED with W/S/A/D. Suspended while free-look (Space) is held.
+	                  Tunables in GameConfig.Controls.
 	  Spacebar     -> FREE-LOOK camera (hold): orbit the camera freely around the
 	                  bird while the bird HOLDS its current flight input.
 	  Mouse1       -> attack (AttackRequest)
@@ -68,7 +71,8 @@ local isAlive       = false
 local thermalData   = {}
 local renderConn    = nil
 
--- Live flight input the physics engine consumes every frame.
+-- Live flight input the physics engine consumes every frame. pitch/roll/yaw are REBUILT
+-- each frame in onFlightStep from `kb` (keyboard) + mouse-steer; flap/dive are set directly.
 local inputState = {
 	pitch = 0,
 	roll  = 0,
@@ -76,6 +80,11 @@ local inputState = {
 	flap  = false,
 	dive  = false,
 }
+
+-- Keyboard axis contributions (W/S pitch, A/D roll, Q/E yaw). Kept SEPARATE from inputState
+-- so the keyboard and the analog mouse-steer don't clobber each other — they're summed each
+-- frame (see onFlightStep). resetInput() clears both.
+local kb = { pitch = 0, roll = 0, yaw = 0 }
 
 -- Smoothed camera state.
 local cameraState = {
@@ -93,6 +102,12 @@ local freeLook = {
 	yaw    = 0, -- radians, horizontal orbit (unbounded -> 360°)
 	pitch  = 0, -- radians, vertical orbit (clamped to +/- FREE_LOOK_PITCH_LIMIT)
 }
+
+-- Mouse-steer VIRTUAL STICK. The mouse is locked to center while flying; its deltas deflect
+-- this stick (x = roll, y = pitch), clamped to [-1,1], and it springs back toward center at
+-- Controls.mouseReturn. Starts at exactly 0 each life (reset in resetInput) so a bird can never
+-- spawn already deflected (that caused the instant spiral crash). Read in computeMouseSteer.
+local steer = { x = 0, y = 0 }
 
 -- Formation toggle state (crows).
 local formationTight = false
@@ -138,10 +153,10 @@ end
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	if gameProcessed then return end
 
-	-- Flight axes
+	-- Flight axes (keyboard -> kb; summed with mouse-steer each frame in onFlightStep)
 	local binding = keyBindings[input.KeyCode]
 	if binding then
-		inputState[binding.axis] = binding.value
+		kb[binding.axis] = binding.value
 		return
 	end
 
@@ -188,8 +203,8 @@ UserInputService.InputEnded:Connect(function(input)
 	local binding = keyBindings[input.KeyCode]
 	if binding then
 		-- Only zero the axis if the released key still owns the current direction.
-		if inputState[binding.axis] == binding.value then
-			inputState[binding.axis] = 0
+		if kb[binding.axis] == binding.value then
+			kb[binding.axis] = 0
 		end
 		return
 	end
@@ -203,13 +218,22 @@ UserInputService.InputEnded:Connect(function(input)
 	end
 end)
 
--- Mouse delta feeds the free-look orbit only (flight input is untouched).
+-- Mouse delta routing: when free-looking (Space) it orbits the camera; otherwise it deflects
+-- the steering virtual stick. Never reads absolute cursor position, so neutral is always well
+-- defined (stick = 0). Both modes keep the mouse LockCenter'd (set in onFlightStep).
 UserInputService.InputChanged:Connect(function(input, gameProcessed)
-	if not freeLook.active then return end
-	if input.UserInputType == Enum.UserInputType.MouseMovement then
+	if input.UserInputType ~= Enum.UserInputType.MouseMovement then return end
+	if freeLook.active then
 		local s = CAM.freeLookSensitivity * 0.01
 		freeLook.yaw   = freeLook.yaw   - input.Delta.X * s
 		freeLook.pitch = math.clamp(freeLook.pitch - input.Delta.Y * s, -FREE_LOOK_PITCH_LIMIT, FREE_LOOK_PITCH_LIMIT)
+	else
+		local C = GameConfig.Controls
+		if C and C.mouseSteer then
+			local s = (C.mouseSensitivity or 1) * 0.004
+			steer.x = math.clamp(steer.x + input.Delta.X * s, -1, 1)
+			steer.y = math.clamp(steer.y + input.Delta.Y * s, -1, 1)
+		end
 	end
 end)
 
@@ -357,6 +381,27 @@ local function getCollisionParams()
 end
 
 --------------------------------------------------------------------------------
+-- MOUSE STEERING — the bird's nose chases the cursor: offset from screen center maps to
+-- analog pitch/roll (deadzone + expo curve), returned in [-1,1] and SUMMED with the keyboard
+-- each frame in onFlightStep. Suspended while free-look (Space) holds the mouse for the camera.
+--------------------------------------------------------------------------------
+local function computeMouseSteer()
+	local C = GameConfig.Controls
+	if not (C and C.mouseSteer) or freeLook.active then return 0, 0 end
+	local expo = C.mouseExpo or 1
+	local function shape(v)
+		local mag = math.clamp(math.abs(v), 0, 1) ^ expo
+		return (v < 0 and -mag) or mag
+	end
+	-- stick RIGHT (steer.x>0) banks RIGHT (roll -1 by the keyBindings convention); stick UP
+	-- (mouse moved up -> steer.y<0) pitches the nose UP (pitch +1) unless invertPitch.
+	local roll  = -shape(steer.x)
+	local pitch = -shape(steer.y)
+	if C.invertPitch then pitch = -pitch end
+	return pitch, roll
+end
+
+--------------------------------------------------------------------------------
 -- MAIN FLIGHT STEP
 --------------------------------------------------------------------------------
 local function onFlightStep(dt)
@@ -367,6 +412,28 @@ local function onFlightStep(dt)
 	-- 1. Thermals -> engine.
 	flightEngine:SetThermalForce(computeThermalForce(rootPart.Position))
 	flightEngine:SetWind(GameConfig.Flight.WIND_BASE)
+
+	-- 1b. Mouse-steer: keep the mouse captured (LockCenter) so movement reads as stick deltas
+	-- and the cursor never leaves the window, then spring the stick back toward center.
+	local C = GameConfig.Controls
+	if C and C.mouseSteer then
+		if UserInputService.MouseBehavior ~= Enum.MouseBehavior.LockCenter then
+			UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+		end
+		-- Spring the stick back to center, SPLIT by axis: roll self-levels (anti-spiral) while
+		-- pitch barely returns so a held climb/dive persists without continuous mouse feed.
+		local kr = math.clamp((C.mouseReturnRoll  or 0) * dt, 0, 1)
+		local kp = math.clamp((C.mouseReturnPitch or 0) * dt, 0, 1)
+		steer.x = steer.x - steer.x * kr
+		steer.y = steer.y - steer.y * kp
+	end
+
+	-- 1c. Build the flight axes from BOTH input sources: analog mouse-steer + keyboard,
+	-- summed and clamped. yaw stays keyboard-only (Q/E). Mouse contributes 0 while free-looking.
+	local mPitch, mRoll = computeMouseSteer()
+	inputState.pitch = math.clamp(kb.pitch + mPitch, -1, 1)
+	inputState.roll  = math.clamp(kb.roll  + mRoll,  -1, 1)
+	inputState.yaw   = kb.yaw
 
 	-- 2. Step the simulation with the live input.
 	flightEngine:Update(dt, inputState)
@@ -429,6 +496,8 @@ local attrConns  = {}   -- [model] = connection watching its "Possessed" attribu
 local acquireGen = 0    -- guards against overlapping async acquisitions
 
 local function resetInput()
+	kb.pitch, kb.roll, kb.yaw = 0, 0, 0
+	steer.x, steer.y = 0, 0
 	inputState.pitch, inputState.roll, inputState.yaw = 0, 0, 0
 	inputState.flap, inputState.dive = false, false
 end
@@ -438,6 +507,10 @@ local function teardownDrive()
 	flightEngine = nil
 	birdModel = nil
 	rootPart = nil
+	-- Release the mouse between lives; onFlightStep re-locks it once we're driving again.
+	if not freeLook.active then
+		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+	end
 end
 
 local function findMyPossessedBird()

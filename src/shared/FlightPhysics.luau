@@ -254,6 +254,16 @@ function FlightPhysics:Update(dt, input)
 		accel = accel + look * (thrust * altFactor / p.mass)
 	end
 
+	-- POWERED CLIMB ASSIST: flapping while the nose is up adds direct climb force, scaled by how
+	-- steeply you point (look.Y). This is what makes "flap = climb" actually work — realistic
+	-- thrust can't beat gravity's pull along a steep climb, so the bird could only zoom-climb then
+	-- stall. Mass-INDEPENDENT (an accel), so the momentum/mass tuning doesn't weaken it. Fades to 0
+	-- at the service ceiling (altFactor) and ends when stamina runs out (wantFlap -> false). Only
+	-- acts with the nose above the horizon, so it leaves level flapping untouched.
+	if wantFlap and look.Y > 0 then
+		accel = accel + Vector3.new(0, (p.flapClimbForce or 0) * look.Y * altFactor, 0)
+	end
+
 	-- THERMAL (external upward force) — restores energy spent diving/turning.
 	accel = accel + self._thermal
 
@@ -302,11 +312,16 @@ function FlightPhysics:Update(dt, input)
 		look = cf.LookVector
 		up = cf.UpVector
 
-		-- COORDINATED TURN (bank-gated): redirect velocity toward the nose ONLY while banked,
-		-- capped by sustainedTurnRate (eagle wide vs crow tight). Never acts in the pitch plane,
-		-- so it cannot recreate the v1 AoA-killing bug. Wings-level flight preserves AoA -> lift.
+		-- GRIP / ALIGNMENT ASSIST (research §v2: "force-based core + grip assist"). Redirect the
+		-- velocity toward the nose so the bird FLIES WHERE IT POINTS — in EVERY attitude, not just
+		-- when banked. This is the lift/anti-stall fix: point the nose up and the flight path
+		-- follows up (a climb) instead of building angle-of-attack until it stalls. Safe now that
+		-- v2 has baseline lift (cl0): driving AoA->0 no longer zeroes lift (that WAS the v1 bug).
+		--   base GRIP_RATE = isotropic grip (the "flies where you point" feel);
+		--   + sustainedTurnRate*bank = the eagle-WIDE / crow-TIGHT turn lever (only in banked turns).
+		-- A moderate (not instant) rate keeps weight — pure velocity-redirection feels noclip (§v2).
 		local bank = 1 - math.abs(up.Y)               -- 0 wings-level .. 1 knife-edge
-		local trackRate = p.sustainedTurnRate * bank * authority
+		local trackRate = (F.GRIP_RATE + p.sustainedTurnRate * bank) * authority
 		if trackRate > EPS then
 			local vMag = self.velocity.Magnitude
 			self.velocity = rotateTowards(self.velocity.Unit, look, trackRate * dt) * vMag
