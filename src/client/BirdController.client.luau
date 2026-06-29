@@ -86,9 +86,16 @@ local inputState = {
 -- frame (see onFlightStep). resetInput() clears both.
 local kb = { pitch = 0, roll = 0, yaw = 0 }
 
--- Smoothed camera state.
+-- Time-scaled pitch ramp: `sign` is the held direction (-1/0/+1), `mag` ramps from the tap
+-- fraction up to 1 the longer the key is held (see onFlightStep). A quick tap only ever reaches
+-- a small magnitude -> a precise AoA nudge; a sustained hold ramps to full pitch authority.
+local pitchRamp = { sign = 0, mag = 0 }
+
+-- Smoothed camera state. `userZoom` is the player's mouse-wheel offset (studs), folded
+-- into the chase distance and clamped so the final distance stays in [min, max].
 local cameraState = {
 	currentDistance = CAM.baseDistance,
+	userZoom = 0,
 }
 
 -- Free-look (Spacebar) — LAW: hold Space to look ALL AROUND while flying. The camera
@@ -222,6 +229,13 @@ end)
 -- the steering virtual stick. Never reads absolute cursor position, so neutral is always well
 -- defined (stick = 0). Both modes keep the mouse LockCenter'd (set in onFlightStep).
 UserInputService.InputChanged:Connect(function(input, gameProcessed)
+	-- Mouse-wheel zoom: scroll up (Delta.Z > 0) pulls the camera IN, scroll down pushes OUT.
+	-- Accumulate into a user offset; the camera step clamps the final distance to [min, max].
+	if input.UserInputType == Enum.UserInputType.MouseWheel then
+		if gameProcessed then return end
+		cameraState.userZoom = cameraState.userZoom - input.Position.Z * (CAM.zoomStep or 6)
+		return
+	end
 	if input.UserInputType ~= Enum.UserInputType.MouseMovement then return end
 	if freeLook.active then
 		local s = CAM.freeLookSensitivity * 0.01
@@ -287,8 +301,14 @@ local function updateCamera(dt)
 	local speed    = flightEngine.speed
 	local velocity = flightEngine.velocity
 
-	-- Distance grows with speed for a sense of velocity.
-	local targetDistance = CAM.baseDistance + speed * CAM.speedDistanceFactor
+	-- Distance grows with speed for a sense of velocity, plus the player's wheel-zoom
+	-- offset, then clamped so the camera can't clip into the bird or run to infinity.
+	local minDist = CAM.minDistance or 10
+	local maxDist = CAM.maxDistance or 120
+	-- Clamp userZoom against the speed-driven base so the wheel range stays meaningful at any speed.
+	local speedBase = CAM.baseDistance + speed * CAM.speedDistanceFactor
+	cameraState.userZoom = math.clamp(cameraState.userZoom, minDist - speedBase, maxDist - speedBase)
+	local targetDistance = math.clamp(speedBase + cameraState.userZoom, minDist, maxDist)
 	cameraState.currentDistance = cameraState.currentDistance
 		+ (targetDistance - cameraState.currentDistance) * 0.1
 
@@ -296,8 +316,14 @@ local function updateCamera(dt)
 	local backward = -cf.LookVector
 	local up       = cf.UpVector
 
-	-- Base chase offset: behind and slightly above the bird.
-	local cameraOffset = (backward * dist) + (up * (dist * 0.25))
+	-- Base chase offset: behind and above the bird. The height ratio grows from `heightFactor`
+	-- up close to `zoomTopDownHeight` at full zoom-out, so wheeling out gives a higher, more
+	-- top-down view. Fraction is measured from baseDistance so the un-zoomed view is unchanged.
+	local hBase   = CAM.heightFactor or 0.25
+	local hTop    = CAM.zoomTopDownHeight or 1.10
+	local zoomFrac = math.clamp((dist - CAM.baseDistance) / math.max(1, maxDist - CAM.baseDistance), 0, 1)
+	local heightRatio = hBase + (hTop - hBase) * zoomFrac
+	local cameraOffset = (backward * dist) + (up * (dist * heightRatio))
 
 	-- Velocity trail: let the camera drift behind the direction of motion. The
 	-- original had a broken `local velDot = velDot = ...` self-reference — fixed.
@@ -325,8 +351,20 @@ local function updateCamera(dt)
 		targetCF = targetCF * CFrame.Angles(0, 0, bankAngle * CAM.bankTiltFactor)
 	end
 
+	-- Crest damping: measure how fast the bird's facing is rotating (rad/s); when it spikes — e.g.
+	-- flipping over the top of a loop — soften the follow so the camera glides through instead of
+	-- whipping around. Camera-only; flight is untouched.
+	local angRate = 0
+	if cameraState.prevLook then
+		local d = math.clamp(cameraState.prevLook:Dot(cf.LookVector), -1, 1)
+		angRate = math.acos(d) / math.max(dt, 1 / 240)
+	end
+	cameraState.prevLook = cf.LookVector
+	local crestBlend = math.clamp(angRate / (CAM.crestAngRate or 3.5), 0, 1)
+	local smoothing  = CAM.followSmoothing * (1 - crestBlend * (CAM.crestDamp or 0.75))
+
 	-- Frame-rate independent smoothing toward the target.
-	local alpha = math.clamp(1 - math.exp(-CAM.followSmoothing * 60 * dt), 0, 1)
+	local alpha = math.clamp(1 - math.exp(-smoothing * 60 * dt), 0, 1)
 	camera.CFrame = camera.CFrame:Lerp(targetCF, alpha)
 
 	-- High-speed shake.
@@ -363,9 +401,12 @@ local function pushUI()
 		local maxStamina = (currentProfile and currentProfile.maxStamina) or 100
 		pcall(_G.UpdateStaminaUI, flightEngine.stamina / math.max(1, maxStamina))
 	end
-	if type(_G.SetAoA) == "function" then
-		local stallDeg = (currentProfile and currentProfile.stallAngleDeg) or 24
-		pcall(_G.SetAoA, flightEngine.aoaDeg, stallDeg)
+	if type(_G.SetIncidence) == "function" then
+		-- Body pitch: the angle of the bird's nose above/below the world horizon (0°).
+		-- Pure attitude — nothing aerodynamic (no AoA, lift, or stall). + = nose up.
+		local look = flightEngine.orientation.LookVector
+		local pitchDeg = math.deg(math.asin(math.clamp(look.Y, -1, 1)))
+		pcall(_G.SetIncidence, pitchDeg)
 	end
 end
 
@@ -432,10 +473,27 @@ local function onFlightStep(dt)
 		steer.y = steer.y - steer.y * kp
 	end
 
-	-- 1c. Build the flight axes from BOTH input sources: analog mouse-steer + keyboard,
+	-- 1c. Time-scaled pitch: a tap nudges AoA a little; holding ramps to full authority. On the
+	-- first frame a pitch key is pressed (or the direction flips) we jump to the tap fraction, then
+	-- ramp toward 1 while held; releasing snaps back to 0 (the nose then stays where it's aimed).
+	if kb.pitch ~= 0 then
+		if pitchRamp.sign ~= kb.pitch then
+			pitchRamp.sign = kb.pitch
+			pitchRamp.mag  = C and C.pitchTapFraction or 0.30
+		else
+			local rampTime = (C and C.pitchRampTime) or 0.55
+			local tap      = (C and C.pitchTapFraction) or 0.30
+			pitchRamp.mag  = math.min(1, pitchRamp.mag + ((1 - tap) / math.max(0.01, rampTime)) * dt)
+		end
+	else
+		pitchRamp.sign, pitchRamp.mag = 0, 0
+	end
+	local kbPitch = pitchRamp.sign * pitchRamp.mag
+
+	-- 1d. Build the flight axes from BOTH input sources: analog mouse-steer + keyboard,
 	-- summed and clamped. yaw stays keyboard-only (Q/E). Mouse contributes 0 while free-looking.
 	local mPitch, mRoll = computeMouseSteer()
-	inputState.pitch = math.clamp(kb.pitch + mPitch, -1, 1)
+	inputState.pitch = math.clamp(kbPitch + mPitch, -1, 1)
 	inputState.roll  = math.clamp(kb.roll  + mRoll,  -1, 1)
 	inputState.yaw   = kb.yaw
 
@@ -501,6 +559,7 @@ local acquireGen = 0    -- guards against overlapping async acquisitions
 
 local function resetInput()
 	kb.pitch, kb.roll, kb.yaw = 0, 0, 0
+	pitchRamp.sign, pitchRamp.mag = 0, 0
 	steer.x, steer.y = 0, 0
 	inputState.pitch, inputState.roll, inputState.yaw = 0, 0, 0
 	inputState.flap, inputState.dive = false, false

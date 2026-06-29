@@ -248,7 +248,15 @@ function FlightPhysics:Update(dt, input)
 	self.isDiving = look.Y < -0.2
 	if wantFlap or (wantDive and self.isDiving) then
 		local thrust = wantFlap and p.flapThrust or (p.flapThrust * 0.5)
-		if self.isDiving then thrust = thrust * p.diveThrustBonus end
+		if self.isDiving then
+			thrust = thrust * p.diveThrustBonus
+			-- Flapping keeps full bite through low/mid dive speed, then fades toward FLAP_DIVE_FLOOR
+			-- as airspeed nears diveSpeedCap — it's hard to flap fast at the top of a stoop, so
+			-- gravity (not your wings) carries the high end. Still fully additive lower down.
+			local band = (F.FLAP_DIVE_FADE_BAND or 0.4) * p.diveSpeedCap
+			local fade = clamp((p.diveSpeedCap - self.velocity.Magnitude) / math.max(1, band), F.FLAP_DIVE_FLOOR or 0.1, 1)
+			thrust = thrust * fade
+		end
 		-- altFactor folds the service ceiling in: thrust fades to 0 at the envelope top, so you
 		-- level off near the ceiling rather than flapping skyward forever (see _authority block).
 		accel = accel + look * (thrust * altFactor / p.mass)

@@ -209,8 +209,8 @@ staminaFillCorner.Parent = staminaBarFill
 --------------------------------------------------------------------------------
 local flightDataFrame = Instance.new("Frame")
 flightDataFrame.Name = "FlightDataFrame"
-flightDataFrame.Size = UDim2.new(0, 150, 0, 96)
-flightDataFrame.Position = UDim2.new(0, 15, 1, -191)
+flightDataFrame.Size = UDim2.new(0, 160, 0, 70)
+flightDataFrame.Position = UDim2.new(0, 15, 1, -95)
 flightDataFrame.BackgroundColor3 = UI.hudColor
 flightDataFrame.BackgroundTransparency = UI.hudTransparency
 flightDataFrame.BorderSizePixel = 0
@@ -223,7 +223,7 @@ dataCorner.Parent = flightDataFrame
 local speedLabel = Instance.new("TextLabel")
 speedLabel.Name = "SpeedLabel"
 speedLabel.Size = UDim2.new(1, -16, 0, 28)
-speedLabel.Position = UDim2.new(0, 8, 0, 4)
+speedLabel.Position = UDim2.new(0, 8, 0, 6)
 speedLabel.BackgroundTransparency = 1
 speedLabel.Text = "SPD: 0"
 speedLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -235,7 +235,7 @@ speedLabel.Parent = flightDataFrame
 local altLabel = Instance.new("TextLabel")
 altLabel.Name = "AltLabel"
 altLabel.Size = UDim2.new(1, -16, 0, 28)
-altLabel.Position = UDim2.new(0, 8, 0, 34)
+altLabel.Position = UDim2.new(0, 8, 0, 36)
 altLabel.BackgroundTransparency = 1
 altLabel.Text = "ALT: 0"
 altLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -244,19 +244,127 @@ altLabel.Font = UI.fontMedium
 altLabel.TextScaled = true
 altLabel.Parent = flightDataFrame
 
--- AoA (angle of attack) readout — unobtrusive; pushed from BirdController via _G.SetAoA.
--- Green near 0°, ambers toward the stall angle, red past it (the visual stall margin).
-local aoaLabel = Instance.new("TextLabel")
-aoaLabel.Name = "AoaLabel"
-aoaLabel.Size = UDim2.new(1, -16, 0, 28)
-aoaLabel.Position = UDim2.new(0, 8, 0, 64)
-aoaLabel.BackgroundTransparency = 1
-aoaLabel.Text = "AoA: 0\194\176"
-aoaLabel.TextColor3 = Color3.fromRGB(120, 230, 140)
-aoaLabel.TextXAlignment = Enum.TextXAlignment.Left
-aoaLabel.Font = UI.fontMedium
-aoaLabel.TextScaled = true
-aoaLabel.Parent = flightDataFrame
+--------------------------------------------------------------------------------
+-- INCIDENCE GAUGE (Bottom Left, right of SPD/ALT): the bird BODY's pitch attitude vs
+-- the world horizon. A fixed horizontal line = the horizon at 0°; the bright pointer =
+-- the bird's body, rotated to its nose-up/nose-down angle. Pure attitude — it does NOT
+-- measure AoA, lift, or stall. Numeric readout below. Pushed via _G.SetIncidence(deg).
+--------------------------------------------------------------------------------
+-- Persistent handles SetIncidence / the reset path mutate each frame. Built inside the
+-- do-block below so the transient construction locals (corners, dial, title, hub, makeBar)
+-- stay scoped there and don't add to the main chunk's local count.
+local incPointer, incTip, incLabel
+do
+	local AOA_DIAL = 110 -- px square dial
+	local aoaGauge = Instance.new("Frame")
+	aoaGauge.Name = "IncidenceGauge"
+	aoaGauge.Size = UDim2.new(0, 140, 0, 164)
+	aoaGauge.Position = UDim2.new(0, 185, 1, -189)
+	aoaGauge.BackgroundColor3 = UI.hudColor
+	aoaGauge.BackgroundTransparency = UI.hudTransparency
+	aoaGauge.BorderSizePixel = 0
+	aoaGauge.Parent = screenGui
+
+	local aoaGaugeCorner = Instance.new("UICorner")
+	aoaGaugeCorner.CornerRadius = UDim.new(0, 8)
+	aoaGaugeCorner.Parent = aoaGauge
+
+	local aoaTitle = Instance.new("TextLabel")
+	aoaTitle.Name = "Title"
+	aoaTitle.Size = UDim2.new(1, -12, 0, 18)
+	aoaTitle.Position = UDim2.new(0, 6, 0, 4)
+	aoaTitle.BackgroundTransparency = 1
+	aoaTitle.Text = "ANGLE OF INCIDENCE"
+	aoaTitle.TextColor3 = Color3.fromRGB(180, 190, 205)
+	aoaTitle.TextXAlignment = Enum.TextXAlignment.Left
+	aoaTitle.Font = UI.fontMedium
+	aoaTitle.TextScaled = true
+	aoaTitle.Parent = aoaGauge
+
+	-- The square dial that holds the rotating bars (center = pivot for everything inside).
+	local aoaDial = Instance.new("Frame")
+	aoaDial.Name = "Dial"
+	aoaDial.AnchorPoint = Vector2.new(0.5, 0)
+	aoaDial.Position = UDim2.new(0.5, 0, 0, 22)
+	aoaDial.Size = UDim2.new(0, AOA_DIAL, 0, AOA_DIAL)
+	aoaDial.BackgroundColor3 = Color3.fromRGB(10, 12, 18)
+	aoaDial.BackgroundTransparency = 0.35
+	aoaDial.BorderSizePixel = 0
+	aoaDial.Parent = aoaGauge
+
+	local aoaDialCorner = Instance.new("UICorner")
+	aoaDialCorner.CornerRadius = UDim.new(1, 0) -- circular
+	aoaDialCorner.Parent = aoaDial
+
+	-- Helper: a bar that pivots about the dial center. `fromCenter` true => extends to the
+	-- right only (a radial pointer/tick); false => a full line through the center.
+	local function makeBar(name, length, thickness, color, transparency, fromCenter)
+		local bar = Instance.new("Frame")
+		bar.Name = name
+		bar.BorderSizePixel = 0
+		bar.BackgroundColor3 = color
+		bar.BackgroundTransparency = transparency or 0
+		if fromCenter then
+			bar.AnchorPoint = Vector2.new(0, 0.5)
+		else
+			bar.AnchorPoint = Vector2.new(0.5, 0.5)
+		end
+		bar.Position = UDim2.new(0.5, 0, 0.5, 0)
+		bar.Size = UDim2.new(0, length, 0, thickness)
+		bar.Parent = aoaDial
+		local c = Instance.new("UICorner")
+		c.CornerRadius = UDim.new(1, 0)
+		c.Parent = bar
+		return bar
+	end
+
+	local radius = AOA_DIAL * 0.46
+	local INC_COLOR = Color3.fromRGB(120, 210, 255) -- single neutral color (no stall meaning)
+	-- Horizon reference: a full horizontal line through the center = 0° (level).
+	makeBar("Horizon", radius * 2, 2, Color3.fromRGB(120, 140, 160), 0.15, false)
+	-- The body pointer — rotates to the bird's nose-up/nose-down attitude.
+	incPointer = makeBar("Pointer", radius, 5, INC_COLOR, 0, true)
+	incPointer.ZIndex = 3
+	-- Tip dot at the pointer's nose end (rides with the pointer's rotation as its child).
+	incTip = Instance.new("Frame")
+	incTip.Name = "Tip"
+	incTip.AnchorPoint = Vector2.new(0.5, 0.5)
+	incTip.Position = UDim2.new(1, 0, 0.5, 0)
+	incTip.Size = UDim2.new(0, 12, 0, 12)
+	incTip.BackgroundColor3 = INC_COLOR
+	incTip.BorderSizePixel = 0
+	incTip.ZIndex = 4
+	incTip.Parent = incPointer
+	local aoaTipCorner = Instance.new("UICorner")
+	aoaTipCorner.CornerRadius = UDim.new(1, 0)
+	aoaTipCorner.Parent = incTip
+	-- Center hub.
+	local aoaHub = Instance.new("Frame")
+	aoaHub.Name = "Hub"
+	aoaHub.AnchorPoint = Vector2.new(0.5, 0.5)
+	aoaHub.Position = UDim2.new(0.5, 0, 0.5, 0)
+	aoaHub.Size = UDim2.new(0, 10, 0, 10)
+	aoaHub.BackgroundColor3 = Color3.fromRGB(210, 220, 235)
+	aoaHub.BorderSizePixel = 0
+	aoaHub.ZIndex = 5
+	aoaHub.Parent = aoaDial
+	local aoaHubCorner = Instance.new("UICorner")
+	aoaHubCorner.CornerRadius = UDim.new(1, 0)
+	aoaHubCorner.Parent = aoaHub
+
+	-- Numeric readout (one decimal, signed).
+	incLabel = Instance.new("TextLabel")
+	incLabel.Name = "IncidenceValue"
+	incLabel.Size = UDim2.new(1, -12, 0, 26)
+	incLabel.Position = UDim2.new(0, 6, 1, -28)
+	incLabel.BackgroundTransparency = 1
+	incLabel.Text = "0.0\194\176"
+	incLabel.TextColor3 = Color3.fromRGB(120, 210, 255)
+	incLabel.TextXAlignment = Enum.TextXAlignment.Center
+	incLabel.Font = UI.font
+	incLabel.TextScaled = true
+	incLabel.Parent = aoaGauge
+end
 
 --------------------------------------------------------------------------------
 -- STALL WARNING (hidden by default; blinks while active)
@@ -420,6 +528,8 @@ RunService.RenderStepped:Connect(function()
 		staminaBarFill.Size = UDim2.new(0, 0, 1, 0)
 		speedLabel.Text = "SPD: 0"
 		altLabel.Text = "ALT: 0"
+		incLabel.Text = "--"
+		incPointer.Rotation = 0
 		stallWarning.Visible = false
 		return
 	end
@@ -447,20 +557,15 @@ function _G.UpdateStaminaUI(ratio)
 	staminaBarFill.Size = UDim2.new(math.clamp(ratio, 0, 1), 0, 1, 0)
 end
 
--- Set the angle-of-attack readout (degrees). Color shifts green -> amber -> red as AoA
--- approaches and exceeds the stall angle, giving an at-a-glance stall margin.
-function _G.SetAoA(deg, stallDeg)
+-- Set the body-incidence readout (degrees): the bird body's pitch above/below the world
+-- horizon (0°). Rotates the pointer to that attitude so the visual gap from the horizon
+-- line IS the angle. + = nose up. Measures nothing aerodynamic (no AoA/lift/stall).
+function _G.SetIncidence(deg)
 	deg = tonumber(deg) or 0
-	stallDeg = tonumber(stallDeg) or 24
-	aoaLabel.Text = string.format("AoA: %d\194\176", math.floor(deg + 0.5))
-	local mag = math.abs(deg)
-	if mag >= stallDeg then
-		aoaLabel.TextColor3 = Color3.fromRGB(255, 80, 70)        -- past stall
-	elseif mag >= stallDeg * 0.75 then
-		aoaLabel.TextColor3 = Color3.fromRGB(255, 200, 80)       -- nearing stall
-	else
-		aoaLabel.TextColor3 = Color3.fromRGB(120, 230, 140)      -- safe
-	end
+	incLabel.Text = string.format("%+.1f\194\176", deg)
+	-- Nose-up (positive) rotates the rightward pointer up (counter-clockwise = negative
+	-- Roblox Rotation). Clamp the SHOWN angle so it can't wrap past vertical.
+	incPointer.Rotation = -math.clamp(deg, -90, 90)
 end
 
 -- Toggle the blinking stall warning.

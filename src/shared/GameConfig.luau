@@ -124,6 +124,12 @@ GameConfig.Flight = {
 	CEILING_BAND = meters(170),     -- ≈607 studs below the ceiling over which flap power fades to 0
 	FLAP_AUTHORITY_FLOOR = 0.6, -- min control authority while flapping (lets you hold a slow climb without tumbling)
 	FLAP_LIFT_FLOOR = 0.55,     -- fraction of clMax lift retained past stall WHILE FLAPPING (anti-mush)
+	-- FLAPPING IN A DIVE: flap thrust stays a useful accelerator through low/mid dive speed but
+	-- naturally fades at the top of a stoop (you can't beat your wings fast enough at speed) —
+	-- gravity still carries the dive. Full thrust until (1 - FADE_BAND) of diveSpeedCap, then
+	-- ramps down to FLAP_DIVE_FLOOR by the cap. Level/climb flapping is untouched (no regression).
+	FLAP_DIVE_FADE_BAND = 0.4, -- top fraction of diveSpeedCap over which dive flap thrust fades out
+	FLAP_DIVE_FLOOR     = 0.1, -- min dive flap thrust fraction retained at the very top end
 	-- AEROBATIC FREEDOM: above AEROBATIC_MIN_SPEED, an aggressive pitch/roll command suppresses the
 	-- weathervane so the nose can swing away from the airflow — this is what lets a fast eagle pull a
 	-- full LOOP or barrel roll instead of being auto-leveled out of it. Ramps in over
@@ -386,6 +392,23 @@ GameConfig.Camera = {
 	shakeMagnitude = 0.6,
 	-- Spacebar free-look: orbit the camera while the bird holds its flight path.
 	freeLookSensitivity = 0.35,
+	-- Mouse-wheel zoom: scroll adjusts a user offset folded into the chase distance.
+	-- The final distance is clamped to [minDistance, maxDistance] so you can't clip
+	-- into the bird or fly the camera off to infinity.
+	zoomStep      = 6,   -- studs of distance change per wheel notch
+	minDistance   = 10,  -- closest the chase cam may sit
+	maxDistance   = 120, -- farthest the chase cam may pull back
+	-- Camera HEIGHT vs zoom: the chase cam rides at `heightFactor × dist` above the bird up close,
+	-- rising toward `zoomTopDownHeight × dist` as you wheel out — so zoomed out gives a higher,
+	-- more top-down view of the eagle.
+	heightFactor     = 0.35, -- base height ratio when zoomed in (a little above the bird)
+	zoomTopDownHeight = 0.55, -- height ratio at full zoom-out (a touch more top-down, but a happy medium — angles stay close)
+	-- Loop/crest damping: when the bird's facing rotates fast (e.g. cresting a loop), the chase
+	-- cam softens its follow so the view glides through the flip instead of whipping. crestAngRate
+	-- is the facing angular speed (rad/s) at which damping reaches full; crestDamp is the max
+	-- fraction by which follow smoothing is reduced. Camera-only — never touches flight.
+	crestAngRate = 3.5,
+	crestDamp    = 0.75,
 }
 
 --------------------------------------------------------------------------------
@@ -407,6 +430,12 @@ GameConfig.Controls = {
 	mouseReturnPitch = 0.4,
 	mouseExpo       = 1.7,   -- response curve: 1 = linear, >1 = finer control near center
 	invertPitch     = false, -- false = mouse UP pitches nose UP (FPS-style). Set true for stick-style (pull back = up).
+	-- TIME-SCALED PITCH (keyboard W/S): a TAP gives a small, precise AoA nudge; HOLDING ramps the
+	-- pitch authority up to full over pitchRampTime. Lets you make fine attitude adjustments without
+	-- losing strong authority on a sustained climb/dive. Releasing snaps the input to 0 (the nose
+	-- then holds where you pointed it — there's no auto-level). PLAYTEST-PROVISIONAL.
+	pitchTapFraction = 0.30, -- pitch authority on the first instant a key is pressed (the "tap" amount)
+	pitchRampTime    = 0.55, -- seconds of holding to ramp from the tap fraction up to full (1.0)
 }
 
 --------------------------------------------------------------------------------
