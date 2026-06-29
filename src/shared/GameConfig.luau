@@ -19,16 +19,52 @@
 local GameConfig = {}
 
 --------------------------------------------------------------------------------
+-- WORLD SCALE / GRAVITY — the master recalibration knob (session 8, "real-scale raptor
+-- flight"). See docs/RESEARCH.md §v3. The whole v2 lift/drag model was implicitly pinned to
+-- Roblox's DEFAULT gravity 196.2 studs/s², which at the canonical 0.28 m/stud is ≈5.6× real g
+-- — so dives accelerated too punchily and there was no altitude to develop a real stoop.
+--
+-- THE FIX (proven invariant): drop gravity toward real AND drop AIR_DENSITY by the SAME factor.
+-- Then v_stall = √(g·wingLoading / (clMax·ρ)) has g and ρ CANCEL, so stall/cruise/dive/terminal
+-- speeds — and the `stall < spawn < cruise` invariant — are preserved EXACTLY at any gravity.
+-- Only the ACCELERATIONS get gentler (real-scale "majesty") and turns/dives get proportionately
+-- bigger (hence the larger world + 2 km ceiling). The other gravity-coupled forces (flapThrust,
+-- flapClimbForce, Thermals.strength) are multiplied by GRAV_SCALE below to hold their ratio to
+-- weight. Everything scale-free (all speeds, control-authority speeds, every rad/s rate,
+-- TERMINAL_VELOCITY, CRASH_SPEED) is UNCHANGED — so the player-approved v2 feel character
+-- (grip, powered climb, momentum, eagle-wide/crow-tight) survives untouched.
+--
+-- GRAVITY_G is the ONE knob to sweep in playtest:
+--   1.0 = true real g at 0.28 m/stud (gravity ≈ 35; most majestic / longest stoop)
+--   2.0 = "arcade-real" (gravity ≈ 70, ≈2.8× gentler than the old 196.2) — current default
+--   3.0+ = punchier / arcadier.  The envelope & invariant cannot break across the whole range.
+--------------------------------------------------------------------------------
+local METERS_PER_STUD = 0.28           -- Roblox canonical scale (2019 World panel)
+local REAL_G          = 9.81           -- m/s²
+local GRAVITY_G       = 2.0            -- fraction of real gravity — THE sweep knob (see above)
+local GRAVITY         = REAL_G * GRAVITY_G / METERS_PER_STUD  -- studs/s² (≈70.1 at GRAVITY_G=2)
+local LEGACY_GRAVITY  = 196.2          -- the gravity the v2 feel was originally calibrated at
+local GRAV_SCALE      = GRAVITY / LEGACY_GRAVITY              -- multiplies every gravity-coupled force
+local function meters(m) return m / METERS_PER_STUD end      -- real metres → studs (world sizing)
+
+GameConfig.MetersPerStud = METERS_PER_STUD -- exposed for any UI/debug that wants real-unit readouts
+
+--------------------------------------------------------------------------------
 -- GLOBAL FLIGHT ENVIRONMENT
 --------------------------------------------------------------------------------
 GameConfig.Flight = {
-	GRAVITY = 196.2,            -- studs/s^2; matches Workspace.Gravity
+	GRAVITY = GRAVITY,          -- studs/s^2 (DERIVED from scale above). Set Workspace.Gravity to match (GameServer).
+	GRAVITY_G = GRAVITY_G,      -- echoed for tooling/HUD; edit the local above to retune
+	GRAV_SCALE = GRAV_SCALE,    -- echoed: factor applied to all gravity-coupled forces
 	-- AIR_DENSITY is the abstract scalar that folds 0.5*rho*wingArea into the lift/drag terms.
 	-- CALIBRATED for the v2 lift curve: with cl0~0.3 and these profiles, level cruise at each
 	-- bird's glideSpeed trims at a few degrees AoA (lift ~= gravity), and stall speed sits well
 	-- below spawn (0.9*glide) and cruise. See FlightPhysics.computeCL and the calibration note
 	-- in project-open-questions. Raising it raises lift everywhere (lower stall speeds).
-	AIR_DENSITY = 0.033,
+	-- v3: scaled by GRAV_SCALE in lockstep with gravity so stall/cruise/terminal speeds stay put
+	-- (the g and ρ in v_stall cancel — see the WORLD SCALE block). Base 0.033 was the v2 value at
+	-- gravity 196.2; do NOT edit this directly to change feel — sweep GRAVITY_G instead.
+	AIR_DENSITY = 0.033 * GRAV_SCALE,
 	WIND_BASE = Vector3.new(0, 0, 0), -- ambient wind; per-map override allowed
 	-- Control authority scales with airspeed: below MIN you can barely steer
 	-- (this is what makes a stalled/slow bird helpless and gives speed meaning).
@@ -78,8 +114,12 @@ GameConfig.Flight = {
 	-- so the bird levels off near the top instead of climbing forever. Combat happens below
 	-- Thermals.maxHeight (480); the eagle ceiling (520) sits just above so the wall is only felt at
 	-- the very top. PLAYTEST-PROVISIONAL.
-	SERVICE_CEILING = 520,      -- studs; envelope top for climbCeilingBonus = 1.0 (the eagle)
-	CEILING_BAND = 140,         -- studs below the ceiling over which flap power fades to 0
+	-- v3 REAL-SCALE: golden eagles soar/migrate at 1350–2000 m AGL (PMC9179650); 2 km ≈ 7150 studs
+	-- at 0.28 m/stud. The eagle owns this tall sky (vertical/energy game); crows top out lower
+	-- (climbCeilingBonus 0.7 → ~5000). The apex is reached via the powered climb + thermals over
+	-- several energy cycles, not in one flap — that grind IS the energy game.
+	SERVICE_CEILING = meters(2000), -- ≈7143 studs; envelope top for climbCeilingBonus = 1.0 (the eagle)
+	CEILING_BAND = meters(170),     -- ≈607 studs below the ceiling over which flap power fades to 0
 	FLAP_AUTHORITY_FLOOR = 0.6, -- min control authority while flapping (lets you hold a slow climb without tumbling)
 	FLAP_LIFT_FLOOR = 0.55,     -- fraction of clMax lift retained past stall WHILE FLAPPING (anti-mush)
 	-- AEROBATIC FREEDOM: above AEROBATIC_MIN_SPEED, an aggressive pitch/roll command suppresses the
@@ -134,9 +174,10 @@ GameConfig.Profiles = {
 		-- short, so level flight bled speed until it stalled. 520/12≈43 lets it sustain/slowly
 		-- gain at cruise. It still trades altitude for top speed (energy fighter) — the dive,
 		-- not the flap, is its speed source. PLAYTEST-PROVISIONAL.
-		flapThrust = 520,       -- forward force from a flap
-		flapClimbForce = 300,   -- session 7: upward climb accel while flapping with the nose up. Set
-		                        -- ABOVE gravity (196) so a flapping eagle keeps climbing even after a
+		flapThrust = 520 * GRAV_SCALE,       -- forward force from a flap (v3: ×GRAV_SCALE holds T/W & T/D vs the lighter weight)
+		flapClimbForce = 300 * GRAV_SCALE,   -- session 7: upward climb accel while flapping with the nose up. Base 300 was
+		                        -- ABOVE gravity (196); ×GRAV_SCALE keeps it above the new (lower) gravity by the same
+		                        -- ratio, so a flapping eagle keeps climbing even after a
 		                        -- steep climb has bled its airspeed (lift ~0) — a real eagle muscles up
 		                        -- on wingbeats, not airspeed. "Flap = climb" until stamina/ceiling. THE
 		                        -- climb-rate knob; mass-independent so the momentum tuning doesn't sap it.
@@ -196,8 +237,8 @@ GameConfig.Profiles = {
 		recoverNoseDownRate = 1.2, -- auto-recovery past the stall
 
 		-- THRUST / SPEED -----------------------------------------------------
-		flapThrust = 150,
-		flapClimbForce = 200,   -- lower than the eagle: the crow is less of a climber (lower ceiling via climbCeilingBonus)
+		flapThrust = 150 * GRAV_SCALE,
+		flapClimbForce = 200 * GRAV_SCALE,   -- lower than the eagle: the crow is less of a climber (lower ceiling via climbCeilingBonus)
 		glideSpeed = 95,
 		maxLevelSpeed = 140,    -- slightly slower top end than eagle in level flight
 		diveThrustBonus = 1.25,
@@ -263,12 +304,18 @@ GameConfig.Squad = {
 --------------------------------------------------------------------------------
 -- THERMALS — restore energy (altitude currency). Placed by GameServer.
 --------------------------------------------------------------------------------
+-- v3 REAL-SCALE: thermals are the energy elevator into the high soaring band (up near the 2 km
+-- ceiling). Wider cores so they're findable in the much bigger sky; maxHeight raised to carry the
+-- eagle into the stoop-launch altitude. strength ×GRAV_SCALE keeps its ~0.7g ratio (a thermal
+-- reduces sink / gives a gentle climb when combined with gliding lift — it doesn't levitate you).
+-- WATCH-ITEM (RESEARCH §v3): real thermal climb is slow; if reaching the apex is tedious in
+-- playtest, raise strength above the scaled value as a gameplay concession.
 GameConfig.Thermals = {
-	count = 6,
-	radius = 90,
-	minHeight = 20,
-	maxHeight = 480,
-	strength = 140,   -- upward force at the core (studs/s^2-ish)
+	count = 8,
+	radius = meters(110),     -- ≈393 studs
+	minHeight = meters(30),   -- ≈107 studs
+	maxHeight = meters(1800), -- ≈6428 studs (carries you into the high soaring band below the 7143 ceiling)
+	strength = 140 * GRAV_SCALE, -- upward accel at the core (studs/s^2), ratio-to-gravity preserved
 }
 
 --------------------------------------------------------------------------------

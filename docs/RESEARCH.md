@@ -78,3 +78,50 @@ This pass answered "how do you actually build a great arcade/sim flight kernel" 
 - en.wikipedia.org: Lift coefficient, Zero-lift axis, Stall (fluid dynamics), Energy–maneuverability theory
 - create.roblox.com/docs/projects/server-authority + devforum Server Authority beta threads
 - gafferongames.com "Fix Your Timestep" — frame-rate-independent integration
+
+---
+
+# v3 — REAL-SCALE recalibration (deep-research pass, 2026-06-28, session 8)
+
+Answers the session-7 north-star: "the best flight model on Roblox" via **real-scale raptor flight** (HANDOFF session-7 block; `project-realscale-flight-goal` memory). Chad's three asks — 2 km ceiling, bigger arena, real dive-acceleration — turned out to share **one** root: the world was built at Roblox's default gravity, which is wrong for the scale.
+
+## The scale crux (measured, not assumed)
+- **1 stud = 0.28 m** is Roblox's canonical scale (the 2019 World-panel definition). [roblox.fandom.com/wiki/Stud_(unit), devforum studs-to-metre]
+- Therefore **real gravity at this scale = 9.81 / 0.28 ≈ 35 studs/s².** Roblox's default `Workspace.Gravity = 196.2` is **≈5.6× real g.** That 5.6× is exactly why dives felt "too punchy with no room to develop a stoop."
+
+## What's ALREADY real at 0.28 m/stud (so don't touch the speeds)
+The v2 speed envelope, converted, is already biologically accurate — only gravity and world-size were off:
+| Quantity | Real | × (1/0.28) | Our config | 
+|---|---|---|---|
+| Golden-eagle stoop | 67–89 m/s (240–320 km/h) | 240–320 studs/s | `Eagle.diveSpeedCap = 320` ✅ (real top end) |
+| Peregrine stoop | ~107 m/s (386 km/h) | 382 studs/s | `TERMINAL_VELOCITY = 400` ✅ |
+| Eagle hunting glide | ~54 m/s (120 mph) | 193 studs/s | `maxLevelSpeed 170` (slightly low) |
+| Eagle cruise/soar | ~36 / 13 m/s | 130 / 46 studs/s | `glideSpeed = 130` ✅ |
+| Best-glide sink | 0.75 m/s (L/D ≈ 25–30) | 2.7 studs/s | eagle glides L/D ~34 (close) |
+| Soaring / migration altitude | 1350–2000 m AGL | 4800–7150 studs | **`SERVICE_CEILING` was 520 ✗** → raise to ~7150 |
+| Golden-eagle wingspan / mass | ~2 m / 3–6.7 kg | ~7 studs | `bodyRadius 4.5` ok |
+
+Sources: birdsnews/britannica/eagles.org (eagle stoop & glide speeds), PMC5896925 + physicsworld (peregrine stoop physics, 25+ G pullout), PMC9179650 (instrumented golden-eagle soaring: 0.75 m/s sink, ~1350–2000 m AGL waves), dimensions.com + Wikipedia Golden_eagle (size/mass).
+
+## The recalibration theorem (why this is SAFE, not scary)
+Drop gravity by factor **k** and **drop `AIR_DENSITY` by the same k.** Then every equilibrium that defines the flight envelope is **invariant** — k cancels:
+- **Stall speed** `v_stall = √(g·wingLoading / (clMax·ρ))` → g↓k, ρ↓k cancel → **unchanged.** (Eagle ~61, Crow ~45 — identical to v2.) The `stall < spawn < cruise` invariant is therefore *structurally guaranteed* at any k.
+- **Cruise trim AoA** (`cl·ρ·v² / WL = g`) → unchanged. **Terminal velocity** (`CD·ρ·v² = m·g`) → unchanged. **Glide ratio / sink rate** → unchanged (pure CL/CD geometry).
+- What DOES change, by design: **all accelerations get gentler ×k** (real-g dive/climb feel — fixes "punchy"), and **turn radius `v²/a_lift` grows ×k** and **dives need ×k more distance** to build → the world must grow ~k (hence the bigger arena + 2 km ceiling).
+
+So the player-approved v2 feel *character* (grip, powered climb, momentum, the eagle-wide/crow-tight split) is preserved; only the scale/majesty changes. **The other gravity-coupled forces must scale by k too** to hold their ratios-to-weight: `flapThrust`, `flapClimbForce` (kept "above gravity"), and `Thermals.strength`. Everything else (speeds, control-authority speeds, all rad/s rates, `TERMINAL`, `CRASH_SPEED`) is scale-free and stays.
+
+## Implementation: one knob
+`GameConfig` now derives gravity from `METERS_PER_STUD = 0.28` and **`GRAVITY_G`** (fraction of real g — THE sweep knob; 1.0 = true real, higher = arcadier/punchier), and multiplies the coupled forces by `GRAV_SCALE = GRAVITY / 196.2`. World sizes are expressed in real metres (`/0.28`). Sweep `GRAVITY_G` in Studio to taste — the envelope/invariant can't break.
+
+## Open watch-items for the playtest (flight==balance)
+- **Floaty vs snappy:** full real-g (k=5.6) is the most majestic but a big jump from the tuned 196.2 — start `GRAVITY_G` partway (arcade-real) and sweep down. Reason about the 1-v-4 on the chosen value.
+- **Reaching 2 km:** thermal climb at real ratios is slow; the eagle reaches the apex via the powered climb + thermals over several energy cycles (intended skill), but if it's tedious, strengthen thermals (a gameplay concession over realism) or lower the practical combat band.
+- **Turn energy-bleed:** wider real-scale turns + lower induced drag (ρ↓) + the grip assist could wash out E-M turn-fighting; if speed stops mattering in dogfights, add a small grip-drag (already flagged in `flight-vertical-envelope`).
+
+## v3 sources (highest quality)
+- roblox.fandom.com/wiki/Stud_(unit) + devforum.roblox.com/t/studs-to-metre-conversion (0.28 m/stud canonical)
+- pmc.ncbi.nlm.nih.gov/articles/PMC9179650 — instrumented golden-eagle long-distance flight (sink rate, soaring altitude)
+- pmc.ncbi.nlm.nih.gov/articles/PMC5896925 + physicsworld.com/a/falcons-high-speed-dive — stoop physics, G-loads
+- birdsnews.com/fastest-bird-species, britannica How-Fast-Can-Eagles-Fly, eagles.org golden-eagle-behavior — eagle stoop/glide/soar speeds
+- en.wikipedia.org/wiki/Golden_eagle + dimensions.com golden-eagle — wingspan/mass/size

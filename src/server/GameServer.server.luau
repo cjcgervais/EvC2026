@@ -59,12 +59,15 @@ local COLLISION_COOLDOWN     = 0.4    -- s; per-pair debounce so one ram is one 
 local ATTACK_COOLDOWN        = 0.6    -- s; per-attacker melee debounce
 
 local AI_HEARTBEAT_DT_CAP    = 1 / 30 -- clamp dt fed to the AI flight engine
-local SPAWN_HEIGHT           = 250    -- default spawn altitude
+-- v3 REAL-SCALE: spawn ~560 m AGL (≈2000 studs) in the much taller sky — lots of dive room below
+-- and ~5000 studs of climb headroom up to the 7143-stud ceiling. (Was 250 in the cramped 520-ceiling
+-- world.) Solves "too easy to crash": the ground is now far away.
+local SPAWN_HEIGHT           = 2000   -- default spawn altitude (studs)
 -- Real obstacle/ground collision now goes through BirdCollision (swept Spherecast) — see
 -- processCrashes / updateAICrows. This Y is only a DEEP FAILSAFE: anything that somehow
 -- tunnels far below the world (baseplate top sits at Y=0) is killed unconditionally so it
--- can't sink forever and stall the respawn loop.
-local GROUND_FAILSAFE_Y      = -40
+-- can't sink forever and stall the respawn loop. Deepened for the bigger v3 world.
+local GROUND_FAILSAFE_Y      = -200
 local RESPAWN_COOLDOWN       = 1.5    -- s; debounce manual self-respawn requests
 
 --------------------------------------------------------------------------------
@@ -189,7 +192,7 @@ local function SetupLighting()
 	Lighting.Brightness = 2.5
 	Lighting.Ambient = Color3.fromRGB(120, 130, 150)
 	Lighting.OutdoorAmbient = Color3.fromRGB(140, 150, 170)
-	Lighting.FogEnd = 4000
+	Lighting.FogEnd = 16000 -- v3: see across the much bigger real-scale arena
 	Lighting.FogColor = Color3.fromRGB(180, 200, 225)
 	Lighting.GeographicLatitude = 30
 
@@ -208,42 +211,54 @@ local function SetupLighting()
 	end
 end
 
--- Build a simple but real arena: a large baseplate + a few spires/perches.
+-- Build the arena. v3 REAL-SCALE (docs/RESEARCH.md §v3, session 8): a vast floor and a sparse
+-- scatter of tall, thin spires spread far apart, so the sky is open (boom-and-zoom room, fewer
+-- crashes) and the spires are navigational landmarks/perches you soar AROUND rather than a dense
+-- forest you clip in a turn. Sized in real metres at 0.28 m/stud. World-bounds are intentionally
+-- soft (huge floor + fog) for now — hard perimeter walls are a later balance pass (they'd add the
+-- very crash-frustration Chad asked to remove).
 local function BuildMap()
+	-- Keep the Roblox engine's own gravity coherent with the flight model's (birds are CFrame-driven
+	-- so they read GameConfig.Flight.GRAVITY directly, but this keeps debris/landings/ragdolls sane).
+	Workspace.Gravity = GameConfig.Flight.GRAVITY
+
 	local map = Workspace:FindFirstChild("Map")
 	if map then map:Destroy() end
 	map = Instance.new("Folder")
 	map.Name = "Map"
 	map.Parent = Workspace
 
-	-- Large baseplate.
+	-- Vast baseplate (≈4.5 km square at 0.28 m/stud) so the ground is rarely a hazard.
 	local base = Instance.new("Part")
 	base.Name = "Baseplate"
 	base.Anchored = true
-	base.Size = Vector3.new(4000, 20, 4000)
-	base.Position = Vector3.new(0, -10, 0)
+	base.Size = Vector3.new(16000, 40, 16000)
+	base.Position = Vector3.new(0, -20, 0)
 	base.Material = Enum.Material.Grass
 	base.Color = Color3.fromRGB(70, 110, 60)
 	base.TopSurface = Enum.SurfaceType.Smooth
 	base.Parent = map
 
-	-- A scatter of tall spires acting as perches / hazards to fly around.
+	-- Sparse tall spires spread across the arena (polar layout: angle, radius, height in studs).
+	-- Heights reach into the mid soaring band; diameters are thin relative to the 16 000-stud world.
 	local spires = {
-		Vector3.new(0, 0, 0),
-		Vector3.new(600, 0, 400),
-		Vector3.new(-550, 0, 300),
-		Vector3.new(350, 0, -600),
-		Vector3.new(-400, 0, -500),
-		Vector3.new(900, 0, -200),
-		Vector3.new(-850, 0, -150),
+		{ ang = 0.4,  rad = 1400, h = 1100 },
+		{ ang = 1.7,  rad = 2600, h = 1700 },
+		{ ang = 2.9,  rad = 1800, h = 800  },
+		{ ang = 3.8,  rad = 3400, h = 2000 },
+		{ ang = 4.6,  rad = 2200, h = 1300 },
+		{ ang = 5.5,  rad = 3000, h = 1500 },
+		{ ang = 6.0,  rad = 900,  h = 600  },
 	}
-	for i, base2D in ipairs(spires) do
-		local height = 220 + (i % 3) * 90
+	for i, s in ipairs(spires) do
+		local base2D = Vector3.new(math.cos(s.ang) * s.rad, 0, math.sin(s.ang) * s.rad)
+		local height = s.h
+		local diameter = 90
 		local spire = Instance.new("Part")
 		spire.Name = "Spire" .. i
 		spire.Anchored = true
 		spire.Shape = Enum.PartType.Cylinder
-		spire.Size = Vector3.new(height, 40, 40) -- cylinder long-axis is X; rotate upright
+		spire.Size = Vector3.new(height, diameter, diameter) -- cylinder long-axis is X; rotate upright
 		spire.CFrame = CFrame.new(base2D + Vector3.new(0, height * 0.5, 0))
 			* CFrame.Angles(0, 0, math.rad(90))
 		spire.Material = Enum.Material.Rock
@@ -254,8 +269,8 @@ local function BuildMap()
 		local perch = Instance.new("Part")
 		perch.Name = "Perch" .. i
 		perch.Anchored = true
-		perch.Size = Vector3.new(70, 8, 70)
-		perch.Position = base2D + Vector3.new(0, height + 4, 0)
+		perch.Size = Vector3.new(diameter + 60, 12, diameter + 60)
+		perch.Position = base2D + Vector3.new(0, height + 6, 0)
 		perch.Material = Enum.Material.Slate
 		perch.Color = Color3.fromRGB(85, 82, 80)
 		perch.Parent = map
@@ -267,7 +282,7 @@ local function CreateThermals()
 	ThermalList = {}
 	local cfg = GameConfig.Thermals
 	local count = cfg.count or 6
-	local ring = 900 -- spread thermals around the arena
+	local ring = 3200 -- v3: spread thermals around the much bigger real-scale arena
 	for i = 1, count do
 		local angle = (i / count) * math.pi * 2
 		local pos = Vector3.new(math.cos(angle) * ring, 0, math.sin(angle) * ring)
@@ -446,7 +461,7 @@ end
 local function spawnEagle(player)
 	local rec = PlayerData[player]
 	if not rec then return end
-	local spawnPos = Vector3.new(math.random(-300, 300), SPAWN_HEIGHT, math.random(-300, 300))
+	local spawnPos = Vector3.new(math.random(-1200, 1200), SPAWN_HEIGHT, math.random(-1200, 1200))
 	local entry = spawnBird(player, "Eagles", "Eagle", spawnPos, false)
 	if entry then
 		rec.birds = { entry.model }
@@ -458,7 +473,7 @@ local function spawnCrowSquad(player)
 	local rec = PlayerData[player]
 	if not rec then return end
 
-	local center = Vector3.new(math.random(-300, 300), SPAWN_HEIGHT, math.random(-300, 300))
+	local center = Vector3.new(math.random(-1200, 1200), SPAWN_HEIGHT, math.random(-1200, 1200))
 	local squad = {
 		player = player,
 		formationName = GameConfig.Squad.defaultFormation or "loose",

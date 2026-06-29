@@ -89,6 +89,21 @@ The feel is good; now scale the **world** up to real raptor proportions. Three e
 
 ---
 
+## Status (2026-06-28) — session 8: REAL-SCALE recalibration (code-complete, build-green, UNPLAYTESTED)
+
+Executed the session-7 north-star. Fresh deep-research (archived in `docs/RESEARCH.md` §v3) confirmed the crux **by measurement**: 1 stud = 0.28 m is Roblox-canonical, so real gravity = `9.81/0.28 ≈ 35` studs/s² and the default `196.2` is **5.6× too strong** — and the v2 *speed* envelope is already biologically real at 0.28 m/stud (golden-eagle stoop 240–320 km/h = 240–320 studs/s = our `diveSpeedCap`; soaring altitude 1350–2000 m = 4800–7150 studs). So only **gravity** and **world size** were wrong.
+
+**The recalibration theorem (why it was safe):** drop `GRAVITY` and `AIR_DENSITY` by the *same* factor and the flight envelope is invariant — in `v_stall = √(g·WL/(clMax·ρ))` the factor cancels. **Verified numerically: Eagle stall = 61.0, Crow stall = 45.2 at GRAVITY_G ∈ {1,2,3} — identical**, so `stall < spawn(117/85) < cruise(130/95)` is structurally guaranteed at any gravity. Only accelerations get gentler (real-g dive feel) and turns/dives get proportionately bigger (→ bigger world). The player-approved v2 feel *character* is preserved.
+
+**What landed:**
+1. **One knob.** `GameConfig` now derives gravity from `METERS_PER_STUD = 0.28` and **`GRAVITY_G`** (fraction of real g — THE sweep knob), and multiplies every gravity-coupled force by `GRAV_SCALE = GRAVITY/196.2`: `AIR_DENSITY`, per-profile `flapThrust` & `flapClimbForce` (still "above gravity" → climb preserved), `Thermals.strength`. **Default `GRAVITY_G = 2.0`** (gravity ≈70, 2.8× gentler than old) — a deliberate arcade-real *first-playtest* value; **sweep toward 1.0 for true real / most majestic.** Scale-free values (all speeds, control-authority speeds, every rad/s rate, `TERMINAL`, `CRASH_SPEED`) untouched.
+2. **2 km sky.** `SERVICE_CEILING = meters(2000) ≈ 7143` (was 520), `CEILING_BAND ≈ 607`, `Thermals.maxHeight ≈ 6429`, `SPAWN_HEIGHT = 2000` (≈560 m AGL — lots of dive room + ~5000 climb headroom), `GROUND_FAILSAFE_Y = -200`.
+3. **Bigger arena.** `BuildMap`: 16 000×16 000 floor; 7 spires spread across ±900–3400 radius, heights 600–2000, thinner (Ø90) — landmarks to soar around, not a crash-forest. Thermal ring 3200, spawn scatter ±1200, `FogEnd = 16000`. `Workspace.Gravity` now set to match the flight model. World-bounds left soft (huge floor + fog) — hard walls deferred (they'd re-add crash-frustration).
+
+**MUST validate in Studio with Chad (this is the sweep):** fly the eagle and judge majesty-vs-snappy → tune the single `GRAVITY_G` local. Confirm (a) the good grip/climb/momentum feel is intact (it should be — character preserved); (b) the dive now *builds* over a long stoop instead of snapping to cap; (c) it's no longer "so easy to crash" (open sky); (d) the eagle can still climb/thermal to a useful altitude without it feeling tedious (if tedious → raise `Thermals.strength` above the scaled value); (e) AI crows hold altitude & don't suicide on the (now sparse) spires; (f) anti-cheat doesn't false-positive (speeds unchanged, so it shouldn't). **Flight==balance:** a 2 km sky + wider real-scale turns reshapes the 1-v-4 (more boom-and-zoom room for the eagle; harder for crows to corner it) — reason about it while sweeping. **Checkpoint:** working tree was clean at `f58c465` before these edits (revert `GameConfig.luau` + `GameServer.server.luau` + `docs/RESEARCH.md` to roll back). Not yet committed — playtest, then commit.
+
+---
+
 ## Status (2026-06-23) — original v1 skeleton notes
 
 A complete v1 skeleton exists as real, version-controlled Luau source under `src/`, wired for [Rojo](https://rojo.space) via `default.project.json`. **It has NOT been run in Roblox Studio yet** — there is no Luau toolchain in this environment, so nothing has been syntax-checked or playtested. Treat "it runs cleanly" as unverified until you open it in Studio.
