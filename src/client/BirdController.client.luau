@@ -133,8 +133,8 @@ local keyBindings = {
 	[Enum.KeyCode.S] = { axis = "pitch", value = 1 },  -- nose UP  (climb)
 	[Enum.KeyCode.A] = { axis = "roll",  value = 1 },  -- bank left
 	[Enum.KeyCode.D] = { axis = "roll",  value = -1 }, -- bank right
-	[Enum.KeyCode.Q] = { axis = "yaw",   value = -1 },
-	[Enum.KeyCode.E] = { axis = "yaw",   value = 1 },
+	[Enum.KeyCode.Q] = { axis = "yaw",   value = 1 },  -- yaw left  (reversed per playtest)
+	[Enum.KeyCode.E] = { axis = "yaw",   value = -1 }, -- yaw right
 }
 
 local function setFreeLook(active)
@@ -362,6 +362,10 @@ local function pushUI()
 	if type(_G.UpdateStaminaUI) == "function" then
 		local maxStamina = (currentProfile and currentProfile.maxStamina) or 100
 		pcall(_G.UpdateStaminaUI, flightEngine.stamina / math.max(1, maxStamina))
+	end
+	if type(_G.SetAoA) == "function" then
+		local stallDeg = (currentProfile and currentProfile.stallAngleDeg) or 24
+		pcall(_G.SetAoA, flightEngine.aoaDeg, stallDeg)
 	end
 end
 

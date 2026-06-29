@@ -209,8 +209,8 @@ staminaFillCorner.Parent = staminaBarFill
 --------------------------------------------------------------------------------
 local flightDataFrame = Instance.new("Frame")
 flightDataFrame.Name = "FlightDataFrame"
-flightDataFrame.Size = UDim2.new(0, 150, 0, 65)
-flightDataFrame.Position = UDim2.new(0, 15, 1, -160)
+flightDataFrame.Size = UDim2.new(0, 150, 0, 96)
+flightDataFrame.Position = UDim2.new(0, 15, 1, -191)
 flightDataFrame.BackgroundColor3 = UI.hudColor
 flightDataFrame.BackgroundTransparency = UI.hudTransparency
 flightDataFrame.BorderSizePixel = 0
@@ -222,7 +222,7 @@ dataCorner.Parent = flightDataFrame
 
 local speedLabel = Instance.new("TextLabel")
 speedLabel.Name = "SpeedLabel"
-speedLabel.Size = UDim2.new(1, -16, 0.5, -4)
+speedLabel.Size = UDim2.new(1, -16, 0, 28)
 speedLabel.Position = UDim2.new(0, 8, 0, 4)
 speedLabel.BackgroundTransparency = 1
 speedLabel.Text = "SPD: 0"
@@ -234,8 +234,8 @@ speedLabel.Parent = flightDataFrame
 
 local altLabel = Instance.new("TextLabel")
 altLabel.Name = "AltLabel"
-altLabel.Size = UDim2.new(1, -16, 0.5, -4)
-altLabel.Position = UDim2.new(0, 8, 0.5, 0)
+altLabel.Size = UDim2.new(1, -16, 0, 28)
+altLabel.Position = UDim2.new(0, 8, 0, 34)
 altLabel.BackgroundTransparency = 1
 altLabel.Text = "ALT: 0"
 altLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -243,6 +243,20 @@ altLabel.TextXAlignment = Enum.TextXAlignment.Left
 altLabel.Font = UI.fontMedium
 altLabel.TextScaled = true
 altLabel.Parent = flightDataFrame
+
+-- AoA (angle of attack) readout — unobtrusive; pushed from BirdController via _G.SetAoA.
+-- Green near 0°, ambers toward the stall angle, red past it (the visual stall margin).
+local aoaLabel = Instance.new("TextLabel")
+aoaLabel.Name = "AoaLabel"
+aoaLabel.Size = UDim2.new(1, -16, 0, 28)
+aoaLabel.Position = UDim2.new(0, 8, 0, 64)
+aoaLabel.BackgroundTransparency = 1
+aoaLabel.Text = "AoA: 0\194\176"
+aoaLabel.TextColor3 = Color3.fromRGB(120, 230, 140)
+aoaLabel.TextXAlignment = Enum.TextXAlignment.Left
+aoaLabel.Font = UI.fontMedium
+aoaLabel.TextScaled = true
+aoaLabel.Parent = flightDataFrame
 
 --------------------------------------------------------------------------------
 -- STALL WARNING (hidden by default; blinks while active)
@@ -276,6 +290,23 @@ crosshair.Parent = screenGui
 local chCorner = Instance.new("UICorner")
 chCorner.CornerRadius = UDim.new(1, 0)
 chCorner.Parent = crosshair
+
+--------------------------------------------------------------------------------
+-- CONTROL HINT (bottom center) — tells the player about free-look + camera pan.
+--------------------------------------------------------------------------------
+local controlHint = Instance.new("TextLabel")
+controlHint.Name = "ControlHint"
+controlHint.Size = UDim2.new(0, 460, 0, 22)
+controlHint.Position = UDim2.new(0.5, -230, 1, -34)
+controlHint.BackgroundTransparency = 1
+controlHint.Text = "Hold SPACE to free-look  \194\183  move the MOUSE to pan the camera"
+controlHint.TextColor3 = Color3.fromRGB(235, 240, 245)
+controlHint.TextStrokeTransparency = 0.5
+controlHint.TextTransparency = 0.15
+controlHint.Font = UI.fontMedium
+controlHint.TextScaled = true
+controlHint.ZIndex = 4
+controlHint.Parent = screenGui
 
 --------------------------------------------------------------------------------
 -- NOTIFICATION DISPLAY (Top Right)
@@ -414,6 +445,22 @@ end)
 function _G.UpdateStaminaUI(ratio)
 	ratio = tonumber(ratio) or 0
 	staminaBarFill.Size = UDim2.new(math.clamp(ratio, 0, 1), 0, 1, 0)
+end
+
+-- Set the angle-of-attack readout (degrees). Color shifts green -> amber -> red as AoA
+-- approaches and exceeds the stall angle, giving an at-a-glance stall margin.
+function _G.SetAoA(deg, stallDeg)
+	deg = tonumber(deg) or 0
+	stallDeg = tonumber(stallDeg) or 24
+	aoaLabel.Text = string.format("AoA: %d\194\176", math.floor(deg + 0.5))
+	local mag = math.abs(deg)
+	if mag >= stallDeg then
+		aoaLabel.TextColor3 = Color3.fromRGB(255, 80, 70)        -- past stall
+	elseif mag >= stallDeg * 0.75 then
+		aoaLabel.TextColor3 = Color3.fromRGB(255, 200, 80)       -- nearing stall
+	else
+		aoaLabel.TextColor3 = Color3.fromRGB(120, 230, 140)      -- safe
+	end
 end
 
 -- Toggle the blinking stall warning.

@@ -80,12 +80,14 @@ GameConfig.Flight = {
 	-- `stabilityRate` multiplies this; `recoverNoseDownRate` adds extra pull past the stall.
 	-- (Replaces v1's PATH_TRACK_RATE, which rotated VELOCITY toward the nose and thus drove
 	-- AoA->0->no-lift — the root cause of the old constant-stall spiral.)
-	-- Auto-leveling weathervane, now a WHISPER (was 1.5 -> 0.7 -> 0.15). The player asked to
-	-- "eliminate auto-leveling"; the grip assist below (velocity follows the nose) is what now
-	-- keeps AoA low / prevents stall, so the nose no longer needs to be dragged back to the
-	-- airflow. A tiny residual keeps the craft from drifting weirdly at very low speed; the
-	-- past-stall recoverNoseDownRate term still fires for stall safety. PLAYTEST-PROVISIONAL.
-	STABILITY_RATE = 0.15,
+	-- Auto-leveling weathervane: ELIMINATED (1.5 -> 0.7 -> 0.15 -> 0). Chad: "get rid of any
+	-- auto-levelling... have the AoA not change unless input is given by the user." The grip
+	-- assist below (velocity follows the nose) is what now keeps AoA low / prevents stall, so the
+	-- nose is NEVER dragged back toward the airflow on its own — it stays exactly where the player
+	-- points it. The per-profile recoverNoseDownRate (past-stall auto-recovery) is also zeroed so
+	-- nothing rotates the nose without input. PLAYTEST-PROVISIONAL (re-add a whisper if low-speed
+	-- handling needs a safety net).
+	STABILITY_RATE = 0,
 	-- GRIP / ALIGNMENT ASSIST (rad/s base, airspeed-scaled). Research §v2: great arcade-sim
 	-- flight = "force-based core + a grip/alignment assist". This rotates VELOCITY toward the
 	-- nose in EVERY attitude so the bird flies where it points — point up, you climb (with lift),
@@ -165,8 +167,8 @@ GameConfig.Profiles = {
 		parasiticDrag = 0.020,  -- low parasitic drag -> great glide/dive
 		inducedDragK = 0.85,    -- induced-drag coefficient (cost of lift: drag ~ k*CL^2)
 		stallAngleDeg = 24,     -- critical AoA before lift rolls off (widened session 7: stalled too easily climbing)
-		stabilityRate = 1.0,    -- weathervane strength (stable boom-and-zoom platform)
-		recoverNoseDownRate = 1.5, -- extra nose-down toward airflow past the stall (auto-recovery)
+		stabilityRate = 1.0,    -- weathervane strength multiplier (moot while STABILITY_RATE = 0)
+		recoverNoseDownRate = 0, -- past-stall auto-recovery DISABLED (no auto-level; nose stays where pointed)
 
 		-- THRUST / SPEED -----------------------------------------------------
 		-- flapThrust must overcome cruise drag so the eagle can hold level flight instead of
@@ -175,7 +177,7 @@ GameConfig.Profiles = {
 		-- gain at cruise. It still trades altitude for top speed (energy fighter) — the dive,
 		-- not the flap, is its speed source. PLAYTEST-PROVISIONAL.
 		flapThrust = 520 * GRAV_SCALE,       -- forward force from a flap (v3: ×GRAV_SCALE holds T/W & T/D vs the lighter weight)
-		flapClimbForce = 300 * GRAV_SCALE,   -- session 7: upward climb accel while flapping with the nose up. Base 300 was
+		flapClimbForce = 400 * GRAV_SCALE,   -- raised 300->400 (Chad: "allow for better climb"). Base was
 		                        -- ABOVE gravity (196); ×GRAV_SCALE keeps it above the new (lower) gravity by the same
 		                        -- ratio, so a flapping eagle keeps climbing even after a
 		                        -- steep climb has bled its airspeed (lift ~0) — a real eagle muscles up
@@ -194,10 +196,13 @@ GameConfig.Profiles = {
 		rollInertia = 0.55,     -- 0..1 sluggishness; higher = heavier-feeling controls
 
 		-- ENERGY / STAMINA (flapping & hard manoeuvres cost stamina) ---------
-		maxStamina = 100,
-		staminaFlapCost = 9,    -- per second of flapping
+		-- Chad: "longer stamina." Budget widened: 140 cap / 6 flap cost ≈ 23s of sustained
+		-- flapping (was 100/9 ≈ 11s) and faster regen (9), so a climb ends from the ceiling
+		-- or a deliberate glide, not premature fatigue. Suits the eagle's endurance identity.
+		maxStamina = 140,
+		staminaFlapCost = 6,    -- per second of flapping
 		staminaDiveCost = 4,    -- per second of powered dive
-		staminaRegen = 7,       -- per second when gliding
+		staminaRegen = 9,       -- per second when gliding
 		climbCeilingBonus = 1.0,-- relative climb ceiling (eagle climbs higher)
 
 		-- COMBAT / ENDURANCE -------------------------------------------------
@@ -233,8 +238,8 @@ GameConfig.Profiles = {
 		parasiticDrag = 0.045,  -- higher drag -> bleeds energy faster, worse glide/dive
 		inducedDragK = 0.55,    -- cheaper to turn (pays less induced drag per unit lift)
 		stallAngleDeg = 24,     -- stalls later -> can point nose harder without dropping
-		stabilityRate = 0.7,    -- LESS weathervaning: holds AoA to point the nose (agile/twitchy)
-		recoverNoseDownRate = 1.2, -- auto-recovery past the stall
+		stabilityRate = 0.7,    -- weathervane multiplier (moot while STABILITY_RATE = 0)
+		recoverNoseDownRate = 0, -- past-stall auto-recovery DISABLED (no auto-level)
 
 		-- THRUST / SPEED -----------------------------------------------------
 		flapThrust = 150 * GRAV_SCALE,

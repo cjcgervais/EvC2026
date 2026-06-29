@@ -59,10 +59,13 @@ local COLLISION_COOLDOWN     = 0.4    -- s; per-pair debounce so one ram is one 
 local ATTACK_COOLDOWN        = 0.6    -- s; per-attacker melee debounce
 
 local AI_HEARTBEAT_DT_CAP    = 1 / 30 -- clamp dt fed to the AI flight engine
--- v3 REAL-SCALE: spawn ~560 m AGL (≈2000 studs) in the much taller sky — lots of dive room below
--- and ~5000 studs of climb headroom up to the 7143-stud ceiling. (Was 250 in the cramped 520-ceiling
--- world.) Solves "too easy to crash": the ground is now far away.
-local SPAWN_HEIGHT           = 2000   -- default spawn altitude (studs)
+-- Spawn LOW (≈600 studs ≈ 170 m AGL) so the ground and the spires are right there as spatial
+-- reference and reachable obstacles — Chad at 2000 reported "no floor to the map and nothing to
+-- collide with" (the floor was a distant speck 2000 studs down and the spires were far below).
+-- The energy game is to CLIMB from here into the tall sky (~6500 studs of headroom to the 7143
+-- ceiling) and stoop back down — spawning mid-void skipped that. The 16k world is still wide-open
+-- so this does NOT reintroduce "too easy to crash" (that was the old cramped 520-ceiling map).
+local SPAWN_HEIGHT           = 600    -- default spawn altitude (studs)
 -- Real obstacle/ground collision now goes through BirdCollision (swept Spherecast) — see
 -- processCrashes / updateAICrows. This Y is only a DEEP FAILSAFE: anything that somehow
 -- tunnels far below the world (baseplate top sits at Y=0) is killed unconditionally so it
