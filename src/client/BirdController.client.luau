@@ -8,17 +8,23 @@
 	of. There is NO Roblox Character; the bird is found in Workspace.Birds by attribute.
 
 	Control scheme (see GameConfig + project brief):
-	  W / S        -> PITCH  (W nose-down to dive/accelerate, S nose-up to climb)
-	  A / D        -> ROLL   (banking; turns are made by banking)
-	  Q / E        -> YAW    (head-led)
-	  Left Shift   -> FLAP   (hold, thrust)
-	  Left Ctrl    -> DIVE   (hold, dive intent)
-	  Mouse (move) -> STEER the nose: cursor offset from screen center = analog pitch/roll,
-	                  SUMMED with W/S/A/D. Suspended while free-look (Space) is held.
-	                  Tunables in GameConfig.Controls.
-	  Spacebar     -> FREE-LOOK camera (hold): orbit the camera freely around the
-	                  bird while the bird HOLDS its current flight input.
-	  Mouse1       -> attack (AttackRequest)
+	  Mouse (move) -> WAR THUNDER MOUSE-AIM: a freely moveable CURSOR (desired direction of flight)
+	                  and a NOSE CROSS projected out front of the bird (its boresight). The eagle steers
+	                  so the nose cross ALWAYS APPROACHES the cursor; centre the cursor on it = fly
+	                  straight. Hold the cursor at the screen EDGE = a sustained full turn / LOOP (the
+	                  gap is unreachable -> the command stays saturated). Suspended while free-look
+	                  (Space) is held. Tunables in GameConfig.Controls (aim*).
+	  W / S        -> PITCH  (W nose-down to dive/accelerate, S nose-up to climb) — SMOOTHED tap->ramp
+	  A / D        -> ROLL   (banking) — SMOOTHED tap->ramp; ADDS to the mouse-aim to tighten a turn
+	  Q / E        -> YAW    (head-led) — smoothed. Keyboard is additive and dominates at full deflection.
+	  Left Shift   -> FLAP THROTTLE up   (sticky: ramps UP-thrust/climb; holds where set)
+	  Left Ctrl    -> FLAP THROTTLE down (sticky: ramps DOWN-thrust/descent; centre = glide)
+	  Spacebar     -> FREE-LOOK camera (TOGGLE): tap to orbit the camera freely around the bird while
+	                  the bird HOLDS its current flight input (aim autopilot suspended); tap again to resume aim.
+	  Mouse Left   -> EXTEND TALONS (hold): eagle active defense/offense — catches a crow in the
+	                  front/underside cone (kill, no damage taken). Server-owned window+cooldown.
+	  Mouse Right  -> EXTEND BEAK (hold): narrow head-on cone, shorter window, longer cooldown.
+	                  (Crows have no weapons — their attack is the suicide ram.)
 	  1-4          -> SwapCrow(index)
 	  F            -> toggle formation tight/loose (SetFormation)
 	  R            -> manual respawn / reset (Respawn)
@@ -29,6 +35,7 @@
 --------------------------------------------------------------------------------
 local RunService        = game:GetService("RunService")
 local UserInputService  = game:GetService("UserInputService")
+local GuiService        = game:GetService("GuiService")
 local Players           = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -43,15 +50,54 @@ local BirdCollision = require(ReplicatedStorage:WaitForChild("BirdCollision"))
 local CAM = GameConfig.Camera
 
 --------------------------------------------------------------------------------
+-- MATH HELPERS (shared by the mouse-aim instructor + the no-snap chase camera)
+--------------------------------------------------------------------------------
+local EPS = 1e-4
+local function clamp(x, lo, hi)
+	if x < lo then return lo elseif x > hi then return hi else return x end
+end
+-- Deadzone + EXPO shaper (War Thunder "nonlinearity"): zero inside the deadzone, then a curve that
+-- is gentle near centre and ramps to FULL (±1) at the edge. expo 1 = linear, >1 = finer near centre.
+local function shapeAxis(x, dead, expo)
+	local a = math.abs(x)
+	if a <= dead then return 0 end
+	local n = (a - dead) / (1 - dead)         -- renormalise the live range to 0..1
+	return (n ^ expo) * (x < 0 and -1 or 1)
+end
+-- Slew unit vector `from` toward unit vector `to` by at most `maxRad` (shortest path). Used to
+-- rate-limit the chase direction so the camera can never snap through a loop. Mirrors FlightPhysics.
+local function rotateTowards(from, to, maxRad)
+	local d = clamp(from:Dot(to), -1, 1)
+	local angle = math.acos(d)
+	if angle < EPS then return to end
+	local t = clamp(maxRad / angle, 0, 1)
+	local result = from * (1 - t) + to * t
+	if result.Magnitude < EPS then return to end
+	return result.Unit
+end
+
+--------------------------------------------------------------------------------
 -- REMOTES (created by the server)
 --------------------------------------------------------------------------------
 local Remotes      = ReplicatedStorage:WaitForChild("Remotes")
 local TeamAssigned = Remotes:WaitForChild("TeamAssigned")
-local AttackRequest = Remotes:WaitForChild("AttackRequest")
+local AttackRequest = Remotes:WaitForChild("AttackRequest") -- legacy; superseded by WeaponHold
+local WeaponHold   = Remotes:WaitForChild("WeaponHold")
 local SwapCrow     = Remotes:WaitForChild("SwapCrow")
 local SetFormation = Remotes:WaitForChild("SetFormation")
 local Respawn      = Remotes:WaitForChild("Respawn")
 local GetThermals  = Remotes:WaitForChild("GetThermals")
+
+-- Eagle active-defense input: hold Left = talons, Right = beak. The server owns the extend/
+-- cooldown timers (WeaponHold carries only intent), and ignores holds from crows (no weapons).
+-- We mirror the held state locally so we only fire on a true edge (press/release), not per frame.
+local weaponHeld = { talon = false, beak = false }
+local function setWeaponHold(name, holding)
+	holding = holding and true or false
+	if weaponHeld[name] == holding then return end
+	weaponHeld[name] = holding
+	WeaponHold:FireServer(name, holding)
+end
 
 --------------------------------------------------------------------------------
 -- PLAYER / CAMERA HANDLES
@@ -116,6 +162,77 @@ local freeLook = {
 -- spawn already deflected (that caused the instant spiral crash). Read in computeMouseSteer.
 local steer = { x = 0, y = 0 }
 
+-- FLAP THROTTLE (sticky): -1 (full Ctrl down-thrust) .. 0 (glide) .. +1 (full Shift up-thrust). Ramped
+-- from the held keys each frame in onFlightStep and fed to FlightPhysics as input.flapThrottle so you can
+-- SET a climb power and fly hands-free on the mouse. resetInput() zeros it (between lives / focus loss).
+local flapThrottle = 0
+
+-- MOUSE-AIM reticle draw state: screen-space pixel positions for the two markers, written by
+-- computeMouseAim each frame and consumed by the render block in onFlightStep. cursorX/Y = the free
+-- mouse cursor (desired direction); noseX/Y = the projected nose cross (boresight), clamped to the
+-- screen. x/y are legacy normalized fields kept only so resetInput's recentre is a no-op-safe write.
+local aimCursor = { x = 0, y = 0, cursorX = 0, cursorY = 0, noseX = 0, noseY = 0 }
+
+-- The APPLIED mouse-aim input, eased toward the raw target each frame (Controls.aimResponse) so the
+-- bird follows the reticle softly/flightily rather than snapping. Summed with keyboard in onFlightStep.
+local aimApplied = { pitch = 0, roll = 0, yaw = 0 }
+
+-- Tap->ramp smoothing for roll and yaw (mirrors pitchRamp) so keyboard banking eases in.
+local rollRamp = { sign = 0, mag = 0 }
+local yawRamp  = { sign = 0, mag = 0 }
+
+-- On-screen aim reticle (a zone circle + a cursor dot). Control-owned (GameUI's HUD is separate).
+local playerGui = player:WaitForChild("PlayerGui")
+local aimGui = Instance.new("ScreenGui")
+aimGui.Name = "AimReticle"
+aimGui.ResetOnSpawn = false
+aimGui.IgnoreGuiInset = true
+aimGui.Enabled = false
+aimGui.Parent = playerGui
+local aimZone = Instance.new("Frame") -- faint FIXED screen-centre tick (dead-ahead reference)
+aimZone.Name = "Center"
+aimZone.AnchorPoint = Vector2.new(0.5, 0.5)
+aimZone.Position = UDim2.fromScale(0.5, 0.5)
+aimZone.Size = UDim2.fromOffset(6, 6)
+aimZone.BackgroundTransparency = 1
+aimZone.Parent = aimGui
+do
+	local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(1, 0); c.Parent = aimZone
+	local s = Instance.new("UIStroke"); s.Thickness = 1; s.Color = Color3.fromRGB(180, 210, 255); s.Transparency = 0.7; s.Parent = aimZone
+end
+-- NOSE CROSS (boresight): where the bird is actually pointed, projected out front. The mouse-aim
+-- steers so this marker chases the cursor dot below. Positioned each frame in onFlightStep from the
+-- screen projection of birdPos + birdLook * aimMarkerDistance. Amber = the bird; cyan = your cursor.
+local noseMarker = Instance.new("Frame")
+noseMarker.Name = "Nose"
+noseMarker.AnchorPoint = Vector2.new(0.5, 0.5)
+noseMarker.Size = UDim2.fromOffset(34, 34)
+noseMarker.BackgroundTransparency = 1
+noseMarker.Parent = aimGui
+do
+	local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(1, 0); c.Parent = noseMarker
+	local s = Instance.new("UIStroke"); s.Thickness = 2; s.Color = Color3.fromRGB(255, 200, 90); s.Transparency = 0.1; s.Parent = noseMarker
+	local pip = Instance.new("Frame") -- centre dot so the boresight reads even against busy terrain
+	pip.AnchorPoint = Vector2.new(0.5, 0.5)
+	pip.Position = UDim2.fromScale(0.5, 0.5)
+	pip.Size = UDim2.fromOffset(4, 4)
+	pip.BorderSizePixel = 0
+	pip.BackgroundColor3 = Color3.fromRGB(255, 200, 90)
+	pip.Parent = noseMarker
+	local pc = Instance.new("UICorner"); pc.CornerRadius = UDim.new(1, 0); pc.Parent = pip
+end
+-- Cursor = a hollow GREEN LINE RING (not a solid dot) marking your desired direction of flight.
+local aimDot = Instance.new("Frame")
+aimDot.Name = "Cursor"
+aimDot.AnchorPoint = Vector2.new(0.5, 0.5)
+aimDot.Size = UDim2.fromOffset(22, 22)
+aimDot.BackgroundTransparency = 1
+aimDot.Parent = aimGui
+do
+	local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(1, 0); c.Parent = aimDot
+	local s = Instance.new("UIStroke"); s.Thickness = 2.5; s.Color = Color3.fromRGB(70, 255, 120); s.Transparency = 0; s.Parent = aimDot
+end
+
 -- Formation toggle state (crows).
 local formationTight = false
 
@@ -169,13 +286,17 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 
 	-- Hold actions
 	if input.KeyCode == Enum.KeyCode.LeftShift then
-		inputState.flap = true
+		-- up-thrust via the sticky flap throttle (ramped from held Shift in onFlightStep)
 		return
 	elseif input.KeyCode == Enum.KeyCode.LeftControl then
-		inputState.dive = true
+		-- down-thrust via the sticky flap throttle (ramped from held Ctrl in onFlightStep)
 		return
 	elseif input.KeyCode == Enum.KeyCode.Space then
-		setFreeLook(true)
+		-- FREE-LOOK is a TOGGLE now (Chad: "change to toggle on/off by space, not press and hold").
+		-- Tap to look all around hands-free while the bird HOLDS its maneuver; tap again to snap the
+		-- aim back. The orbit resets each time it's toggled ON (in setFreeLook), so it always begins
+		-- from the chase pose. Survives crow-swaps via acquire() re-arming to freeLook.active.
+		setFreeLook(not freeLook.active)
 		return
 	elseif input.KeyCode == Enum.KeyCode.F then
 		formationTight = not formationTight
@@ -200,9 +321,12 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 		return
 	end
 
-	-- Attack
+	-- Eagle active defense: hold Left = talons, Right = beak (extend; the server gates the parry
+	-- and the cooldown). Crows have no weapons, so the server ignores these for a crow.
 	if input.UserInputType == Enum.UserInputType.MouseButton1 then
-		AttackRequest:FireServer()
+		setWeaponHold("talon", true)
+	elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
+		setWeaponHold("beak", true)
 	end
 end)
 
@@ -220,8 +344,15 @@ UserInputService.InputEnded:Connect(function(input)
 		inputState.flap = false
 	elseif input.KeyCode == Enum.KeyCode.LeftControl then
 		inputState.dive = false
-	elseif input.KeyCode == Enum.KeyCode.Space then
-		setFreeLook(false)
+	end
+	-- NOTE: Space no longer turns free-look off on key-release — it's a TOGGLE (handled in InputBegan).
+	-- Focus loss (WindowFocusReleased) still force-clears it so you never get stuck looking around.
+
+	-- Retract the eagle's active-defense weapons on mouse-up.
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		setWeaponHold("talon", false)
+	elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
+		setWeaponHold("beak", false)
 	end
 end)
 
@@ -241,14 +372,8 @@ UserInputService.InputChanged:Connect(function(input, gameProcessed)
 		local s = CAM.freeLookSensitivity * 0.01
 		freeLook.yaw   = freeLook.yaw   - input.Delta.X * s
 		freeLook.pitch = math.clamp(freeLook.pitch - input.Delta.Y * s, -FREE_LOOK_PITCH_LIMIT, FREE_LOOK_PITCH_LIMIT)
-	else
-		local C = GameConfig.Controls
-		if C and C.mouseSteer then
-			local s = (C.mouseSensitivity or 1) * 0.004
-			steer.x = math.clamp(steer.x + input.Delta.X * s, -1, 1)
-			steer.y = math.clamp(steer.y + input.Delta.Y * s, -1, 1)
-		end
 	end
+	-- (Mouse-aim reads the absolute cursor position in onFlightStep; nothing to accumulate here.)
 end)
 
 -- Arrow keys also orbit the free-look camera (alternative to the mouse).
@@ -313,42 +438,67 @@ local function updateCamera(dt)
 		+ (targetDistance - cameraState.currentDistance) * 0.1
 
 	local dist = cameraState.currentDistance
-	local backward = -cf.LookVector
-	local up       = cf.UpVector
 
-	-- Base chase offset: behind and above the bird. The height ratio grows from `heightFactor`
-	-- up close to `zoomTopDownHeight` at full zoom-out, so wheeling out gives a higher, more
-	-- top-down view. Fraction is measured from baseDistance so the un-zoomed view is unchanged.
+	-- CONTINUOUS, RATE-LIMITED CHASE DIRECTION (the no-snap / anti-sickness fix, RESEARCH §v4). The old
+	-- camera rebuilt its azimuth from the bird's HORIZONTAL heading, which REVERSES ~180° over the top of a
+	-- loop and SNAPPED the view (the nausea bug). Instead we keep ONE persistent full-3D unit vector
+	-- (bird->camera) and slew it toward "behind the bird's motion" at a CAPPED angular rate. It is never
+	-- rebuilt from a discontinuous reference, so a full 360° loop arcs smoothly — no azimuth snap, no
+	-- over/under pole flip. Roblox CFrame:Lerp (shortest-path quaternion slerp) finishes the smoothing.
+	local lookVec = cf.LookVector
+	local followDir = lookVec
+	if speed > 12 and velocity.Magnitude > 1 then
+		-- Blend the nose toward the VELOCITY vector (look-ahead): the camera reads the actual flight path.
+		local blended = lookVec:Lerp(velocity.Unit, CAM.lookAheadFactor or 0.3)
+		if blended.Magnitude > EPS then followDir = blended.Unit end
+	end
+	local desiredChase = -followDir
+	local prevChase = cameraState.chaseDir or desiredChase
+	cameraState.chaseDir = rotateTowards(prevChase, desiredChase, (CAM.chaseTurnRate or 3.6) * dt)
+	local chaseDir = cameraState.chaseDir
+
+	-- Camera-up = world-up made perpendicular to the chase direction: keeps the horizon level in normal
+	-- flight and tilts CONTINUOUSLY as the chase goes vertical (so CFrame.lookAt never degenerates). Near
+	-- the pole (chase ~ straight up/down) we hold the last good up so it can't pop.
+	local camUp = Vector3.yAxis - chaseDir * chaseDir.Y
+	if camUp.Magnitude < 0.15 then
+		camUp = cameraState.camUpPrev or Vector3.yAxis
+	else
+		camUp = camUp.Unit
+	end
+	cameraState.camUpPrev = camUp
+
+	-- Height ratio grows with zoom for a higher, more top-down view when wheeled out.
 	local hBase   = CAM.heightFactor or 0.25
 	local hTop    = CAM.zoomTopDownHeight or 1.10
 	local zoomFrac = math.clamp((dist - CAM.baseDistance) / math.max(1, maxDist - CAM.baseDistance), 0, 1)
 	local heightRatio = hBase + (hTop - hBase) * zoomFrac
-	local cameraOffset = (backward * dist) + (up * (dist * heightRatio))
 
-	-- Velocity trail: let the camera drift behind the direction of motion. The
-	-- original had a broken `local velDot = velDot = ...` self-reference — fixed.
-	if speed > 10 then
-		local velNorm = velocity.Unit
-		local velDot  = backward:Dot(velNorm)
-		cameraOffset = cameraOffset + (velNorm * velDot * speed * 0.05)
-	end
+	local cameraOffset = chaseDir * dist + camUp * (dist * heightRatio)
 
-	-- FREE-LOOK: orbit the offset around the bird (yaw about world up, pitch about
-	-- the bird's right axis) WITHOUT touching flight input.
+	-- FREE-LOOK: orbit the offset (and its up) around the bird in a WORLD-referenced frame (yaw about world
+	-- up, pitch about the world-horizontal right) so the view holds its ASPECT while the bird maneuvers — it
+	-- no longer revolves with the bird's roll. WITHOUT touching flight input. (Toggle: Space.)
 	if freeLook.active then
-		local orbit = CFrame.Angles(0, freeLook.yaw, 0)
-			* CFrame.fromAxisAngle(cf.RightVector, freeLook.pitch)
+		local yawCF = CFrame.fromAxisAngle(Vector3.yAxis, freeLook.yaw)
+		local pitchAxis = yawCF:VectorToWorldSpace(Vector3.xAxis) -- world-horizontal right, yaw-rotated
+		local orbit = CFrame.fromAxisAngle(pitchAxis, freeLook.pitch) * yawCF
 		cameraOffset = orbit:VectorToWorldSpace(cameraOffset)
+		camUp        = orbit:VectorToWorldSpace(camUp)
 	end
 
 	local camPos  = position + cameraOffset
-	local targetCF = CFrame.new(camPos, position)
+	-- Look slightly AHEAD of the bird along its flight path (the bird then sits a touch low in frame for a
+	-- forward-leaning, lead-the-target feel). camUp is the continuous up reference -> no inverted roll snap.
+	local lookTarget = position + followDir * (dist * 0.12)
+	local targetCF = CFrame.lookAt(camPos, lookTarget, camUp)
 
-	-- Bank tilt: roll the camera slightly with the bird (skip while free-looking).
+	-- Bank tilt: roll the camera slightly with the bird in a turn, but FADE it out as the bird inverts
+	-- (uprightFade) so the loop crest doesn't whip the camera over.
 	if not freeLook.active then
-		local rightVec  = cf.RightVector
-		local bankAngle = math.asin(math.clamp(rightVec.Y, -1, 1))
-		targetCF = targetCF * CFrame.Angles(0, 0, bankAngle * CAM.bankTiltFactor)
+		local bankAngle = math.asin(math.clamp(cf.RightVector.Y, -1, 1))
+		local uprightFade = math.clamp(cf.UpVector.Y, 0, 1)
+		targetCF = targetCF * CFrame.Angles(0, 0, bankAngle * CAM.bankTiltFactor * uprightFade)
 	end
 
 	-- Crest damping: measure how fast the bird's facing is rotating (rad/s); when it spikes — e.g.
@@ -408,6 +558,10 @@ local function pushUI()
 		local pitchDeg = math.deg(math.asin(math.clamp(look.Y, -1, 1)))
 		pcall(_G.SetIncidence, pitchDeg)
 	end
+	if type(_G.UpdateFlapUI) == "function" then
+		-- Sticky flap throttle readout: signed throttle (-1 down .. +1 up), wingbeat Hz, power-per-stroke.
+		pcall(_G.UpdateFlapUI, flightEngine.flapThrottle or 0, flightEngine.flapFreqHz or 0, flightEngine.flapPower or 0)
+	end
 end
 
 --------------------------------------------------------------------------------
@@ -426,24 +580,189 @@ local function getCollisionParams()
 end
 
 --------------------------------------------------------------------------------
--- MOUSE STEERING — the bird's nose chases the cursor: offset from screen center maps to
--- analog pitch/roll (deadzone + expo curve), returned in [-1,1] and SUMMED with the keyboard
--- each frame in onFlightStep. Suspended while free-look (Space) holds the mouse for the camera.
+-- WINGTIP STALL VORTICES — wispy vapor streaming off each wingtip that fades IN as the bird's AoA
+-- nears the stall angle (a visible loss-of-lift cue). Client cosmetic on the possessed bird only;
+-- driven each frame from flightEngine.aoaDeg vs the profile stall angle. Built once per acquired model.
 --------------------------------------------------------------------------------
-local function computeMouseSteer()
-	local C = GameConfig.Controls
-	if not (C and C.mouseSteer) or freeLook.active then return 0, 0 end
-	local expo = C.mouseExpo or 1
-	local function shape(v)
-		local mag = math.clamp(math.abs(v), 0, 1) ^ expo
-		return (v < 0 and -mag) or mag
+local vortexTrails = {}     -- array of Trail (one per wingtip)
+local lastVortexT  = -1     -- last applied transparency, to skip redundant NumberSequence churn
+local function buildVortexTrails(model)
+	vortexTrails = {}
+	lastVortexT = -1
+	if not model then return end
+	for _, side in ipairs({ "LeftWing", "RightWing" }) do
+		local wing = model:FindFirstChild(side)
+		if wing and wing:IsA("BasePart") then
+			local existing = wing:FindFirstChild("VortexTrail")
+			if existing then
+				table.insert(vortexTrails, existing)
+			else
+				local sx = (side == "RightWing") and 1 or -1
+				local a0 = Instance.new("Attachment"); a0.Name = "VortA0"
+				a0.Position = Vector3.new(sx * wing.Size.X * 0.5, 0, -wing.Size.Z * 0.3); a0.Parent = wing
+				local a1 = Instance.new("Attachment"); a1.Name = "VortA1"
+				a1.Position = Vector3.new(sx * wing.Size.X * 0.5, 0,  wing.Size.Z * 0.3); a1.Parent = wing
+				local tr = Instance.new("Trail")
+				tr.Name = "VortexTrail"
+				tr.Attachment0 = a0
+				tr.Attachment1 = a1
+				tr.Lifetime = 0.45
+				tr.MinLength = 0
+				tr.FaceCamera = true
+				tr.LightEmission = 0.4
+				tr.Color = ColorSequence.new(Color3.fromRGB(232, 240, 255))
+				tr.Transparency = NumberSequence.new(1) -- invisible until near stall (set per frame)
+				tr.WidthScale = NumberSequence.new({
+					NumberSequenceKeypoint.new(0, 1),
+					NumberSequenceKeypoint.new(1, 0),
+				})
+				tr.Parent = wing
+				table.insert(vortexTrails, tr)
+			end
+		end
 	end
-	-- stick RIGHT (steer.x>0) banks RIGHT (roll -1 by the keyBindings convention); stick UP
-	-- (mouse moved up -> steer.y<0) pitches the nose UP (pitch +1) unless invertPitch.
-	local roll  = -shape(steer.x)
-	local pitch = -shape(steer.y)
+end
+
+local function updateVortexTrails()
+	if not (flightEngine and currentProfile) or #vortexTrails == 0 then return end
+	local stallAngle = currentProfile.stallAngleDeg or 24
+	local band = 8 -- degrees before stall over which the vapor fades in
+	local f = math.clamp((math.abs(flightEngine.aoaDeg or 0) - (stallAngle - band)) / band, 0, 1)
+	local t = 1 - 0.7 * f -- 1 (invisible) .. 0.3 (wispy but clearly visible) at/over the stall
+	if math.abs(t - lastVortexT) < 0.02 then return end
+	lastVortexT = t
+	local seq = NumberSequence.new(t)
+	for _, tr in ipairs(vortexTrails) do
+		tr.Transparency = seq
+	end
+end
+
+--------------------------------------------------------------------------------
+-- INPUT HELPERS — keyboard tap->ramp smoothing + the mouse-aim autopilot.
+--------------------------------------------------------------------------------
+-- Ease an axis from a tap fraction up to full deflection while a key is held (mirrors the pitch
+-- ramp). `state` = {sign, mag}; `target` = -1/0/+1. A tap gives `tapFrac`; holding ramps to 1 over
+-- `rampTime`; releasing snaps to 0 (the nose/bank then holds — there is no auto-level).
+local function rampAxis(state, target, tapFrac, rampTime, dt)
+	if target ~= 0 then
+		if state.sign ~= target then
+			state.sign = target
+			state.mag = tapFrac
+		else
+			state.mag = math.min(1, state.mag + ((1 - tapFrac) / math.max(0.01, rampTime)) * dt)
+		end
+	else
+		state.sign, state.mag = 0, 0
+	end
+	return state.sign * state.mag
+end
+
+-- MOUSE-AIM (War Thunder instructor model) — COORDINATED-FLIGHT autopilot. Two markers: the CURSOR
+-- (your desired direction of flight) and the NOSE CROSS (boresight, projected out front). We resolve the
+-- cursor's world direction into the bird's BODY frame and fly a REAL coordinated turn toward it: the
+-- ELEVATOR pulls the nose toward the target (uncapped -> a held edge cursor loops), the BANK rolls the
+-- lift vector onto the target so the side error nulls AS IT BANKS (this is what kills the perpetual-bank
+-- corkscrew), and a little RUDDER coordinates. The nose-up pull eases off near stall so the bird climbs to
+-- the stall edge and HOLDS there instead of yanking past it into a stalling dive. Returns 0,0,0 while
+-- free-look (Space) suspends it. Writes aimCursor.* (marker screen positions) for the reticle render.
+local function computeMouseAim()
+	local C = GameConfig.Controls
+	if not (C and C.mouseAim) or freeLook.active then
+		return 0, 0, 0
+	end
+	if not (rootPart and rootPart.Parent and camera and flightEngine) then return 0, 0, 0 end
+	local vp = camera.ViewportSize
+	if not vp or vp.Y < 2 then return 0, 0, 0 end
+
+	-- Project the NOSE CROSS: a point out front of the bird ("where the eagle is flying").
+	local cf = rootPart.CFrame
+	local birdLook = cf.LookVector
+	local nosePoint = cf.Position + birdLook * (C.aimMarkerDistance or 600)
+	local noseVP = camera:WorldToViewportPoint(nosePoint)
+	local inFront = noseVP.Z > 0
+
+	local inset = GuiService:GetGuiInset()
+	local mouse = UserInputService:GetMouseLocation()
+
+	-- Resolve the cursor into a desired BODY-frame direction. Comparing the camera ray through the cursor
+	-- with the camera ray through the CROSS makes "cursor on the cross" == zero error (no neutral bias from
+	-- the chase camera's offset). Rotate the bird's actual nose by that same cross->cursor rotation.
+	local localTarget
+	if inFront then
+		local aimDir  = camera:ViewportPointToRay(mouse.X - inset.X, mouse.Y - inset.Y).Direction
+		local noseDir = camera:ViewportPointToRay(noseVP.X, noseVP.Y).Direction
+		local d = math.clamp(noseDir:Dot(aimDir), -1, 1)
+		local targetLook = birdLook
+		if d < 0.99999 then
+			local axis = noseDir:Cross(aimDir)
+			if axis.Magnitude > 1e-5 then
+				targetLook = CFrame.fromAxisAngle(axis.Unit, math.acos(d)):VectorToWorldSpace(birdLook)
+			end
+		end
+		localTarget = cf:VectorToObjectSpace(targetLook)
+	else
+		-- Cross behind the camera (over the top of a loop): the projection flips, so synthesise a target
+		-- from the cursor's vertical offset so the bird KEEPS pulling through instead of snapping/reversing.
+		local upAmt = ((vp.Y * 0.5 + inset.Y) - mouse.Y) / (vp.Y * 0.5) -- + = cursor above centre
+		localTarget = Vector3.new(0, math.clamp(upAmt, -1, 1), -1).Unit
+	end
+
+	-- Body-frame target (x = right, y = up; forward = -z). HORIZONTAL drives bank+yaw, VERTICAL drives pitch.
+	local rgt = localTarget.X
+	local upc = localTarget.Y
+
+	-- SYMMETRIC shaping (deadzone + EXPO) on BOTH axes — WT "nonlinearity" (RESEARCH §v4). Gentle near
+	-- centre for fine aim, ramping to FULL authority at the edge, so PITCH keeps full pull for a clean
+	-- vertical loop AND a slight sideways cursor no longer snaps into a hard bank. Consistent feel both axes.
+	local hCmd = shapeAxis(rgt, C.aimBankDeadzone or 0.10, C.aimBankExpo or 1.8)
+	local vCmd = shapeAxis(upc, C.aimPitchDeadzone or 0.05, C.aimPitchExpo or 1.8)
+
+	-- LOOP COMMIT vs stall protection. Ride the edge: the nose-up pull keeps FULL authority until |AoA|
+	-- comes within aimStallBandDeg of stall, then eases — so a started loop finishes instead of mushing
+	-- out early. SUSPENDED entirely while powered (flap throttle up), because the beating wings hold lift
+	-- past stall then (FlightPhysics FLAP_LIFT_FLOOR) — a powered loop ALWAYS commits.
+	local stallAngle = (currentProfile and currentProfile.stallAngleDeg) or 24
+	local band = C.aimStallBandDeg or 4
+	local powered = (flapThrottle or 0) > 0.05
+	local aoaHead = powered and 1
+		or math.clamp((stallAngle - math.abs(flightEngine.aoaDeg or 0)) / math.max(1, band), 0, 1)
+
+	-- ELEVATOR (PD): P pulls the nose toward the target; D (aimPitchDamp · current pitch-rate) damps the
+	-- climb/pull porpoise. The damp normalises the body rate by the profile pitchRate so it's ~[-1,1].
+	-- Full deflection still saturates to 1 (loop authority intact); the damp only bites near equilibrium.
+	local pitchRate = (currentProfile and currentProfile.pitchRate) or 2.0
+	local pitchRate01 = clamp((flightEngine.pitchVel or 0) / math.max(0.1, pitchRate), -1, 1)
+	local pitch = vCmd * (C.aimPitchGain or 2.6) - (C.aimPitchDamp or 0.35) * pitchRate01
+	if pitch > 0 then pitch = pitch * aoaHead end  -- ride-the-edge protection on the nose-UP pull only
+	pitch = clamp(pitch, -1, 1)
+
+	-- BANK + RUDDER fire TOGETHER toward the target (coordinated flight), now PD-damped. When there's no
+	-- bank demand (hCmd ~ 0) a wings-LEVELLING term rolls the wings level, so a top-centre cursor flies
+	-- STRAIGHT UP instead of getting stuck in a bank. Signs (keyBindings): bank/yaw RIGHT = negative
+	-- roll/yaw input; a right bank (curBank > 0) is levelled with +roll. The roll-rate damp (aimRollDamp ·
+	-- current roll-rate) kills the bank oscillation that made a sustained coordinated turn wobble.
+	local curBank = math.asin(clamp(-cf.RightVector.Y, -1, 1)) -- + = banked right (right wing down)
+	-- ...only when upright (UpVector.Y>0) so it never fights the inverted top of a loop.
+	local levelAssist = curBank * (C.aimLevelGain or 0.9)
+		* (1 - math.min(1, math.abs(hCmd))) * math.max(0, cf.UpVector.Y)
+	local rollRate = (currentProfile and currentProfile.rollRate) or 3.2
+	local rollRate01 = clamp((flightEngine.rollVel or 0) / math.max(0.1, rollRate), -1, 1)
+	local roll = clamp(-hCmd * (C.aimRollGain or 2.0) + levelAssist - (C.aimRollDamp or 0.30) * rollRate01, -1, 1)
+	local yaw  = clamp(-hCmd * (C.aimYawGain or 0.6), -1, 1)
 	if C.invertPitch then pitch = -pitch end
-	return pitch, roll
+
+	-- Marker screen positions for the render block (cross clamped on-screen).
+	local margin = 24
+	aimCursor.cursorX, aimCursor.cursorY = mouse.X, mouse.Y
+	if inFront then
+		aimCursor.noseX = math.clamp(noseVP.X + inset.X, margin, vp.X + inset.X - margin)
+		aimCursor.noseY = math.clamp(noseVP.Y + inset.Y, margin, vp.Y + inset.Y - margin)
+	else
+		aimCursor.noseX = vp.X * 0.5 + inset.X
+		aimCursor.noseY = vp.Y * 0.5 + inset.Y
+	end
+
+	return pitch, roll, yaw
 end
 
 --------------------------------------------------------------------------------
@@ -458,44 +777,59 @@ local function onFlightStep(dt)
 	flightEngine:SetThermalForce(computeThermalForce(rootPart.Position))
 	flightEngine:SetWind(GameConfig.Flight.WIND_BASE)
 
-	-- 1b. Mouse-steer: keep the mouse captured (LockCenter) so movement reads as stick deltas
-	-- and the cursor never leaves the window, then spring the stick back toward center.
+	-- 1b. Mouse mode. Free-look LOCKS the mouse to orbit the camera; otherwise mouse-AIM uses the
+	-- absolute cursor (Default behavior). The OS icon is hidden either way (our reticle replaces it).
 	local C = GameConfig.Controls
-	if C and C.mouseSteer then
+	local aimOn = C and C.mouseAim and not freeLook.active
+	if freeLook.active then
 		if UserInputService.MouseBehavior ~= Enum.MouseBehavior.LockCenter then
 			UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
 		end
-		-- Spring the stick back to center, SPLIT by axis: roll self-levels (anti-spiral) while
-		-- pitch barely returns so a held climb/dive persists without continuous mouse feed.
-		local kr = math.clamp((C.mouseReturnRoll  or 0) * dt, 0, 1)
-		local kp = math.clamp((C.mouseReturnPitch or 0) * dt, 0, 1)
-		steer.x = steer.x - steer.x * kr
-		steer.y = steer.y - steer.y * kp
-	end
-
-	-- 1c. Time-scaled pitch: a tap nudges AoA a little; holding ramps to full authority. On the
-	-- first frame a pitch key is pressed (or the direction flips) we jump to the tap fraction, then
-	-- ramp toward 1 while held; releasing snaps back to 0 (the nose then stays where it's aimed).
-	if kb.pitch ~= 0 then
-		if pitchRamp.sign ~= kb.pitch then
-			pitchRamp.sign = kb.pitch
-			pitchRamp.mag  = C and C.pitchTapFraction or 0.30
-		else
-			local rampTime = (C and C.pitchRampTime) or 0.55
-			local tap      = (C and C.pitchTapFraction) or 0.30
-			pitchRamp.mag  = math.min(1, pitchRamp.mag + ((1 - tap) / math.max(0.01, rampTime)) * dt)
+		UserInputService.MouseIconEnabled = false
+	elseif aimOn then
+		if UserInputService.MouseBehavior ~= Enum.MouseBehavior.Default then
+			UserInputService.MouseBehavior = Enum.MouseBehavior.Default
 		end
-	else
-		pitchRamp.sign, pitchRamp.mag = 0, 0
+		UserInputService.MouseIconEnabled = false
 	end
-	local kbPitch = pitchRamp.sign * pitchRamp.mag
 
-	-- 1d. Build the flight axes from BOTH input sources: analog mouse-steer + keyboard,
-	-- summed and clamped. yaw stays keyboard-only (Q/E). Mouse contributes 0 while free-looking.
-	local mPitch, mRoll = computeMouseSteer()
-	inputState.pitch = math.clamp(kbPitch + mPitch, -1, 1)
-	inputState.roll  = math.clamp(kb.roll  + mRoll,  -1, 1)
-	inputState.yaw   = kb.yaw
+	-- 1c. Keyboard tap->ramp smoothing for ALL THREE axes (eases input in; refines the banking so
+	-- it's no longer all-or-nothing). A tap gives a small deflection; holding ramps to full.
+	local tapP  = (C and C.pitchTapFraction) or 0.30
+	local rampP = (C and C.pitchRampTime) or 0.55
+	local tapB  = (C and C.bankTapFraction) or 0.22
+	local rampB = (C and C.bankRampTime) or 0.50
+	local kbPitch = rampAxis(pitchRamp, kb.pitch, tapP, rampP, dt)
+	local kbRoll  = rampAxis(rollRamp,  kb.roll,  tapB, rampB, dt)
+	local kbYaw   = rampAxis(yawRamp,   kb.yaw,   tapB, rampB, dt)
+
+	-- 1d. Mouse-aim autopilot. While aiming: EASE the applied aim toward the live target and draw the
+	-- reticle. While FREE-LOOK is held: FREEZE the aim (hold the last command) so the bird MAINTAINS its
+	-- maneuver — e.g. keeps pulling a vertical loop — while you orbit the camera, then resumes on release.
+	-- Either way the keyboard AUGMENTS on top (still works in free-look for manual nudges).
+	if aimOn and camera then
+		local aPitch, aRoll, aYaw = computeMouseAim()
+		local resp = math.clamp(((C and C.aimResponse) or 7) * dt, 0, 1)
+		aimApplied.pitch = aimApplied.pitch + (aPitch - aimApplied.pitch) * resp
+		aimApplied.roll  = aimApplied.roll  + (aRoll  - aimApplied.roll)  * resp
+		aimApplied.yaw   = aimApplied.yaw   + (aYaw   - aimApplied.yaw)   * resp
+		aimGui.Enabled = true
+		aimDot.Position    = UDim2.fromOffset(aimCursor.cursorX, aimCursor.cursorY) -- ring: your cursor (desired direction)
+		noseMarker.Position = UDim2.fromOffset(aimCursor.noseX, aimCursor.noseY)    -- amber: the bird's nose (boresight)
+	else
+		-- Free-look (or mouse-aim off): aimApplied is held FROZEN (not eased to 0) so the maneuver continues.
+		aimGui.Enabled = false
+	end
+	inputState.pitch = math.clamp(kbPitch + aimApplied.pitch, -1, 1)
+	inputState.roll  = math.clamp(kbRoll  + aimApplied.roll,  -1, 1)
+	inputState.yaw   = math.clamp(kbYaw   + aimApplied.yaw,   -1, 1)
+
+	-- 1e. FLAP THROTTLE (sticky): hold Shift to ramp UP-thrust, Ctrl to ramp DOWN-thrust; it HOLDS where
+	-- you set it (no decay), so you can set a climb power and fly the spiral hands-free on the mouse.
+	local thrRate = (C and C.flapThrottleRate) or 1.1
+	if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift)   then flapThrottle = math.min( 1, flapThrottle + thrRate * dt) end
+	if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then flapThrottle = math.max(-1, flapThrottle - thrRate * dt) end
+	inputState.flapThrottle = flapThrottle
 
 	-- 2. Step the simulation with the live input.
 	flightEngine:Update(dt, inputState)
@@ -523,7 +857,7 @@ local function onFlightStep(dt)
 	rootPart.AssemblyLinearVelocity = flightEngine.velocity
 	rootPart.AssemblyAngularVelocity = Vector3.new()
 
-	-- 4. Wing animation.
+	-- 4. Wing animation + wingtip stall vortices.
 	if birdModel then
 		BirdBuilder.AnimateWings(
 			birdModel,
@@ -533,6 +867,7 @@ local function onFlightStep(dt)
 			dt
 		)
 	end
+	updateVortexTrails()
 
 	-- 5. Camera + FOV.
 	updateCamera(dt)
@@ -560,9 +895,18 @@ local acquireGen = 0    -- guards against overlapping async acquisitions
 local function resetInput()
 	kb.pitch, kb.roll, kb.yaw = 0, 0, 0
 	pitchRamp.sign, pitchRamp.mag = 0, 0
+	rollRamp.sign, rollRamp.mag = 0, 0
+	yawRamp.sign, yawRamp.mag = 0, 0
 	steer.x, steer.y = 0, 0
+	aimCursor.x, aimCursor.y = 0, 0
+	aimApplied.pitch, aimApplied.roll, aimApplied.yaw = 0, 0, 0
 	inputState.pitch, inputState.roll, inputState.yaw = 0, 0, 0
 	inputState.flap, inputState.dive = false, false
+	flapThrottle = 0
+	inputState.flapThrottle = 0
+	-- Release active-defense weapons too (focus loss / death / between lives).
+	setWeaponHold("talon", false)
+	setWeaponHold("beak", false)
 end
 
 local function teardownDrive()
@@ -570,10 +914,17 @@ local function teardownDrive()
 	flightEngine = nil
 	birdModel = nil
 	rootPart = nil
-	-- Release the mouse between lives; onFlightStep re-locks it once we're driving again.
+	-- Drop the persistent chase basis so the camera SNAPS to the new bird's pose on the first frame
+	-- after a respawn/swap instead of visibly slewing in from the dead bird's last direction.
+	cameraState.chaseDir = nil
+	cameraState.camUpPrev = nil
+	cameraState.prevLook = nil
+	-- Release the mouse between lives; onFlightStep re-locks/hides it once we're driving again.
 	if not freeLook.active then
 		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
 	end
+	aimGui.Enabled = false
+	UserInputService.MouseIconEnabled = true
 end
 
 local function findMyPossessedBird()
@@ -606,6 +957,11 @@ local function acquire()
 	-- genuine release (or focus loss / death without Space) turns it off.
 	setFreeLook(UserInputService:IsKeyDown(Enum.KeyCode.Space))
 
+	-- Re-assert weapon-hold intent for the new bird (the server resets weapon timers on every
+	-- (re)spawn/swap; resetInput just cleared our mirror) from the physically held mouse buttons.
+	if UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then setWeaponHold("talon", true) end
+	if UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then setWeaponHold("beak", true) end
+
 	if not target then return end
 
 	local body = target.PrimaryPart or target:WaitForChild("Body", 5)
@@ -626,6 +982,9 @@ local function acquire()
 
 	birdModel = target
 	rootPart  = body
+
+	-- Wingtip stall-vortex vapor for the bird we're now flying (idempotent per model).
+	buildVortexTrails(target)
 
 	-- Seed the engine from the body's LIVE state so swapping crows (or taking over a
 	-- bird the server was flying) does not snap position/heading/velocity.

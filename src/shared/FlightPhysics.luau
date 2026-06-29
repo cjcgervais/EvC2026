@@ -148,8 +148,21 @@ function FlightPhysics:Update(dt, input)
 	local inPitch = input.pitch or 0
 	local inRoll = input.roll or 0
 	local inYaw = input.yaw or 0
-	local wantFlap = input.flap and self.stamina > 0
-	local wantDive = input.dive == true
+	-- FLAP THROTTLE: the player passes a continuous input.flapThrottle in [-1,1] (sticky; Shift ramps
+	-- up-thrust, Ctrl ramps down-thrust). AI crows pass the legacy boolean input.flap/input.dive
+	-- (flapThrottle nil) and behave EXACTLY as before. flapPow is the wingbeat effort (0..1) that scales
+	-- thrust, climb force, post-stall lift, stamina cost, and wingbeat frequency.
+	local throttle = input.flapThrottle
+	local wantFlap, wantDive, flapPow
+	if throttle ~= nil then
+		flapPow = math.min(1, math.abs(throttle))
+		wantFlap = (throttle > 0.02) and self.stamina > 0
+		wantDive = (input.dive == true) or (throttle < -0.02)
+	else
+		flapPow = 1
+		wantFlap = input.flap and self.stamina > 0
+		wantDive = input.dive == true
+	end
 
 	local cf = self.orientation
 	local authority = self:_authority()
@@ -220,7 +233,7 @@ function FlightPhysics:Update(dt, input)
 		-- of clMax; altFactor fades it out at the ceiling. wantFlap is false once stamina hits 0,
 		-- so the ordinary airspeed stall returns then (the fatigue stall the design wants).
 		if wantFlap and altFactor > 0 and math.abs(self.aoaDeg) > p.stallAngleDeg then
-			local powered = p.clMax * F.FLAP_LIFT_FLOOR * altFactor
+			local powered = p.clMax * F.FLAP_LIFT_FLOOR * altFactor * flapPow
 			if powered > math.abs(cl) then
 				cl = (self.aoaDeg >= 0) and powered or -powered
 			end
@@ -247,7 +260,7 @@ function FlightPhysics:Update(dt, input)
 	self.isFlapping = wantFlap and true or false
 	self.isDiving = look.Y < -0.2
 	if wantFlap or (wantDive and self.isDiving) then
-		local thrust = wantFlap and p.flapThrust or (p.flapThrust * 0.5)
+		local thrust = (wantFlap and p.flapThrust or (p.flapThrust * 0.5)) * flapPow
 		if self.isDiving then
 			thrust = thrust * p.diveThrustBonus
 			-- Flapping keeps full bite through low/mid dive speed, then fades toward FLAP_DIVE_FLOOR
@@ -269,7 +282,7 @@ function FlightPhysics:Update(dt, input)
 	-- at the service ceiling (altFactor) and ends when stamina runs out (wantFlap -> false). Only
 	-- acts with the nose above the horizon, so it leaves level flapping untouched.
 	if wantFlap and look.Y > 0 then
-		accel = accel + Vector3.new(0, (p.flapClimbForce or 0) * look.Y * altFactor, 0)
+		accel = accel + Vector3.new(0, (p.flapClimbForce or 0) * flapPow * look.Y * altFactor, 0)
 	end
 
 	-- THERMAL (external upward force) — restores energy spent diving/turning.
@@ -358,7 +371,7 @@ function FlightPhysics:Update(dt, input)
 	-- 6. ENERGY / STAMINA + animation phase
 	----------------------------------------------------------------------------
 	if wantFlap or (wantDive and self.isDiving) then
-		local cost = self.isDiving and p.staminaDiveCost or p.staminaFlapCost
+		local cost = (self.isDiving and p.staminaDiveCost or p.staminaFlapCost) * flapPow
 		self.stamina = math.max(0, self.stamina - cost * dt)
 	else
 		self.stamina = math.min(p.maxStamina, self.stamina + p.staminaRegen * dt)
@@ -366,8 +379,19 @@ function FlightPhysics:Update(dt, input)
 
 	self.speed = self.velocity.Magnitude
 	self.verticalSpeed = self.velocity.Y
-	local flapFreq = self.isFlapping and 9 or 2
+	-- Wingbeat frequency scales with flap effort (drives the wing animation AND the HUD readout).
+	local flapFreq = self.isFlapping and (2 + 9 * flapPow) or 2
 	self.flapPhase = (self.flapPhase + dt * flapFreq) % (math.pi * 2)
+	-- Expose flap state for the HUD (BirdController -> _G.UpdateFlapUI): signed throttle, beat freq, effort.
+	self.flapThrottle = throttle or (wantFlap and 1 or 0)
+	self.flapFreqHz = flapFreq
+	self.flapPower = flapPow
+	-- Expose the smoothed body angular rates (rad/s) so the mouse-aim INSTRUCTOR can add rate/
+	-- derivative (PD) damping — feeding these back negatively is what stops the coordinated-turn
+	-- porpoise (pure-P over this inertial plant is underdamped). Read by computeMouseAim next frame.
+	self.pitchVel = self._pitchVel
+	self.rollVel  = self._rollVel
+	self.yawVel   = self._yawVel
 
 	return self
 end

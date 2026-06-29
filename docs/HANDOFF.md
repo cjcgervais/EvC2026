@@ -2,6 +2,22 @@
 
 Read this first. It tells the next agent exactly where the project stands, the one decision that's already been made for you, and the prioritized work queue. Pair it with `CLAUDE.md` (architecture + contracts), `docs/RESEARCH.md` (why the numbers are what they are), and project memory (`MEMORY.md` index).
 
+> ## ⚙️ TOP PRIORITY (2026-06-29): flight + camera holistic redesign — IMPLEMENTED, awaiting Studio verify
+> The mouse-aim control law, energy tuning, and chase camera were rebuilt holistically on a `deep-research`
+> pass (26 sources, 23 verified claims) instead of more band-aids. **What landed** (full rationale +
+> citations in **[`docs/RESEARCH.md`](RESEARCH.md) §v4**; problem statement in
+> **[`docs/HANDOFF-flight-tuning.md`](HANDOFF-flight-tuning.md)**):
+> - **Mouse instructor → PD coordinated-flight controller**: symmetric deadzone+expo on both pitch & bank
+>   (WT "nonlinearity"), rate/derivative damping to kill the turn porpoise, and a "ride-the-edge" AoA
+>   protection (suspended while powered) so a started **loop now commits** instead of mushing.
+> - **Chase camera → continuous, rate-limited full-3D chase direction** + shortest-path `CFrame:Lerp`:
+>   **no azimuth snap / no pole flip through a full 360° loop** (the motion-sickness fix).
+> - **Free-look → Space TOGGLE** (was hold); the world-referenced orbit holds its aspect.
+> - Plant: `inducedDragK` eased for energy retention (keeps the n² EM cost); aerobatic-speed gate lowered.
+> **NEXT AGENT: this needs a HUMAN Studio playtest** against the acceptance criteria in the flight-tuning
+> doc, then re-tag the kernel. Tune against the §v4 target numbers, not by eyeball. The kernel is NOT back in
+> its `v1.0-eagle-flight` HUMAN-VERIFIED state until that playtest passes.
+
 ---
 
 ## Status (2026-06-23)

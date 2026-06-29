@@ -125,3 +125,77 @@ So the player-approved v2 feel *character* (grip, powered climb, momentum, the e
 - pmc.ncbi.nlm.nih.gov/articles/PMC5896925 + physicsworld.com/a/falcons-high-speed-dive — stoop physics, G-loads
 - birdsnews.com/fastest-bird-species, britannica How-Fast-Can-Eagles-Fly, eagles.org golden-eagle-behavior — eagle stoop/glide/soar speeds
 - en.wikipedia.org/wiki/Golden_eagle + dimensions.com golden-eagle — wingspan/mass/size
+
+---
+
+# §v4 — Holistic control-law + chase-camera redesign (2026-06-29, deep-research grounded)
+
+**Why:** the mouse-aim control law, the energy tuning, and the chase camera had been iterated by live
+playtest to the point where band-aid tuning traded one symptom for another (they're coupled). Per the
+project workflow, a `deep-research` pass (5 angles → 26 sources → 25 claims adversarially verified, 23
+confirmed) grounded the rebuild. The six problems (P1 loops won't complete, P2 pitch curve, P3 turn
+porpoise, P4 energy bleed, P5 nose-down flap thrust, P6 camera loop-snap) and their root causes are in
+`docs/HANDOFF-flight-tuning.md`.
+
+## What the research established (and what it didn't)
+- **WT mouse-aim is a "direction mode" Instructor.** The cursor sets a desired flight *direction*; the
+  Instructor takes authority over all three axes to chase it **within the flight envelope — preventing
+  critical AoA, stall, and spin** ("preserving lift"). That envelope clamp is *exactly* what makes a
+  full-deflection turn or loop **commit** instead of mushing. Source: old-wiki.warthunder.com
+  Instructor/How_the_instructor_works (primary, 3-0). **Gaijin does NOT publish the control-law internals**
+  (P vs PD/PID, gains, deadzone) — so the damping choice is the implementer's.
+- **Input shaping is documented:** per-axis **nonlinearity/expo 1.0–2.5** softens centre sensitivity while
+  keeping full deflection at the edge. Source: wiki.warthunder.com/controls/4785 (3-0). → symmetric
+  deadzone+expo on **both** pitch and bank (`aimPitchExpo=aimBankExpo=1.8`).
+- **Energy-Maneuverability targets are first-principles:** instantaneous coordinated turn rate
+  `ω = g·√(n²−1)/V`; the **corner point** (CLmax stall limit ∩ g-limit) gives peak instantaneous turn at
+  `V_corner = V_stall·√(n_max)`; **sustained** turn is `Ps=0` i.e. `T=D(n)`; realistic sustained ~2.7–3 g
+  vs ~6 g corner for piston-class craft. The **parabolic drag polar `CD = CD0 + K·CL²`, `K = 1/(π·AR·e)`**
+  means **induced drag ∝ CL² ∝ load-factor²** — the principled "hard pulls cost energy but not absurdly"
+  lever, and a max-g instantaneous turn is *meant* to decelerate. Sources: VT AOE3104 turningflight.pdf
+  (primary), agodemar Flight-Mechanics drag-polar (primary), flyonspeed, Aces High trainer (all 3-0).
+  *Refuted 0-3 — do not reintroduce:* "corner velocity = the Ps=0 sustained point" (it is the instantaneous
+  point); "WT roll-isolates the instructor."
+- **Camera (the anti-sickness core):** smooth **position and rotation as independent channels** (Unreal
+  separate CameraLagSpeed/CameraRotationLagSpeed); use **frame-rate-independent damping**
+  `Lerp(a,b,1−exp(−λ·dt))` (Rory Driscoll / lolengine, 3-0) — naive per-frame lerp is fps-dependent; and
+  **shortest-path (quaternion) rotational interpolation** (dot<0 → negate to pick the short arc) survives a
+  **360° loop with no azimuth snap and no pole flip** (josimard critically-damped quat spring, 3-0 on the
+  math). Roblox `CFrame:Lerp` already does shortest-path slerp — so the snap was never the Lerp, it was the
+  **target** (the old `headBack` azimuth from the bird's *horizontal heading*, which reverses ~180° over the
+  loop top). Fix: a **single persistent full-3D chase direction, rate-limited** (`chaseTurnRate`) — never
+  rebuilt from a discontinuous reference.
+- **Free-look (pillar 4): unanswered by the corpus** — the project's own world-referenced orbit remains the
+  reference. Player decision implemented: **Space = toggle**, not hold.
+
+## What changed in code (tune against these, don't eyeball)
+- **`FlightPhysics`**: exposes `pitchVel/rollVel/yawVel` (smoothed body rates) so the instructor can do PD.
+- **`GameConfig.Controls`** (the instructor): `aimResponse 9→13` (PD now does the damping, ease needn't add
+  lag); **symmetric** `aimPitchDeadzone=0.05/aimPitchExpo=1.8` + `aimBankDeadzone=0.10/aimBankExpo=1.8`
+  (P2); **PD** `aimPitchDamp=0.35`, `aimRollDamp=0.30` (P3 — rate feedback critically-damps the porpoise);
+  `aimStallBandDeg 7→4` + **suspend the AoA fade while powered** (flap throttle up) so a started loop
+  commits (P1, "ride the edge"); `aimPitchGain 3.0→2.6` (full deflection still saturates → loop authority
+  intact).
+- **`GameConfig.Camera`**: `chaseTurnRate=3.6` (rad/s cap on chase-direction slew — THE no-snap knob, ≥ the
+  bird's loop rate), `lookAheadFactor=0.3` (blend chase toward the velocity vector). `BirdController`
+  rewrites `updateCamera` to the continuous rate-limited chase + world-up-perpendicular camera-up + slight
+  look-ahead, all finished by `CFrame:Lerp` (P6).
+- **`GameConfig.Flight/Eagle`**: `AEROBATIC_MIN_SPEED 110→60` (it gates a now-inert weathervane since
+  `STABILITY_RATE=0`; lowered so it can't fight a slow loop top — loop commit is owned by the controller +
+  powered-lift floor), `inducedDragK 0.65→0.58` (more energy retention through a pull while keeping the n²
+  EM cost — P4). **P5 verified, no change**: nose-down + Shift (positive flap throttle) already accelerates
+  via `accel += look·thrust·diveThrustBonus·fade`.
+
+**Status: implemented; awaiting Studio human-verify** (the only real test). Acceptance criteria in
+`docs/HANDOFF-flight-tuning.md`. Validate one system at a time: plant (keyboard loop/turn) → mouse
+instructor (PD turn + loop commit) → free-look toggle → camera (full 360° loop with no snap/sickness).
+
+## v4 sources (highest quality)
+- old-wiki.warthunder.com/Instructor/How_the_instructor_works (primary — direction-mode + envelope protect)
+- wiki.warthunder.com/controls/4785-setting-up-control-axis-and-sensitivity (expo 1.0–2.5)
+- archive.aoe.vt.edu/lutze/AOE3104/turningflight.pdf (primary — turn rate, corner, load factor)
+- agodemar.github.io/FlightMechanics4Pilots/mypages/drag-polar (primary — CD=CD0+K·CL², K=1/(π·AR·e))
+- flyonspeed.org/basic-energy-management, trainers.hitechcreations.com/.../1076-turning (EM corner/sustained)
+- rorydriscoll.com/2016/03/07/frame-rate-independent-damping-using-lerp + lolengine.net/blog/2015/05/03 (fps-independent damping)
+- dev.epicgames.com/.../SpringArmComponent (independent position vs rotation lag channels)
+- gist.github.com/josimard/5737f3488fdfa2d207d68de282904479 (critically-damped quat spring, shortest-path)

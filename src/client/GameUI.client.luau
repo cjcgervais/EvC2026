@@ -30,6 +30,7 @@ local TakeDamage     = Remotes:WaitForChild("TakeDamage")
 
 local player = Players.LocalPlayer
 local UI = GameConfig.UI
+local myTeam = nil  -- set from TeamAssigned; used to pick out ENEMY birds for the indicators
 
 --------------------------------------------------------------------------------
 -- SCREEN GUI
@@ -203,6 +204,58 @@ staminaBarFill.Parent = staminaBarBg
 local staminaFillCorner = Instance.new("UICorner")
 staminaFillCorner.CornerRadius = UDim.new(0, 4)
 staminaFillCorner.Parent = staminaBarFill
+
+--------------------------------------------------------------------------------
+-- FLAP THROTTLE (Bottom Center, above the bars): the sticky flap throttle (Shift = up-thrust,
+-- Ctrl = down-thrust). A centre-zero bar — green right = climb power, amber left = descent power —
+-- plus the resulting wingbeat frequency + power-per-stroke. Fed by _G.UpdateFlapUI(throttle, freqHz, power).
+--------------------------------------------------------------------------------
+local flapFillUp, flapFillDown, flapText
+do
+	local flapFrame = Instance.new("Frame")
+	flapFrame.Name = "FlapFrame"
+	flapFrame.Size = UDim2.new(0, 300, 0, 46)
+	flapFrame.Position = UDim2.new(0.5, -150, 1, -160) -- just above the HP/FLY bars
+	flapFrame.BackgroundColor3 = UI.hudColor
+	flapFrame.BackgroundTransparency = UI.hudTransparency
+	flapFrame.BorderSizePixel = 0
+	flapFrame.Parent = screenGui
+	local fc = Instance.new("UICorner"); fc.CornerRadius = UDim.new(0, 8); fc.Parent = flapFrame
+
+	local title = Instance.new("TextLabel")
+	title.Size = UDim2.new(0, 60, 0, 18); title.Position = UDim2.new(0, 10, 0, 4)
+	title.BackgroundTransparency = 1; title.Text = "FLAP"; title.Font = UI.font
+	title.TextColor3 = Color3.fromRGB(200, 220, 235); title.TextXAlignment = Enum.TextXAlignment.Left
+	title.TextScaled = true; title.Parent = flapFrame
+
+	flapText = Instance.new("TextLabel")
+	flapText.Size = UDim2.new(0, 170, 0, 18); flapText.Position = UDim2.new(1, -180, 0, 4)
+	flapText.BackgroundTransparency = 1; flapText.Text = "GLIDE"; flapText.Font = UI.fontMedium
+	flapText.TextColor3 = Color3.fromRGB(220, 230, 240); flapText.TextXAlignment = Enum.TextXAlignment.Right
+	flapText.TextScaled = true; flapText.Parent = flapFrame
+
+	local barBg = Instance.new("Frame")
+	barBg.Size = UDim2.new(1, -20, 0, 14); barBg.Position = UDim2.new(0, 10, 0, 26)
+	barBg.BackgroundColor3 = Color3.fromRGB(30, 30, 30); barBg.BorderSizePixel = 0; barBg.Parent = flapFrame
+	local bgc = Instance.new("UICorner"); bgc.CornerRadius = UDim.new(0, 4); bgc.Parent = barBg
+
+	local tick = Instance.new("Frame") -- centre = glide reference
+	tick.AnchorPoint = Vector2.new(0.5, 0.5); tick.Position = UDim2.new(0.5, 0, 0.5, 0)
+	tick.Size = UDim2.new(0, 2, 1, 0); tick.BackgroundColor3 = Color3.fromRGB(120, 130, 140)
+	tick.BorderSizePixel = 0; tick.ZIndex = 3; tick.Parent = barBg
+
+	flapFillUp = Instance.new("Frame") -- climb power: grows RIGHT from centre
+	flapFillUp.AnchorPoint = Vector2.new(0, 0.5); flapFillUp.Position = UDim2.new(0.5, 0, 0.5, 0)
+	flapFillUp.Size = UDim2.new(0, 0, 1, 0); flapFillUp.BackgroundColor3 = Color3.fromRGB(90, 210, 120)
+	flapFillUp.BorderSizePixel = 0; flapFillUp.Parent = barBg
+	local uc = Instance.new("UICorner"); uc.CornerRadius = UDim.new(0, 4); uc.Parent = flapFillUp
+
+	flapFillDown = Instance.new("Frame") -- descent power: grows LEFT from centre
+	flapFillDown.AnchorPoint = Vector2.new(1, 0.5); flapFillDown.Position = UDim2.new(0.5, 0, 0.5, 0)
+	flapFillDown.Size = UDim2.new(0, 0, 1, 0); flapFillDown.BackgroundColor3 = Color3.fromRGB(230, 160, 80)
+	flapFillDown.BorderSizePixel = 0; flapFillDown.Parent = barBg
+	local dc = Instance.new("UICorner"); dc.CornerRadius = UDim.new(0, 4); dc.Parent = flapFillDown
+end
 
 --------------------------------------------------------------------------------
 -- FLIGHT DATA (Bottom Left): SPD + ALT
@@ -407,7 +460,7 @@ controlHint.Name = "ControlHint"
 controlHint.Size = UDim2.new(0, 460, 0, 22)
 controlHint.Position = UDim2.new(0.5, -230, 1, -34)
 controlHint.BackgroundTransparency = 1
-controlHint.Text = "Hold SPACE to free-look  \194\183  move the MOUSE to pan the camera"
+controlHint.Text = "MOUSE aims (cross chases cursor)  \194\183  SHIFT/CTRL flap throttle  \194\183  hold SPACE free-look"
 controlHint.TextColor3 = Color3.fromRGB(235, 240, 245)
 controlHint.TextStrokeTransparency = 0.5
 controlHint.TextTransparency = 0.15
@@ -449,6 +502,7 @@ notifLabel.Parent = notifFrame
 --------------------------------------------------------------------------------
 TeamAssigned.OnClientEvent:Connect(function(teamName, profile)
 	teamName = teamName or ""
+	myTeam = teamName
 	teamLabel.Text = "TEAM " .. string.upper(teamName)
 	local isEagles = (teamName == "Eagles")
 	teamLabel.TextColor3 = isEagles and UI.eagleAccent or UI.crowAccent
@@ -513,6 +567,177 @@ local function findMyBird()
 	return anyOwned
 end
 
+--------------------------------------------------------------------------------
+-- WEAPON METERS (eagle only) — talon (Left) + beak (Right) extend/cooldown gauges, fed by
+-- the server via Body attributes Talon/BeakMeter (0..1) and Talon/BeakActive (bool). The
+-- frame stays hidden for crows (those attributes are never set on a crow body).
+--------------------------------------------------------------------------------
+local weaponsFrame
+local talonFill, beakFill
+do
+	weaponsFrame = Instance.new("Frame")
+	weaponsFrame.Name = "WeaponsFrame"
+	weaponsFrame.Size = UDim2.new(0, 200, 0, 60)
+	weaponsFrame.Position = UDim2.new(1, -215, 1, -85) -- bottom-right
+	weaponsFrame.BackgroundColor3 = UI.hudColor
+	weaponsFrame.BackgroundTransparency = UI.hudTransparency
+	weaponsFrame.BorderSizePixel = 0
+	weaponsFrame.Visible = false
+	weaponsFrame.Parent = screenGui
+	local fc = Instance.new("UICorner"); fc.CornerRadius = UDim.new(0, 8); fc.Parent = weaponsFrame
+
+	local function makeRow(y, text)
+		local label = Instance.new("TextLabel")
+		label.Size = UDim2.new(0, 60, 0, 20)
+		label.Position = UDim2.new(0, 10, 0, y)
+		label.BackgroundTransparency = 1
+		label.Font = Enum.Font.GothamBold
+		label.TextSize = 13
+		label.TextColor3 = Color3.fromRGB(235, 235, 235)
+		label.TextXAlignment = Enum.TextXAlignment.Left
+		label.Text = text
+		label.Parent = weaponsFrame
+
+		local bg = Instance.new("Frame")
+		bg.Size = UDim2.new(1, -80, 0, 16)
+		bg.Position = UDim2.new(0, 70, 0, y + 2)
+		bg.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+		bg.BorderSizePixel = 0
+		bg.Parent = weaponsFrame
+		local bgc = Instance.new("UICorner"); bgc.CornerRadius = UDim.new(0, 4); bgc.Parent = bg
+
+		local fill = Instance.new("Frame")
+		fill.Size = UDim2.new(1, 0, 1, 0)
+		fill.BackgroundColor3 = Color3.fromRGB(120, 200, 120)
+		fill.BorderSizePixel = 0
+		fill.Parent = bg
+		local fillc = Instance.new("UICorner"); fillc.CornerRadius = UDim.new(0, 4); fillc.Parent = fill
+		return fill
+	end
+
+	talonFill = makeRow(8, "TALON")
+	beakFill = makeRow(32, "BEAK")
+end
+
+-- Colour a weapon bar by state: bright green when actively COVERING (can parry now), blue when
+-- charged/ready, amber while cooling down. Width = meter (0..1).
+local function paintWeapon(fill, meter, active)
+	fill.Size = UDim2.new(math.clamp(meter, 0, 1), 0, 1, 0)
+	if active then
+		fill.BackgroundColor3 = Color3.fromRGB(90, 230, 120)
+	elseif meter >= 1 then
+		fill.BackgroundColor3 = Color3.fromRGB(90, 160, 230)
+	else
+		fill.BackgroundColor3 = Color3.fromRGB(220, 130, 70)
+	end
+end
+
+--------------------------------------------------------------------------------
+-- ENEMY INDICATORS — a box (with range) over each on-screen enemy bird, and an edge arrow
+-- pointing toward each off-screen one, so the player can find/track crows in the big sky.
+--------------------------------------------------------------------------------
+local enemyMarkers = {}
+local function getMarker(i)
+	if enemyMarkers[i] then return enemyMarkers[i] end
+	local f = Instance.new("Frame")
+	f.Name = "EnemyMarker" .. i
+	f.AnchorPoint = Vector2.new(0.5, 0.5)
+	f.Size = UDim2.fromOffset(40, 40)
+	f.BackgroundTransparency = 1
+	f.ZIndex = 6
+	f.Visible = false
+	f.Parent = screenGui
+
+	local box = Instance.new("Frame")
+	box.Name = "Box"
+	box.Size = UDim2.fromScale(1, 1)
+	box.BackgroundTransparency = 1
+	box.Parent = f
+	local stroke = Instance.new("UIStroke")
+	stroke.Thickness = 2
+	stroke.Color = Color3.fromRGB(255, 95, 95)
+	stroke.Parent = box
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 6)
+	corner.Parent = box
+
+	local arrow = Instance.new("TextLabel")
+	arrow.Name = "Arrow"
+	arrow.Size = UDim2.fromScale(1, 1)
+	arrow.BackgroundTransparency = 1
+	arrow.Font = Enum.Font.GothamBold
+	arrow.TextSize = 28
+	arrow.TextColor3 = Color3.fromRGB(255, 95, 95)
+	arrow.Text = "\u{27A4}" -- ➤ (points +X at rotation 0)
+	arrow.Visible = false
+	arrow.Parent = f
+
+	local dist = Instance.new("TextLabel")
+	dist.Name = "Dist"
+	dist.AnchorPoint = Vector2.new(0.5, 0)
+	dist.Position = UDim2.new(0.5, 0, 1, 2)
+	dist.Size = UDim2.fromOffset(80, 14)
+	dist.BackgroundTransparency = 1
+	dist.Font = Enum.Font.GothamBold
+	dist.TextSize = 12
+	dist.TextColor3 = Color3.fromRGB(255, 135, 135)
+	dist.TextStrokeTransparency = 0.4
+	dist.Text = ""
+	dist.Parent = f
+
+	enemyMarkers[i] = f
+	return f
+end
+
+local function hideEnemyMarkers()
+	for i = 1, #enemyMarkers do enemyMarkers[i].Visible = false end
+end
+
+local function updateEnemyMarkers(myPos)
+	local cam = workspace.CurrentCamera
+	if not (myTeam and cam) then hideEnemyMarkers() return end
+	local vp = cam.ViewportSize
+	local cx, cy = vp.X * 0.5, vp.Y * 0.5
+	local used = 0
+	for _, m in ipairs(birdsFolder:GetChildren()) do
+		local team = m:IsA("Model") and m:GetAttribute("Team")
+		if team and team ~= myTeam then
+			local eb = m.PrimaryPart or m:FindFirstChild("Body")
+			if eb then
+				used += 1
+				local marker = getMarker(used)
+				marker.Visible = true
+				local wp = eb.Position
+				local sp = cam:WorldToViewportPoint(wp)
+				local dist = math.floor((wp - myPos).Magnitude + 0.5)
+				marker.Dist.Text = tostring(dist)
+				local onScreen = sp.Z > 0 and sp.X >= 0 and sp.X <= vp.X and sp.Y >= 0 and sp.Y <= vp.Y
+				if onScreen then
+					marker.Box.Visible = true
+					marker.Arrow.Visible = false
+					marker.Position = UDim2.fromOffset(sp.X, sp.Y)
+					local s = math.clamp(2600 / math.max(dist, 1), 16, 64)
+					marker.Size = UDim2.fromOffset(s, s)
+				else
+					-- Off-screen or behind: pin an arrow to the screen edge pointing at it.
+					local dx, dy = sp.X - cx, sp.Y - cy
+					if sp.Z < 0 then dx, dy = -dx, -dy end
+					if math.abs(dx) < 1e-3 and math.abs(dy) < 1e-3 then dy = 1 end
+					local margin = 46
+					local scale = math.min((cx - margin) / math.max(math.abs(dx), 1e-3),
+						(cy - margin) / math.max(math.abs(dy), 1e-3))
+					marker.Position = UDim2.fromOffset(cx + dx * scale, cy + dy * scale)
+					marker.Size = UDim2.fromOffset(34, 34)
+					marker.Box.Visible = false
+					marker.Arrow.Visible = true
+					marker.Arrow.Rotation = math.deg(math.atan2(dy, dx))
+				end
+			end
+		end
+	end
+	for i = used + 1, #enemyMarkers do enemyMarkers[i].Visible = false end
+end
+
 RunService.RenderStepped:Connect(function()
 	-- Blink the stall warning while visible.
 	if stallWarning.Visible then
@@ -530,6 +755,8 @@ RunService.RenderStepped:Connect(function()
 		altLabel.Text = "ALT: 0"
 		incLabel.Text = "--"
 		incPointer.Rotation = 0
+		weaponsFrame.Visible = false
+		hideEnemyMarkers()
 		stallWarning.Visible = false
 		return
 	end
@@ -546,6 +773,20 @@ RunService.RenderStepped:Connect(function()
 	local speed = body.AssemblyLinearVelocity.Magnitude
 	speedLabel.Text = "SPD: " .. tostring(math.floor(speed + 0.5))
 	altLabel.Text = "ALT: " .. tostring(math.floor(body.Position.Y + 0.5))
+
+	-- Weapon meters (eagle only): the server sets Talon/BeakMeter on the eagle Body.
+	local tMeter = body:GetAttribute("TalonMeter")
+	if typeof(tMeter) == "number" then
+		weaponsFrame.Visible = true
+		paintWeapon(talonFill, tMeter, body:GetAttribute("TalonActive") == true)
+		local bMeter = body:GetAttribute("BeakMeter")
+		paintWeapon(beakFill, (typeof(bMeter) == "number") and bMeter or 0, body:GetAttribute("BeakActive") == true)
+	else
+		weaponsFrame.Visible = false
+	end
+
+	-- Enemy indicators (boxes over on-screen crows, edge arrows for off-screen ones).
+	updateEnemyMarkers(body.Position)
 end)
 
 --------------------------------------------------------------------------------
@@ -573,6 +814,25 @@ function _G.SetStallWarning(isStalling)
 	stallWarning.Visible = isStalling and true or false
 	if not isStalling then
 		stallWarning.TextTransparency = 0
+	end
+end
+
+-- Flap throttle readout: throttle (-1 down .. 0 glide .. +1 up), wingbeat freq (Hz), power per stroke (0..1).
+function _G.UpdateFlapUI(throttle, freqHz, power)
+	throttle = math.clamp(tonumber(throttle) or 0, -1, 1)
+	if throttle >= 0 then
+		flapFillUp.Size = UDim2.new(0.5 * throttle, 0, 1, 0)
+		flapFillDown.Size = UDim2.new(0, 0, 1, 0)
+	else
+		flapFillDown.Size = UDim2.new(0.5 * (-throttle), 0, 1, 0)
+		flapFillUp.Size = UDim2.new(0, 0, 1, 0)
+	end
+	if math.abs(throttle) < 0.02 then
+		flapText.Text = "GLIDE"
+	else
+		local pct = math.floor((tonumber(power) or 0) * 100 + 0.5)
+		local dir = throttle > 0 and "\u{25B2}" or "\u{25BC}" -- ▲ up-thrust / ▼ down-thrust
+		flapText.Text = string.format("%s %.1fHz \194\183 %d%%", dir, tonumber(freqHz) or 0, pct)
 	end
 end
 
