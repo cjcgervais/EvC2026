@@ -45,6 +45,37 @@ GameConfig.Flight = {
 	-- (Replaces v1's PATH_TRACK_RATE, which rotated VELOCITY toward the nose and thus drove
 	-- AoA->0->no-lift — the root cause of the old constant-stall spiral.)
 	STABILITY_RATE = 1.5,
+	-- PHUGOID DAMPING (vertical-motion stabilizer, studs/s of vertical accel per stud/s of
+	-- climb rate). A high-L/D wing (the eagle glides at L/D ~34) has an almost UNDAMPED
+	-- phugoid: lift responds to speed, so the bird slowly trades altitude<->speed in a ~3s
+	-- oscillation -> visible porpoising/bobbing, worst while flapping (overspeed balloons it).
+	-- Real airframes shed this via pitch damping; here it's an aerodynamic force opposing
+	-- vertical velocity, scaled by dynamic pressure so it fades at low speed and never makes
+	-- free lift at rest. RELEASED by active pitch input and disabled while diving, so
+	-- intentional climbs and the dive/stoop keep full authority. Higher = stiffer, more
+	-- "on-rails" glide; 0 = pure (porpoising) aero. PLAYTEST-PROVISIONAL.
+	PHUGOID_DAMPING = 2.1,
+	-- VERTICAL FLIGHT ENVELOPE (powered climb + service ceiling). Design rule (Chad, session 6):
+	-- "as long as you can flap you should be able to climb" — a sustained climb should end from
+	-- FATIGUE (running out of stamina) or the ceiling, NOT merely from bleeding airspeed. While
+	-- actively flapping, control authority gets a floor (so you can still command the climb at low
+	-- speed) and the beating wings keep making lift past the nominal stall; when stamina hits 0 you
+	-- can't flap, the floors vanish, and the airspeed stall returns (the fatigue stall).
+	-- SERVICE_CEILING (× per-profile climbCeilingBonus — eagle climbs higher than crow) is the top
+	-- of the envelope: flap power and powered-climb lift fade to 0 over CEILING_BAND studs below it,
+	-- so the bird levels off near the top instead of climbing forever. Combat happens below
+	-- Thermals.maxHeight (480); the eagle ceiling (520) sits just above so the wall is only felt at
+	-- the very top. PLAYTEST-PROVISIONAL.
+	SERVICE_CEILING = 520,      -- studs; envelope top for climbCeilingBonus = 1.0 (the eagle)
+	CEILING_BAND = 140,         -- studs below the ceiling over which flap power fades to 0
+	FLAP_AUTHORITY_FLOOR = 0.5, -- min control authority while flapping (lets you hold a slow climb)
+	FLAP_LIFT_FLOOR = 0.55,     -- fraction of clMax lift retained past stall WHILE FLAPPING (anti-mush)
+	-- AEROBATIC FREEDOM: above AEROBATIC_MIN_SPEED, an aggressive pitch/roll command suppresses the
+	-- weathervane so the nose can swing away from the airflow — this is what lets a fast eagle pull a
+	-- full LOOP or barrel roll instead of being auto-leveled out of it. Ramps in over
+	-- AEROBATIC_SPEED_BAND studs/s above the min; hands-off/slow flight keeps full stability (so it
+	-- can never reintroduce the level-flight porpoising). PLAYTEST-PROVISIONAL.
+	AEROBATIC_SPEED_BAND = 40,
 	-- OBSTACLE COLLISION (BirdCollision, queue #4). Birds are CFrame-driven so they have NO
 	-- native Roblox collision — the controllers sweep a Spherecast along each step instead.
 	-- CRASH_SPEED is the CLOSING speed (studs/s, into a surface normal) at or above which a

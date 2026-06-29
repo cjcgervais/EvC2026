@@ -154,6 +154,18 @@ function FlightPhysics:Update(dt, input)
 	local cf = self.orientation
 	local authority = self:_authority()
 
+	-- VERTICAL FLIGHT ENVELOPE: altFactor is 1 below this bird's service ceiling and fades to 0
+	-- at it (climbCeilingBonus: eagle climbs higher than crow), throttling flap power + powered-
+	-- climb lift near the top so the bird levels off there instead of climbing forever. While
+	-- actively flapping, authority gets a floor so you can still command a climb at low airspeed
+	-- -- the climb then ends from FATIGUE (stamina hits 0 -> wantFlap false -> floor gone) or the
+	-- ceiling, not merely from bleeding speed. (See GameConfig.Flight "VERTICAL FLIGHT ENVELOPE".)
+	local ceiling = F.SERVICE_CEILING * (p.climbCeilingBonus or 1)
+	local altFactor = clamp((ceiling - cf.Position.Y) / math.max(EPS, F.CEILING_BAND), 0, 1)
+	if wantFlap then
+		authority = math.max(authority, F.FLAP_AUTHORITY_FLOOR * altFactor)
+	end
+
 	----------------------------------------------------------------------------
 	-- 1. ROTATIONAL CONTROL (with inertia). Produces banking, pitch, yaw; no
 	--    auto-leveling, so loops & barrel rolls are possible at speed.
@@ -202,6 +214,17 @@ function FlightPhysics:Update(dt, input)
 		-- the bird's up side. Mass-independent (lift balances weight, both scale with mass);
 		-- wingLoading is the lever (low = more lift accel = lower stall + tighter turns = crow).
 		cl = computeCL(p, self.aoaDeg)
+		-- POWERED CLIMB: while flapping (and below the service ceiling) the beating wings keep
+		-- making lift past the nominal stall, so a held climb mushes only when STAMINA runs out
+		-- (fatigue) -- not merely when airspeed drops. Floors post-stall lift to FLAP_LIFT_FLOOR
+		-- of clMax; altFactor fades it out at the ceiling. wantFlap is false once stamina hits 0,
+		-- so the ordinary airspeed stall returns then (the fatigue stall the design wants).
+		if wantFlap and altFactor > 0 and math.abs(self.aoaDeg) > p.stallAngleDeg then
+			local powered = p.clMax * F.FLAP_LIFT_FLOOR * altFactor
+			if powered > math.abs(cl) then
+				cl = (self.aoaDeg >= 0) and powered or -powered
+			end
+		end
 		local q = F.AIR_DENSITY * speed * speed
 		local liftAccel = (cl * q) / p.wingLoading
 		local liftDir = up - velDir * up:Dot(velDir)
@@ -226,11 +249,26 @@ function FlightPhysics:Update(dt, input)
 	if wantFlap or (wantDive and self.isDiving) then
 		local thrust = wantFlap and p.flapThrust or (p.flapThrust * 0.5)
 		if self.isDiving then thrust = thrust * p.diveThrustBonus end
-		accel = accel + look * (thrust / p.mass)
+		-- altFactor folds the service ceiling in: thrust fades to 0 at the envelope top, so you
+		-- level off near the ceiling rather than flapping skyward forever (see _authority block).
+		accel = accel + look * (thrust * altFactor / p.mass)
 	end
 
 	-- THERMAL (external upward force) — restores energy spent diving/turning.
 	accel = accel + self._thermal
+
+	-- PHUGOID DAMPING: the v2 drag polar gives a great glide but an almost undamped
+	-- altitude<->speed oscillation (porpoising). Oppose vertical velocity with an
+	-- aerodynamic force scaled by dynamic pressure (q ~ speed^2, normalized by glideSpeed
+	-- so it's ~1 at cruise and fades to 0 when slow -- no free lift at rest/stall). RELEASE
+	-- it under active pitch input and kill it while diving, so deliberate climbs and the
+	-- stoop keep full authority; only hands-off level flight gets the smooth-glide assist.
+	local release = 1 - clamp(math.abs(inPitch), 0, 1)
+	if self.isDiving then release = 0 end
+	if release > 0 and speed > EPS then
+		local q01 = clamp((speed * speed) / (p.glideSpeed * p.glideSpeed), 0, 1)
+		accel = accel + Vector3.new(0, -self.velocity.Y * F.PHUGOID_DAMPING * release * q01, 0)
+	end
 
 	----------------------------------------------------------------------------
 	-- 3. INTEGRATE velocity
@@ -251,6 +289,15 @@ function FlightPhysics:Update(dt, input)
 			local over = (math.abs(self.aoaDeg) - p.stallAngleDeg) / math.max(EPS, p.stallAngleDeg)
 			stabRad = stabRad + (p.recoverNoseDownRate * clamp(over, 0, 2) * authority) * dt
 		end
+		-- AEROBATIC FREEDOM: above AEROBATIC_MIN_SPEED, an aggressive pitch/roll command suppresses
+		-- the weathervane so the nose can swing away from the airflow — what lets a fast eagle pull
+		-- a full LOOP or barrel roll instead of being auto-leveled out of it. Lift (perpendicular to
+		-- airflow) is what then curves the velocity around the loop. Hands-off or slow flight keeps
+		-- full stability, so this can never reintroduce the level-flight porpoising.
+		local aero = clamp((self.velocity.Magnitude - F.AEROBATIC_MIN_SPEED)
+			/ math.max(EPS, F.AEROBATIC_SPEED_BAND), 0, 1)
+		local cmd = math.max(math.abs(inPitch), math.abs(inRoll))
+		stabRad = stabRad * (1 - aero * cmd)
 		cf = rotateLookToward(cf, vDir, stabRad)
 		look = cf.LookVector
 		up = cf.UpVector
