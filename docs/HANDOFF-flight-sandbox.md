@@ -22,7 +22,9 @@ under *Guardrails*. **Validate everything in Studio — pressing Play is the onl
 - The flight **kernel** (`FlightPhysics` + the grip/PD/loop-commit model) is human-verified — see the
   `flight-vertical-envelope` and `flight-camera-redesign-handoff` memories. **Don't reopen the kernel** to do
   any of the work below; every task here is an input-layer, camera, config, or map change.
-- Branch `flight-camera-redesign-v4`. `master` is the last fully human-verified build. `.\build.ps1` is green.
+- **Merged to `master` (2026-06-30)** — the redesign + free-look fixes now live on `master`, the verified
+  baseline. **Branch fresh off `master`** for this grind (don't reuse the old `flight-camera-redesign-v4`).
+  `.\build.ps1` is green on `master`.
 
 ---
 

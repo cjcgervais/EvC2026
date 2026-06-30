@@ -176,5 +176,5 @@ swap their `+ s` / `- s` to match; the player only reported the mouse, so flip t
 ## Pointers
 - All edits: `src/client/BirdController.client.luau` (`onFlightStep` for Bug 1, `updateCamera` for Bug 2, the
   `UserInputService.InputChanged` free-look handler for Bug 3).
-- Branch: `flight-camera-redesign-v4` (pushed to origin). `master` is the last HUMAN-VERIFIED build.
+- Status: fixes are player-confirmed and **merged to `master` (2026-06-30)** — that's the verified baseline now.
 - Context: `docs/RESEARCH.md §v4`, `docs/HANDOFF-flight-tuning.md`, memory `flight-camera-redesign-handoff`.
