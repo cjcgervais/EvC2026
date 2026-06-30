@@ -840,28 +840,26 @@ local function computeMouseAim(dt)
 	local inFront = noseVP.Z > 0
 
 	local inset = GuiService:GetGuiInset()
-	local cx, cy = inset.X + vp.X * 0.5, inset.Y + vp.Y * 0.5
 	local maxR   = math.sqrt(((C.aimCursorAreaFrac or 0.875) * vp.X * vp.Y) / math.pi)
 
-	-- SELF-CENTERING VIRTUAL CURSOR (relative mouse — the key fix, Chad 2026-06-30: "the reticle never meets the
-	-- cursor, it just keeps turning hard"). The mouse DELTA pushes the virtual cursor out from centre (the nose);
-	-- every frame it also DECAYS back toward centre at aimRecenterRate. So a held deflection RESOLVES: the bird
-	-- coordinated-turns toward where you pushed, the cursor eases back to the nose cross, the error → 0, and the
-	-- bird STRAIGHTENS in the new direction — instead of turning forever (the chase cam re-centres the heading, so
-	-- an ABSOLUTE cursor could never be reached → perpetual turn). Moving the mouse continuously balances the decay
-	-- = a sustained turn/loop. aimRecenterRate = 0 → no decay (the old hold-at-edge behaviour). Needs the mouse
-	-- LockCenter'd (set in onFlightStep) so GetMouseDelta reports movement and neutral (stick=0) is well defined.
+	-- VIRTUAL CURSOR (relative mouse). `aimVirtual` is the cursor's DEFLECTION FROM THE NOSE CROSS — so the
+	-- reachable zone is a circle CENTRED ON THE NOSE (symmetric up/down: fixes Chad's "the cursor zone was offset
+	-- downward, couldn't reach the top"; the old version clamped to a screen-centred circle while resting at the
+	-- below-centre nose, biasing it down). The mouse DELTA moves the cursor and it STAYS where you put it — the
+	-- CURSOR drives the bird's nose, not the other way around (Chad: "the cursor moves the bird aim, not the bird
+	-- aim moving the mouse against me"). A GENTLE relax (aimRecenterRate) eases the deflection back toward 0 (the
+	-- nose) so a held deflection eventually straightens out instead of turning forever — but it's soft enough that
+	-- the cursor doesn't rubber-band/fight you. aimRecenterRate = 0 → fully persistent cursor (no relax at all);
+	-- higher → straightens out sooner. Needs the mouse LockCenter'd (onFlightStep) so GetMouseDelta reports.
 	local delta = UserInputService:GetMouseDelta()
 	aimVirtual = aimVirtual + delta * (C.aimMouseSensitivity or 1.0)
-	-- Decay toward the NOSE CROSS offset (not raw screen centre): when the cursor settles it then sits exactly ON
-	-- the cross → zero error → the bird HOLDS its current heading (a true straighten), even mid-bank where the
-	-- cross isn't at screen centre. So the green ring visibly returns to the amber cross = "met, resolved".
-	local noseTarget = inFront and Vector2.new(noseVP.X - vp.X * 0.5, noseVP.Y - vp.Y * 0.5) or Vector2.new(0, 0)
-	local decay = math.clamp((C.aimRecenterRate or 3.0) * (dt or 0), 0, 1)
-	aimVirtual = aimVirtual:Lerp(noseTarget, decay)
+	local decay = math.clamp((C.aimRecenterRate or 1.0) * (dt or 0), 0, 1)
+	aimVirtual = aimVirtual:Lerp(Vector2.new(0, 0), decay) -- relax the DEFLECTION toward 0 (= cursor back on the nose)
 	local vr = aimVirtual.Magnitude
 	if vr > maxR and vr > EPS then aimVirtual = aimVirtual * (maxR / vr) end
-	local mouse = Vector2.new(cx + aimVirtual.X, cy + aimVirtual.Y)
+	local noseWinX = (inFront and noseVP.X or vp.X * 0.5) + inset.X
+	local noseWinY = (inFront and noseVP.Y or vp.Y * 0.5) + inset.Y
+	local mouse = Vector2.new(noseWinX + aimVirtual.X, noseWinY + aimVirtual.Y)
 
 	-- Resolve the cursor into a desired BODY-frame direction. Comparing the camera ray through the cursor
 	-- with the camera ray through the CROSS makes "cursor on the cross" == zero error (no neutral bias from

@@ -578,13 +578,14 @@ GameConfig.Controls = {
 	-- Flight.AEROBATIC_MIN_SPEED) — a slow bird mushes instead of looping (Energy-Maneuverability).
 	-- ALL PLAYTEST-PROVISIONAL.
 	mouseAim     = true,
-	-- SELF-CENTERING VIRTUAL CURSOR (relative mouse, 2026-06-30 — Chad: "the reticle never meets the cursor, it
-	-- just keeps turning hard"). The mouse delta pushes the cursor out from the nose; aimRecenterRate eases it
-	-- back to centre each frame, so a held deflection RESOLVES (turn toward the push, then straighten) instead of
-	-- turning forever. aimMouseSensitivity scales the push (cursor pixels per mouse pixel). Set aimRecenterRate = 0
-	-- to get the old never-resolving hold-at-edge behaviour. HIGHER aimRecenterRate = straightens out sooner.
+	-- VIRTUAL CURSOR (relative mouse, 2026-06-30). The mouse delta moves the cursor as a DEFLECTION FROM THE NOSE
+	-- CROSS (so its reachable zone is centred on the nose — symmetric up/down). The CURSOR stays where you put it
+	-- and drives the bird's nose toward it (Chad: "the cursor moves the bird aim, not the bird aim moving the mouse
+	-- against me"). aimRecenterRate is a GENTLE relax of the deflection back toward the nose so a held deflection
+	-- eventually STRAIGHTENS instead of turning forever — soft enough not to rubber-band/fight you. 0 = fully
+	-- persistent cursor (no relax); HIGHER = straightens out sooner. aimMouseSensitivity scales the cursor travel.
 	aimMouseSensitivity = 1.0,  -- virtual-cursor travel per unit of mouse movement
-	aimRecenterRate     = 3.0,  -- per-sec ease of the cursor back to the nose (the "resolve/straighten" knob)
+	aimRecenterRate     = 1.0,  -- per-sec GENTLE relax of the cursor's deflection back to the nose (resolve knob; 0 = off)
 	aimMarkerDistance = 600,  -- LEGACY (unused since the beak reticle was coupled to beakReticleDistance, 2026-06-30)
 	-- BEAK + TALON RETICLES (melee-aim UI, reworked 2026-06-30 per Chad). The amber BEAK cross is the boresight
 	-- AND the head-on strike marker: it's drawn at beakReticleDistance out front, and the aim ERROR is computed
