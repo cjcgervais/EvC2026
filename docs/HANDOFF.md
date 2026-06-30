@@ -9,9 +9,19 @@ Read this first. It tells the next agent exactly where the project stands, the o
 > that swings with bank)**, and the **game auto-picks** beak-vs-talon by **which zone the nearest enemy is in**
 > (`GameServer.enemyZone`); **(c)** per-zone timers per Chad — **talon 4 s active / 2 s cd**, **beak 2 s / 4 s**.
 > HUD chips L/F/R → BEAK/TALON. **Map build-out (ask #2) is DEFERRED** per Chad until the strike feels right
-> (already committed; leave it). **#3 (crows mob)** still needs a Play. **NEXT: Chad playtests the strike + aim**
-> (verify cursor-centred=level, the talon arc swings & auto-selects, durations feel right; watch 1-v-4 — talon
-> 67% uptime). Don't reopen the loved flight kernel/feel. ⚠️ See the balance watch in `combat-directional-strike`.
+> (already committed; leave it). **#3 (crows mob)** still needs a Play.
+>
+> **+ AIM RESOLVE FIX (latest commit):** Chad — "the reticle never meets the cursor, it just keeps turning hard."
+> The chase cam re-centres the heading, so an ABSOLUTE cursor is unreachable → perpetual turn. Mouse-aim is now a
+> **self-centering virtual cursor** (relative mouse / `GetMouseDelta`, `LockCenter`): the cursor decays back to
+> the nose cross at `Controls.aimRecenterRate` (3.0), so **deflect → coordinated-turn → straighten** (held
+> deflection resolves; continuous movement = sustained turn/loop). `aimRecenterRate=0` = old behaviour. See
+> [[mouse-aim-pursuit-model]].
+>
+> **NEXT: Chad playtests the strike + aim** (verify deflect-then-straighten resolves, cursor-centred=level, the
+> talon arc swings & auto-selects, durations feel right; watch 1-v-4 — talon 67% uptime). Tuning knobs:
+> `aimRecenterRate`/`aimMouseSensitivity`, `beakReticleDistance`, `talonReticleDistance`/`talonArcSpreadDeg`,
+> `Combat.strikes` durations + `strikeSelectRange`. Don't reopen the loved flight kernel. ⚠️ Balance watch in `combat-directional-strike`.
 >
 > ## 🎯 (prior) strike reticles, beak-zone aim, build out the map ([`docs/HANDOFF-reticle-map.md`](HANDOFF-reticle-map.md))
 > P1–P6 are landed + pushed and Chad has been live-testing them. His 2026-06-30 notes opened **three new asks**
