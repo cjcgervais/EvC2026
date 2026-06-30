@@ -372,9 +372,9 @@ UserInputService.InputChanged:Connect(function(input, gameProcessed)
 	if freeLook.active then
 		local s = CAM.freeLookSensitivity * 0.01
 		freeLook.yaw   = freeLook.yaw   - input.Delta.X * s
-		-- Pitch INVERTED per player ask (2026-06-30): mouse-up now looks DOWN, mouse-down looks UP. Yaw/pan
-		-- is unchanged. The arrow-key pitch below is kept in sync (Up = -s) so both inputs agree.
-		freeLook.pitch = math.clamp(freeLook.pitch - input.Delta.Y * s, -FREE_LOOK_PITCH_LIMIT, FREE_LOOK_PITCH_LIMIT)
+		-- Free-look pitch: mouse-up looks UP, mouse-down looks down (player re-inverted 2026-06-30). Yaw/pan
+		-- unchanged. The arrow-key pitch below is kept in sync (Up = look up) so both inputs agree.
+		freeLook.pitch = math.clamp(freeLook.pitch + input.Delta.Y * s, -FREE_LOOK_PITCH_LIMIT, FREE_LOOK_PITCH_LIMIT)
 	end
 	-- (Mouse-aim reads the absolute cursor position in onFlightStep; nothing to accumulate here.)
 end)
@@ -385,9 +385,9 @@ RunService.RenderStepped:Connect(function(dt)
 	local s = CAM.freeLookSensitivity * 2.5 * dt
 	if UserInputService:IsKeyDown(Enum.KeyCode.Left)  then freeLook.yaw   = freeLook.yaw   + s end
 	if UserInputService:IsKeyDown(Enum.KeyCode.Right) then freeLook.yaw   = freeLook.yaw   - s end
-	-- Up/Down match the INVERTED mouse pitch (player ask): Up key looks DOWN (+s), Down key looks UP (-s).
-	if UserInputService:IsKeyDown(Enum.KeyCode.Up)    then freeLook.pitch = math.clamp(freeLook.pitch + s, -FREE_LOOK_PITCH_LIMIT, FREE_LOOK_PITCH_LIMIT) end
-	if UserInputService:IsKeyDown(Enum.KeyCode.Down)  then freeLook.pitch = math.clamp(freeLook.pitch - s, -FREE_LOOK_PITCH_LIMIT, FREE_LOOK_PITCH_LIMIT) end
+	-- Up/Down match the mouse pitch (player re-inverted): Up key looks UP (-s), Down key looks DOWN (+s).
+	if UserInputService:IsKeyDown(Enum.KeyCode.Up)    then freeLook.pitch = math.clamp(freeLook.pitch - s, -FREE_LOOK_PITCH_LIMIT, FREE_LOOK_PITCH_LIMIT) end
+	if UserInputService:IsKeyDown(Enum.KeyCode.Down)  then freeLook.pitch = math.clamp(freeLook.pitch + s, -FREE_LOOK_PITCH_LIMIT, FREE_LOOK_PITCH_LIMIT) end
 end)
 
 --------------------------------------------------------------------------------

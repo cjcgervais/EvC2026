@@ -8,11 +8,11 @@ Read this first. It tells the next agent exactly where the project stands, the o
 > new safe revert point; `v1.0-eagle-flight` remains the pure-kernel point). **None touched the aero kernel
 > math** — these are input-shaping, camera, and cosmetic only, so the kernel stays `v1.0`-verified. What
 > landed (full detail in [`docs/HANDOFF-flight-feel-combat.md`](HANDOFF-flight-feel-combat.md) "Landed"):
-> mouse-aim deadzone shrunk to cursor-sized + ramp tuned to `expo 1.5` (more linear); aim reticle clamped to a
-> big centred circle (`aimCursorAreaFrac 0.875`); **free-look horizon lock** (stays world-level when you bank);
-> **chase loop turn-over** (`Camera.loopFollowUp 0.8` — camera arcs over *with* the bird, "perfect");
-> **free-look pitch inverted + wider pole range** (`FREE_LOOK_PITCH_LIMIT 1.70`); fainter centre crosshair; a
-> proper **white eagle tail**. **Don't regress any of these.**
+> mouse-aim with a tiny deadzone + **fully linear** ramp (`expo 1.0`) + higher authority gains; aim reticle
+> clamped to a big centred circle (`aimCursorAreaFrac 0.875`); **free-look horizon lock** (stays world-level
+> when you bank); **chase loop turn-over** (`Camera.loopFollowUp 0.8` — camera arcs over *with* the bird,
+> "perfect"); **free-look pitch (mouse-up = up) + wider pole range** (`FREE_LOOK_PITCH_LIMIT 1.70`); fainter
+> centre crosshair; a proper **white eagle tail**. **Don't regress any of these.**
 >
 > ### ▶ NEXT GRIND (still open) → same doc [`docs/HANDOFF-flight-feel-combat.md`](HANDOFF-flight-feel-combat.md)
 > Five of the six Playtest-3 asks remain: **P1** HUD must headline **SPACE = toggle free-look** (the hint is

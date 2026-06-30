@@ -18,12 +18,12 @@ human verifier.**
 ## ✅ Landed this session (2026-06-30, build-green — mouse-aim feel + cameras, PLAYER-CONFIRMED)
 A live tuning pass with the player. All `.\build.ps1`-verified; none touch the aero kernel (input-shaping +
 camera-only). **Where noted PLAYER-CONFIRMED, don't regress.**
-1. **Mouse-aim deadzone → "cursor-sized" + tuned ramp.** Player: *"too big a deadzone — make it the
-   circumference of the cursor, then a ramp of force per deflection… give it more linearity."* In
-   `GameConfig.Controls`: `aimBankDeadzone 0.10→0.025`, `aimPitchDeadzone 0.05→0.025` (small, equal → round
-   neutral around the cursor); `aimBankExpo`/`aimPitchExpo` settled at **1.5** (started 1.8→2.0→2.5, then
-   walked back to 1.5 for more linearity / steeper rise off centre). Shaper is `BirdController.shapeAxis`
-   (deadzone→renormalise→`n^expo`). Tuning: more linear → 1.2–1.0; jitter at centre → deadzone ~0.04.
+1. **Mouse-aim: tiny deadzone, FULLY LINEAR ramp, more authority.** Player walked this live: *"too big a
+   deadzone… more linearity… way less deadzone, full linearity, more mouse authority."* Final
+   `GameConfig.Controls`: `aimBankDeadzone`/`aimPitchDeadzone` `0.10/0.05 → 0.006` (a hair); `aimBankExpo`/
+   `aimPitchExpo` `→ 1.0` (linear, force ∝ offset — walked 1.8→2.5→1.5→1.0); gains up for authority
+   `aimPitchGain 2.6→3.3`, `aimRollGain 2.0→2.6`, `aimYawGain 0.6→0.78`. Shaper is `BirdController.shapeAxis`.
+   Tuning: jitter at centre → deadzone ~0.012; oscillation on a pull → raise `aimPitchDamp`/`aimRollDamp`.
 2. **Aim cursor clamped to a big CENTRED circle.** Player: *"the cursor should not go beyond a certain
    circle… it should cover ~7/8 of the screen by AREA and be centred."* `computeMouseAim` clamps the reticle
    to a circle at the viewport centre with radius `√(aimCursorAreaFrac·W·H/π)`; new
@@ -39,12 +39,11 @@ camera-only). **Where noted PLAYER-CONFIRMED, don't regress.**
    the top, instead of the horizon staying world-flat while the bird inverts. Gated by the crest rate → **zero
    effect in normal flight** (horizon stays level there). `chaseDir` (the no-snap basis) untouched, so no
    azimuth-snap regression. Tuning: more follow → toward 1.0; less → toward 0.4; 0 = old behavior.
-5. **Free-look pitch INVERTED + wider pole range — PLAYER-CONFIRMED.** Player: *"invert the camera pitch up
-   and down, and give me more range toward the poles — not so much that I spin round."* Mouse + arrow free-look
-   pitch flipped (mouse-up = look DOWN), and `FREE_LOOK_PITCH_LIMIT 1.54→1.70` rad (~88°→~97°) so you can look
-   straight up/down + a touch past, both ways, still well under π (no wrap/spin). *(This reverses the earlier
-   player-confirmed pitch-sign fix — by explicit new request.)* If the horizon ever rolls at the very extreme,
-   the pole is being crossed → trim the `1.70` constant down a few degrees.
+5. **Free-look pitch direction (mouse-up = look UP) + wider pole range — PLAYER-CONFIRMED.** He toggled the
+   pitch sign twice and settled on **mouse-up = look UP** (mouse + arrows in sync). `FREE_LOOK_PITCH_LIMIT
+   1.54→1.70` rad (~88°→~97°) so you can look straight up/down + a touch past, both ways, still well under π
+   (no wrap/spin). If the horizon ever rolls at the very extreme, the pole is being crossed → trim the `1.70`
+   constant down a few degrees.
 6. **Central crosshair dot more transparent — PLAYER-CONFIRMED.** `GameUI` crosshair `BackgroundTransparency
    0.4→0.8` (faint dead-centre dot).
 7. **Eagle given a proper WHITE TAIL — PLAYER-CONFIRMED.** `BirdBuilder` now has a per-bird `tailColor`
