@@ -575,9 +575,9 @@ end
 
 --------------------------------------------------------------------------------
 -- STRIKE METER (eagle only) — the directional-strike gauge. One bar (ready / active / cooldown)
--- plus an ARMED-DIRECTION indicator (L / F / R) whose lit chip = the strike a LEFT-CLICK would
--- throw at the current bank. Fed by the server via Body attributes StrikeMeter (0..1), StrikeActive
--- (bool), StrikeArmedDir ("left"|"forward"|"right"). Hidden for crows (those attrs are eagle-only).
+-- plus an ARMED-ZONE indicator (BEAK / TALON) whose lit chip = the strike a LEFT-CLICK would throw,
+-- auto-picked by which zone the nearest enemy is in. Fed by the server via Body attributes StrikeMeter
+-- (0..1), StrikeActive (bool), StrikeArmedDir ("beak"|"talon"|"none"). Hidden for crows (eagle-only attrs).
 --------------------------------------------------------------------------------
 local weaponsFrame
 local strikeFill, armedChips
@@ -599,15 +599,15 @@ do
 	title.TextColor3 = Color3.fromRGB(235, 235, 235); title.TextXAlignment = Enum.TextXAlignment.Left
 	title.Text = "STRIKE"; title.Parent = weaponsFrame
 
-	-- Armed-direction chips (the lit one = the strike your bank will throw right now).
+	-- Armed-zone chips (the lit one = the strike a LEFT-CLICK throws now, auto-picked by enemy proximity).
 	armedChips = {}
-	local order = { "left", "forward", "right" }
-	local chipText = { left = "\u{25C0} L", forward = "\u{25B2} F", right = "R \u{25B6}" }
+	local order = { "beak", "talon" }
+	local chipText = { beak = "\u{25B2} BEAK", talon = "TALON \u{25BC}" }
 	for i, key in ipairs(order) do
 		local chip = Instance.new("TextLabel")
 		chip.Name = "Chip_" .. key
-		chip.Size = UDim2.new(0, 40, 0, 18)
-		chip.Position = UDim2.new(0, 92 + (i - 1) * 40, 0, 8)
+		chip.Size = UDim2.new(0, 58, 0, 18)
+		chip.Position = UDim2.new(0, 88 + (i - 1) * 60, 0, 8)
 		chip.BackgroundTransparency = 1
 		chip.Font = Enum.Font.GothamBold
 		chip.TextSize = 13
@@ -634,7 +634,7 @@ do
 end
 
 -- Paint the strike bar by state (green = active/can hit, blue = ready, amber = cooling down) and
--- light the armed-direction chip matching the live bank.
+-- light the armed-zone chip the server reports an enemy is engaging ("beak"/"talon"; "none" lights neither).
 local function paintStrike(meter, active, armedDir)
 	strikeFill.Size = UDim2.new(math.clamp(meter, 0, 1), 0, 1, 0)
 	if active then

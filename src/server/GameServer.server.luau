@@ -908,28 +908,30 @@ end
 -- and owns the offset coverage cone. During the active window (past startup) the offset cone BOTH
 -- parries an incoming ram (tryStrikeCatch, from processCollisions: crow dies, eagle unharmed) AND
 -- deals offensive damage to a crow inside the cone within reach (the proactive hunt). ONE
--- catch-or-hit per window (the `caught` flag). State + a HUD meter/armed-dir are mirrored onto the
--- eagle Body as attributes (StrikeMeter 0..1, StrikeActive bool, StrikeArmedDir "left|right|forward").
+-- catch-or-hit per window (the `caught` flag). State + a HUD meter/armed-zone are mirrored onto the
+-- eagle Body as attributes (StrikeMeter 0..1, StrikeActive bool, StrikeArmedDir "beak"|"talon"|"none").
 
--- Classify the eagle's current bank into a strike type. roll = +banked-right (matches the client's
--- curBank). Authoritative: read from the Body's CFrame, never from any client-sent value.
--- INVERTED side-mapping (player ask 2026-06-30): rolling LEFT raises/bares the talon on the RIGHT side
--- (and vice-versa), so a left bank fires the RIGHT strike and a right bank fires the LEFT strike. Front
--- stays front. (The cone offsets in GameConfig.Combat.strikes are unchanged — "right" still covers the
--- bird's right-front — only which bank selects which side is flipped here.)
-local function classifyBank(body)
-	local roll = math.asin(math.clamp(-body.CFrame.RightVector.Y, -1, 1)) -- + = banked right (right wing down)
-	local thr = math.rad((GameConfig.Combat and GameConfig.Combat.bankStrikeThresholdDeg) or 18)
-	if roll > thr then return "left"       -- banked RIGHT bares the LEFT side
-	elseif roll < -thr then return "right" -- banked LEFT bares the RIGHT side
-	else return "forward" end
+-- The world-space axis of a strike's coverage cone (read from the Body's CFrame — authoritative, never a
+-- client value). "belly" = the bird's DOWN (-Up): it SWINGS as you roll, so the talon zone naturally tracks
+-- where the talons reach; "forward" (default) = the nose, for the beak jab.
+local function strikeAxis(body, cfg)
+	if cfg.axis == "belly" then return -body.CFrame.UpVector end
+	return body.CFrame.LookVector
 end
 
--- The coverage/strike cone axis for a strike type: the nose rotated by coneOffsetDeg about the bird's
--- up axis (so a side strike covers that side's front quadrant). +offset = toward the bird's right.
-local function strikeConeAxis(body, cfg)
-	local off = math.rad(cfg.coneOffsetDeg or 0)
-	return body.CFrame.LookVector * math.cos(off) + body.CFrame.RightVector * math.sin(off)
+-- Which strike ZONE the nearest enemy is in (Chad 2026-06-30 — the proximal zone makes the strike; the old
+-- bank-chosen LEFT/RIGHT dichotomy is GONE). "talon" when the enemy is more aligned with the BELLY (down) axis
+-- than the nose, else "beak"; returns `none` when no enemy is within strikeSelectRange. Banking tilts the belly
+-- axis sideways, so a hard bank swings the talon zone onto a side-low crow. Authoritative; client only mirrors
+-- this (StrikeArmedDir) to LIGHT the matching reticle. `none` lets onStrike default to beak but the HUD stay dark.
+local function enemyZone(entry, none)
+	local range = (GameConfig.Combat and GameConfig.Combat.strikeSelectRange) or 200
+	local target = findNearestEnemy(entry, range)
+	if not target then return none end
+	local d = target.body.Position - entry.body.Position
+	if d.Magnitude < 1e-3 then return none end
+	d = d.Unit
+	return (d:Dot(-entry.body.CFrame.UpVector) > d:Dot(entry.body.CFrame.LookVector)) and "talon" or "beak"
 end
 
 local function newStrikeState()
@@ -966,7 +968,7 @@ local function onStrike(player)
 	local s = entry.strike
 	if s.state ~= "ready" then return end -- busy (startup/active/cooldown) — ignore the trigger
 	local strikes = GameConfig.Combat and GameConfig.Combat.strikes
-	local stype = classifyBank(entry.body)
+	local stype = enemyZone(entry, "beak") -- auto-pick by enemy proximity; default to the forward beak jab
 	local cfg = strikes and strikes[stype]
 	if not cfg then return end
 	lastAttackAt[player] = now
@@ -994,7 +996,7 @@ local function updateEagleStrikes(dt)
 			stepStrike(s, dt)
 
 			-- OFFENSIVE pass: while active (past startup) and not yet spent this window, a crow inside the
-			-- offset cone within reach takes the strike's damage. One hit per window (shares `caught` with
+			-- zone's cone (beak=forward / talon=belly) within reach takes the strike's damage. One per window (shares `caught` with
 			-- the defensive parry, so a strike lands EITHER a kill-catch OR an offensive hit, never both).
 			if s.state == "active" and s.startupLeft <= 0 and not s.caught then
 				local cfg = strikes[s.stype]
@@ -1005,7 +1007,7 @@ local function updateEagleStrikes(dt)
 					if target and dist and dist <= reach then
 						local dir = target.body.Position - entry.body.Position
 						if dir.Magnitude > 1e-3 then
-							local axis = strikeConeAxis(entry.body, cfg)
+							local axis = strikeAxis(entry.body, cfg)
 							if dir.Unit:Dot(axis) >= math.cos(math.rad(cfg.coverHalfAngleDeg or 60)) then
 								local dmg = (cfg.damage == "beak") and (p.beakDamage or 22) or (p.talonDamage or 34)
 								s.caught = true
@@ -1017,7 +1019,7 @@ local function updateEagleStrikes(dt)
 			end
 
 			-- HUD mirror: meter (0..1), whether it can parry/hit right now, and the LIVE armed direction
-			-- (the strike a click would throw at the current bank — lights the L/F/R indicator).
+			-- (the strike a click would throw — picked by enemy proximity; lights the BEAK/TALON indicator).
 			local meter, active = 1, false
 			if s.state == "active" then
 				local cfg = strikes[s.stype] or {}
@@ -1030,7 +1032,7 @@ local function updateEagleStrikes(dt)
 			end
 			entry.body:SetAttribute("StrikeMeter", meter)
 			entry.body:SetAttribute("StrikeActive", active)
-			entry.body:SetAttribute("StrikeArmedDir", classifyBank(entry.body))
+			entry.body:SetAttribute("StrikeArmedDir", enemyZone(entry, "none"))
 		end
 	end
 end
@@ -1046,7 +1048,7 @@ local function tryStrikeCatch(eagle, crow)
 	if not cfg then return false end
 	local dir = crow.body.Position - eagle.body.Position
 	if dir.Magnitude < 1e-3 then return false end
-	local axis = strikeConeAxis(eagle.body, cfg)
+	local axis = strikeAxis(eagle.body, cfg)
 	if dir.Unit:Dot(axis) >= math.cos(math.rad(cfg.coverHalfAngleDeg or 60)) then
 		s.caught = true
 		return true

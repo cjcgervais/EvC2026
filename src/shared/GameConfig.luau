@@ -317,34 +317,34 @@ GameConfig.Profiles = {
 GameConfig.Combat = {
 	eagleHits = 3,   -- unparried crow rams the eagle survives (1 ram = health/eagleHits)
 
-	-- DIRECTIONAL STRIKE (eagle only) — the central-thesis combat model (player ask 2026-06-30: "the
-	-- banking side the bird is flying to — left talon strike, right talon strike, or forward — determines
-	-- the type of strike and its duration and downtime"). ONE button (LEFT-CLICK) fires a strike; the
-	-- eagle's BANK at the click instant picks WHICH of three strikes, each with its own startup→active
-	-- duration→cooldown (downtime) and an OFFSET coverage cone:
-	--   bank LEFT  (|roll| > threshold, left wing down)  -> LEFT talon  (cone offset to the bird's left-front)
-	--   bank RIGHT (|roll| > threshold, right wing down) -> RIGHT talon (cone offset right-front)
-	--   ~LEVEL     (|roll| < threshold)                  -> FORWARD     (narrow head-on, beak-flavored)
-	-- During a strike's ACTIVE window (past startup), the offset cone BOTH parries an incoming crow ram
-	-- (crow dies, eagle unharmed — the old catch) AND deals offensive damage to a crow inside the cone
-	-- within reach (the eagle can HUNT, not only counter). ONE catch-or-hit per window.
+	-- DIRECTIONAL STRIKE (eagle only) — REWORKED 2026-06-30 (Chad): drop the left/right talon dichotomy. There
+	-- are now just TWO zones, and the GAME auto-picks which strike a LEFT-CLICK throws by which zone the nearest
+	-- enemy is in (the proximal reticle makes the strike — GameServer.enemyZone), each with its own
+	-- startup→active duration→cooldown and a coverage cone:
+	--   • TALON — a wide BELLY zone (cone around the bird's DOWN/-Up axis, so it SWINGS as you roll/bank — the
+	--             talon arc reticle shows it). LONG active window, SHORT reset: the bread-and-butter grab when a
+	--             crow is below / below-to-the-side. (Chad: ~4 s effective duration, ~2 s cooldown.)
+	--   • BEAK  — a narrow FORWARD zone (cone around the nose; the beak/boresight reticle). SHORT active window,
+	--             LONG reset: a committed head-on jab. (Chad: ~2 s duration, ~4 s cooldown.)
+	-- During a strike's ACTIVE window (past startup) the zone's cone BOTH parries an incoming crow ram (crow
+	-- dies, eagle unharmed — tryStrikeCatch) AND deals offensive damage to a crow inside the cone within reach
+	-- (the eagle can HUNT). ONE catch-or-hit per window. The client mirrors the picked zone live
+	-- (Body attr StrikeArmedDir "beak"/"talon"/"none") to LIGHT the matching reticle.
 	--
-	-- WHY THIS IS BALANCED (1-v-4 — preserve this reasoning): the eagle can only be banked ONE way at a
-	-- time, so it covers/strikes ONE angle per commitment. Four crows from spread angles → striking left
-	-- leaves right/rear open → the swarm still wins by SATURATION (the whole asymmetry). Directionality
-	-- SHARPENS the "one catch per window / multi-angle beats one cover" lever, it doesn't weaken it. Tune
-	-- the windows/downtimes so a skilled eagle covers a READ but cannot spam-cover all sides (research
-	-- guardrail: >50% single-angle uptime = the "always-on" trap). The OFFENSIVE damage is the lever to
-	-- watch hardest — if 1-v-4 turns too eagle-favored, drop the damage/reach/duration (or zero the
-	-- offensive pass and keep it defense-only first). Server owns every timer + the bank classification
-	-- (anti-cheat): the client sends only a fire EDGE, never a direction. ALL PLAYTEST-PROVISIONAL.
-	bankStrikeThresholdDeg = 18,  -- |roll| beyond this picks a side; within it = forward
+	-- WHY THIS IS BALANCED (1-v-4 — preserve this reasoning): the eagle presents ONE zone at a time (belly OR
+	-- nose) → it covers/strikes ONE angle per commitment → four crows from spread angles still win by
+	-- SATURATION (the whole asymmetry). ⚠️ WATCH (flight==balance): the talon's LONG active window (4 s active /
+	-- 2 s cd ≈ 67% uptime) flirts with the research >50% single-angle "always-on" guardrail. If 1-v-4 turns
+	-- eagle-favored, cut the talon duration / widen its cooldown / drop the offensive damage (or zero the
+	-- offensive pass → defense-only) FIRST. Server owns every timer + the zone pick (anti-cheat): the client
+	-- sends only a fire EDGE, never a direction. ALL PLAYTEST-PROVISIONAL (durations/cooldowns are Chad's asks).
+	bankStrikeThresholdDeg = 18,  -- LEGACY (no longer used; the strike zone is picked by enemy proximity, not bank)
+	strikeSelectRange = 200,      -- studs; an enemy within this range drives the zone pick + reticle lighting
 	strikes = {
-		-- Bread-and-butter side talons: wider cone offset to that side, medium window + reset.
-		left    = { startup = 0.12, duration = 0.45, cooldown = 1.2, coverHalfAngleDeg = 70, coneOffsetDeg = -55, damage = "talon", reachFraction = 0.7 },
-		right   = { startup = 0.12, duration = 0.45, cooldown = 1.2, coverHalfAngleDeg = 70, coneOffsetDeg =  55, damage = "talon", reachFraction = 0.7 },
-		-- Committed head-on: narrow forward cone, quicker startup, shorter window, longer downtime.
-		forward = { startup = 0.10, duration = 0.30, cooldown = 1.6, coverHalfAngleDeg = 40, coneOffsetDeg =   0, damage = "beak",  reachFraction = 0.8 },
+		-- TALON: wide belly cone (swings with bank), long active window + short reset — the workhorse grab.
+		talon = { startup = 0.10, duration = 4.0, cooldown = 2.0, axis = "belly",   coverHalfAngleDeg = 70, damage = "talon", reachFraction = 0.85 },
+		-- BEAK: narrow forward cone, short active window + long reset — the committed head-on jab.
+		beak  = { startup = 0.10, duration = 2.0, cooldown = 4.0, axis = "forward", coverHalfAngleDeg = 35, damage = "beak",  reachFraction = 0.85 },
 	},
 }
 
@@ -578,16 +578,18 @@ GameConfig.Controls = {
 	-- Flight.AEROBATIC_MIN_SPEED) — a slow bird mushes instead of looping (Energy-Maneuverability).
 	-- ALL PLAYTEST-PROVISIONAL.
 	mouseAim     = true,
-	aimMarkerDistance = 600,  -- studs the nose cross is projected out front of the bird FOR THE AIM-ERROR math
-	-- BEAK-ZONE STRIKE RETICLES (melee-aim UI, 2026-06-30). The DRAWN amber nose cross + the two side talon
-	-- reticles sit CLOSE to the beak (beakReticleDistance) so they read as the actual strike reach — DECOUPLED
-	-- from aimMarkerDistance, which stays at its tuned 600 for the steering aim-error geometry (moving the
-	-- DRAWN reticle in must NOT change the loved feel — handoff caution). The two side reticles are offset this
-	-- many studs along the bird's RIGHT axis near the beak; the one armed by the live bank LIGHTS UP using the
-	-- INVERTED mapping (matches GameServer.classifyBank): bank RIGHT arms LEFT, bank LEFT arms RIGHT, level =
-	-- the forward (nose-cross) strike. Client-side bank read = zero latency; server stays strike-authoritative.
-	beakReticleDistance     = 70,  -- studs out front the melee reticles are drawn (the talon/strike zone)
-	strikeReticleSideOffset = 26,  -- studs the L/R talon reticles sit to either side of the beak (along RightVector)
+	aimMarkerDistance = 600,  -- LEGACY (unused since the beak reticle was coupled to beakReticleDistance, 2026-06-30)
+	-- BEAK + TALON RETICLES (melee-aim UI, reworked 2026-06-30 per Chad). The amber BEAK cross is the boresight
+	-- AND the head-on strike marker: it's drawn at beakReticleDistance out front, and the aim ERROR is computed
+	-- from the SAME point — that COUPLING is what makes "cursor centred on the cross == straight & level flight"
+	-- (the old decoupled draw at 70 vs error at 600 dove at centre). Distance only moves the neutral cursor, not
+	-- the per-pixel feel (the error is a screen-angle), so the loved gains carry. The TALON reticle is a
+	-- hemispherical ARC of pips UNDER the bird (talonReticleDistance below, spanning ±talonArcSpreadDeg in the
+	-- roll plane) that SWINGS as you bank. NO left/right any more — one beak zone, one talon zone; the server
+	-- picks which a click throws by enemy proximity (StrikeArmedDir) and the matching reticle lights.
+	beakReticleDistance = 90,   -- studs out front the beak cross sits (also the coupled aim-error reference)
+	talonReticleDistance = 70,  -- studs below the belly the talon arc is drawn
+	talonArcSpreadDeg = 60,     -- half-spread of the talon arc to either side of straight-down (in the roll plane)
 	aimResponse  = 13.0,      -- per-sec ease of the APPLIED input toward target. RAISED 9->13: the PD damping
 	                          -- below now does the smoothing, so the ease no longer has to add lag (lag = phase =
 	                          -- the porpoise). Faster ease = crisper, less floaty; PD keeps it from overshooting.
