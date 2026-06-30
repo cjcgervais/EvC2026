@@ -2,7 +2,19 @@
 
 Read this first. It tells the next agent exactly where the project stands, the one decision that's already been made for you, and the prioritized work queue. Pair it with `CLAUDE.md` (architecture + contracts), `docs/RESEARCH.md` (why the numbers are what they are), and project memory (`MEMORY.md` index).
 
-> ## ⚙️ TOP PRIORITY (2026-06-29): flight + camera holistic redesign — IMPLEMENTED, awaiting Studio verify
+> ## 🦅 TOP PRIORITY (2026-06-30): flight-feel & sandbox grind — START HERE → [`docs/HANDOFF-flight-sandbox.md`](HANDOFF-flight-sandbox.md)
+> Playtest-2: the player **loves the flight + the (now-fixed) free-look** — kernel and maneuvers confirmed
+> great. Four focused feel/QoL improvements remain, fully scoped with exact pointers and acceptance criteria
+> in the sandbox handoff: **P1** map renders too late at speed (almost certainly `Workspace.StreamingEnabled`
+> defaulting ON — disable it, ~26 anchored parts don't need streaming); **P2** make free-look pan feel like
+> War Thunder arcade (crisp 1:1 smoothing + higher sensitivity, all camera-only); **P3** a richer sandbox
+> (mid-field parallax/texture for a sense of speed + a no-combat **Sandbox mode** flag); **P4** more
+> power/acceleration per flap, **balance-aware** (Eagle change — reason about 1-v-4; stamina stays the
+> limiter). The three Playtest-1 free-look bugs below are **FIXED & player-confirmed** — don't regress them.
+>
+> ---
+>
+> ## ⚙️ (2026-06-29) flight + camera holistic redesign — IMPLEMENTED & largely player-confirmed
 > The mouse-aim control law, energy tuning, and chase camera were rebuilt holistically on a `deep-research`
 > pass (26 sources, 23 verified claims) instead of more band-aids. **What landed** (full rationale +
 > citations in **[`docs/RESEARCH.md`](RESEARCH.md) §v4**; problem statement in

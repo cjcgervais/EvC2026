@@ -1,5 +1,14 @@
 # HANDOFF — Free-look mode: 3 playtest bugs + the attitude-hold spec
 
+> **STATUS — FIXED & PLAYER-CONFIRMED 2026-06-30.** All three fixes are IN
+> `src/client/BirdController.client.luau` and the player confirmed free-look now works (attitude holds, no
+> camera flip, pitch correct). **Don't regress these.** Remaining flight-feel work moved to
+> **[`HANDOFF-flight-sandbox.md`](HANDOFF-flight-sandbox.md)**. Bug 1 used the **ease-to-0** variant
+> (the documented primary). Bug 2 also took the optional `lookTarget = position` polish. Bug 3 was
+> extended: the **arrow-key** pitch (Up/Down) was flipped to match the corrected mouse, because the two
+> shared `freeLook.pitch` with the same convention, so fixing only the mouse would have left the arrows
+> inverted relative to it. Validate against the Acceptance criteria below; the doc text is the rationale.
+
 **Created 2026-06-29** after the FIRST live playtest of the `flight-camera-redesign-v4` branch (the holistic
 redesign — see `docs/RESEARCH.md §v4`, `docs/HANDOFF-flight-tuning.md`, and the
 `flight-camera-redesign-handoff` memory). For an agent with **cleared context**. Pair with `CLAUDE.md`
