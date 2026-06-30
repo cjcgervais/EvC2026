@@ -192,6 +192,14 @@ local aimCursor = { x = 0, y = 0, cursorX = 0, cursorY = 0, noseX = 0, noseY = 0
 -- bird follows the reticle softly/flightily rather than snapping. Summed with keyboard in onFlightStep.
 local aimApplied = { pitch = 0, roll = 0, yaw = 0 }
 
+-- SELF-CENTERING VIRTUAL AIM CURSOR (relative mouse). The mouse DELTA pushes this offset (from screen centre,
+-- i.e. from the nose cross) out; it eases back toward centre every frame at Controls.aimRecenterRate. So a held
+-- deflection RESOLVES — the bird coordinated-turns toward where you pushed, the cursor returns to the nose, and
+-- the bird STRAIGHTENS (instead of turning forever; Chad 2026-06-30). Continuous mouse movement balances the
+-- decay into a sustained turn/loop. resetInput() recentres it. (Restores the original virtual-stick intent —
+-- see the InputChanged comment — that had been replaced by a never-resolving absolute-cursor read.)
+local aimVirtual = Vector2.new(0, 0)
+
 -- Tap->ramp smoothing for roll and yaw (mirrors pitchRamp) so keyboard banking eases in.
 local rollRamp = { sign = 0, mag = 0 }
 local yawRamp  = { sign = 0, mag = 0 }
@@ -321,7 +329,10 @@ local function setFreeLook(active)
 		freeLook.pitch = 0
 		UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
 	else
-		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+		-- Returning to mouse-aim: recentre the virtual cursor so the bird doesn't lurch from a stale deflection,
+		-- and re-lock the mouse (onFlightStep will keep it LockCenter'd for the relative-delta aim read).
+		aimVirtual = Vector2.new(0, 0)
+		UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
 	end
 end
 
@@ -425,7 +436,7 @@ UserInputService.InputChanged:Connect(function(input, gameProcessed)
 		-- unchanged. The arrow-key pitch below is kept in sync (Up = look up) so both inputs agree.
 		freeLook.pitch = math.clamp(freeLook.pitch + input.Delta.Y * s, -FREE_LOOK_PITCH_LIMIT, FREE_LOOK_PITCH_LIMIT)
 	end
-	-- (Mouse-aim reads the absolute cursor position in onFlightStep; nothing to accumulate here.)
+	-- (Mouse-aim reads the per-frame GetMouseDelta straight in computeMouseAim; nothing to accumulate here.)
 end)
 
 -- Arrow keys also orbit the free-look camera (alternative to the mouse).
@@ -806,7 +817,7 @@ end
 -- corkscrew), and a little RUDDER coordinates. The nose-up pull eases off near stall so the bird climbs to
 -- the stall edge and HOLDS there instead of yanking past it into a stalling dive. Returns 0,0,0 while
 -- free-look (Space) suspends it. Writes aimCursor.* (marker screen positions) for the reticle render.
-local function computeMouseAim()
+local function computeMouseAim(dt)
 	local C = GameConfig.Controls
 	if not (C and C.mouseAim) or freeLook.active then
 		return 0, 0, 0
@@ -829,22 +840,28 @@ local function computeMouseAim()
 	local inFront = noseVP.Z > 0
 
 	local inset = GuiService:GetGuiInset()
-	local mouse = UserInputService:GetMouseLocation()
-
-	-- CLAMP the aim cursor to a big CIRCLE CENTRED on the screen (player ask 2026-06-30: "it should cover ~7/8
-	-- of the screen by AREA and be centred"). Centre = the viewport centre in window coords (matches the
-	-- nose-cross's own screen-centre, since aimGui.IgnoreGuiInset = true). Radius is set from a target AREA
-	-- fraction: r = sqrt(areaFrac · W · H / π) — at 7/8 this reaches the top/bottom edges and most of the
-	-- width. Past the rim the reticle is pinned, so the command just stays saturated (sustained full turn/loop)
-	-- instead of sliding to a corner. Clamping `mouse` here feeds BOTH the aim ray and the drawn reticle.
 	local cx, cy = inset.X + vp.X * 0.5, inset.Y + vp.Y * 0.5
 	local maxR   = math.sqrt(((C.aimCursorAreaFrac or 0.875) * vp.X * vp.Y) / math.pi)
-	local dx, dy = mouse.X - cx, mouse.Y - cy
-	local r = math.sqrt(dx * dx + dy * dy)
-	if r > maxR and r > EPS then
-		local k = maxR / r
-		mouse = Vector2.new(cx + dx * k, cy + dy * k)
-	end
+
+	-- SELF-CENTERING VIRTUAL CURSOR (relative mouse — the key fix, Chad 2026-06-30: "the reticle never meets the
+	-- cursor, it just keeps turning hard"). The mouse DELTA pushes the virtual cursor out from centre (the nose);
+	-- every frame it also DECAYS back toward centre at aimRecenterRate. So a held deflection RESOLVES: the bird
+	-- coordinated-turns toward where you pushed, the cursor eases back to the nose cross, the error → 0, and the
+	-- bird STRAIGHTENS in the new direction — instead of turning forever (the chase cam re-centres the heading, so
+	-- an ABSOLUTE cursor could never be reached → perpetual turn). Moving the mouse continuously balances the decay
+	-- = a sustained turn/loop. aimRecenterRate = 0 → no decay (the old hold-at-edge behaviour). Needs the mouse
+	-- LockCenter'd (set in onFlightStep) so GetMouseDelta reports movement and neutral (stick=0) is well defined.
+	local delta = UserInputService:GetMouseDelta()
+	aimVirtual = aimVirtual + delta * (C.aimMouseSensitivity or 1.0)
+	-- Decay toward the NOSE CROSS offset (not raw screen centre): when the cursor settles it then sits exactly ON
+	-- the cross → zero error → the bird HOLDS its current heading (a true straighten), even mid-bank where the
+	-- cross isn't at screen centre. So the green ring visibly returns to the amber cross = "met, resolved".
+	local noseTarget = inFront and Vector2.new(noseVP.X - vp.X * 0.5, noseVP.Y - vp.Y * 0.5) or Vector2.new(0, 0)
+	local decay = math.clamp((C.aimRecenterRate or 3.0) * (dt or 0), 0, 1)
+	aimVirtual = aimVirtual:Lerp(noseTarget, decay)
+	local vr = aimVirtual.Magnitude
+	if vr > maxR and vr > EPS then aimVirtual = aimVirtual * (maxR / vr) end
+	local mouse = Vector2.new(cx + aimVirtual.X, cy + aimVirtual.Y)
 
 	-- Resolve the cursor into a desired BODY-frame direction. Comparing the camera ray through the cursor
 	-- with the camera ray through the CROSS makes "cursor on the cross" == zero error (no neutral bias from
@@ -960,18 +977,14 @@ local function onFlightStep(dt)
 	flightEngine:SetThermalForce(computeThermalForce(rootPart.Position))
 	flightEngine:SetWind(GameConfig.Flight.WIND_BASE)
 
-	-- 1b. Mouse mode. Free-look LOCKS the mouse to orbit the camera; otherwise mouse-AIM uses the
-	-- absolute cursor (Default behavior). The OS icon is hidden either way (our reticle replaces it).
+	-- 1b. Mouse mode. BOTH free-look and mouse-AIM now LOCK the mouse to centre: free-look orbits the camera off
+	-- the delta, mouse-aim feeds the delta into the self-centering virtual cursor (so a deflection RESOLVES). The
+	-- OS icon is hidden either way (our reticle replaces it). LockCenter is also what makes GetMouseDelta report.
 	local C = GameConfig.Controls
 	local aimOn = C and C.mouseAim and not freeLook.active
-	if freeLook.active then
+	if freeLook.active or aimOn then
 		if UserInputService.MouseBehavior ~= Enum.MouseBehavior.LockCenter then
 			UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
-		end
-		UserInputService.MouseIconEnabled = false
-	elseif aimOn then
-		if UserInputService.MouseBehavior ~= Enum.MouseBehavior.Default then
-			UserInputService.MouseBehavior = Enum.MouseBehavior.Default
 		end
 		UserInputService.MouseIconEnabled = false
 	end
@@ -994,7 +1007,7 @@ local function onFlightStep(dt)
 	-- the FOV change can't feed back through the camera-projection aim into pitch/bank. Keyboard SUMS on top
 	-- below, so QWEASD still adjust the held attitude. Resumes mouse-aim cleanly on release/toggle-back.
 	if aimOn and camera and not aimZoom.active then
-		local aPitch, aRoll, aYaw = computeMouseAim()
+		local aPitch, aRoll, aYaw = computeMouseAim(dt)
 		local resp = math.clamp(((C and C.aimResponse) or 7) * dt, 0, 1)
 		aimApplied.pitch = aimApplied.pitch + (aPitch - aimApplied.pitch) * resp
 		aimApplied.roll  = aimApplied.roll  + (aRoll  - aimApplied.roll)  * resp
@@ -1097,6 +1110,7 @@ local function resetInput()
 	yawRamp.sign, yawRamp.mag = 0, 0
 	steer.x, steer.y = 0, 0
 	aimCursor.x, aimCursor.y = 0, 0
+	aimVirtual = Vector2.new(0, 0)
 	aimApplied.pitch, aimApplied.roll, aimApplied.yaw = 0, 0, 0
 	inputState.pitch, inputState.roll, inputState.yaw = 0, 0, 0
 	inputState.flap, inputState.dive = false, false
