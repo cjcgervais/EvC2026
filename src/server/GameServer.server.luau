@@ -1292,12 +1292,16 @@ local function avoidObstacle(entry)
 	local hit = BirdCollision.lookAhead(body.Position, dir, look, entry.profile.bodyRadius + (cfg.spherePad or 8), getCollisionParams())
 	if not hit then return nil end
 	local dist = (hit.Position - body.Position).Magnitude
-	local urgency = 1 - math.clamp(dist / look, 0, 1)
+	-- Urgency ramps EARLY (sqrt curve) so the crow starts banking away the moment terrain is seen, not only
+	-- once it's too close to turn at speed. Plus a floor so even a far detection produces a real nudge.
+	local urgency = math.max(0.35, math.sqrt(1 - math.clamp(dist / look, 0, 1)))
 	local normal = hit.Normal
 	local tangent = dir - normal * dir:Dot(normal)
 	local tm = tangent.Magnitude
 	local tunit = (tm > 1e-3) and (tangent / tm) or Vector3.new()
-	local steerAway = normal * 0.7 + tunit * 0.3
+	-- Favour the TANGENT (slide/arc around) over pure push-back so the crow curves past the wall while
+	-- keeping speed toward the eagle, rather than braking head-on into it.
+	local steerAway = normal * 0.55 + tunit * 0.7
 	local sm = steerAway.Magnitude
 	if sm < 1e-3 then return normal, urgency end
 	return steerAway / sm, urgency
@@ -1347,28 +1351,30 @@ local function updateAICrows(dt)
 				-- resolve here directly — a head-on map impact crashes the crow, a graze slides
 				-- it along the surface (engine velocity is server-trusted; use it for the gate).
 				local toPos = entry.engine.orientation.Position
-				local newPos, newVel, crashed = BirdCollision.resolve(
+				-- AI crows treat a terrain impact as NON-LETHAL: even a head-on hit just slides them along the
+				-- surface (we pass a huge crashSpeed so resolve never flags `crashed`). A bot must never suicide
+				-- on a building before the player can engage it (player ask 2026-06-30); its deaths come from the
+				-- eagle's strikes/collisions (and the deep Y-failsafe). The PLAYER-flown crow is unaffected — its
+				-- crashes run through processCrashes with the real CRASH_SPEED. Avoidance (above) still makes the
+				-- bot arc around terrain so it doesn't just grind along a wall.
+				local newPos, newVel = BirdCollision.resolve(
 					fromPos, toPos, entry.engine.velocity, entry.profile.bodyRadius,
-					getCollisionParams(), GameConfig.Flight.CRASH_SPEED
+					getCollisionParams(), math.huge
 				)
-				if crashed then
-					applyDamage(entry, getHealth(body) + 1, nil, "crash")
-				else
-					if (newPos - toPos).Magnitude > 1e-3 then
-						-- Re-seat the engine at the slid position (keep its rotation) + slid velocity.
-						local cf = entry.engine.orientation
-						entry.engine.orientation = (cf - cf.Position) + newPos
-						entry.engine.velocity = newVel
-					end
-					pcall(function()
-						body.CFrame = entry.engine.orientation
-						body.AssemblyLinearVelocity = entry.engine.velocity
-						body.AssemblyAngularVelocity = Vector3.new()
-					end)
-
-					-- Animate wings to match the AI state.
-					BirdBuilder.AnimateWings(entry.model, entry.engine.isFlapping, entry.engine.isDiving, entry.engine.flapPhase, fdt)
+				if (newPos - toPos).Magnitude > 1e-3 then
+					-- Re-seat the engine at the slid position (keep its rotation) + slid velocity.
+					local cf = entry.engine.orientation
+					entry.engine.orientation = (cf - cf.Position) + newPos
+					entry.engine.velocity = newVel
 				end
+				pcall(function()
+					body.CFrame = entry.engine.orientation
+					body.AssemblyLinearVelocity = entry.engine.velocity
+					body.AssemblyAngularVelocity = Vector3.new()
+				end)
+
+				-- Animate wings to match the AI state.
+				BirdBuilder.AnimateWings(entry.model, entry.engine.isFlapping, entry.engine.isDiving, entry.engine.flapPhase, fdt)
 			end
 		end
 	end
