@@ -494,7 +494,7 @@ GameConfig.Camera = {
 	-- opaque body can't block the view. It does NOT move the camera or swing the look (that offset the zoom and
 	-- fed back into flight) — the look stays heading-centred and steering is SUSPENDED while zooming, so it's
 	-- purely awareness. Eagle-distance is the MOUSE WHEEL's job (zoomStep/userZoom), in chase AND free-look.
-	aimFOV          = 38,   -- narrower FOV while zoomed (from baseFOV 70) — the magnification (lower = stronger)
+	aimFOV          = 22,   -- narrower FOV while zoomed (from baseFOV 70) — the magnification (lower = stronger zoom). ~3.2x at 22
 	aimFadeBird     = 0.85, -- how transparent the eagle goes at full zoom (0 = opaque, 1 = invisible) so it can't block
 	aimZoomLerp     = 0.22, -- per-frame ease of the zoom factor toward 0/1 (higher = snappier zoom)
 	-- Mouse-wheel zoom: scroll adjusts a user offset folded into the chase distance.
@@ -598,10 +598,10 @@ GameConfig.Controls = {
 	aimBankDeadzone  = 0.006, -- BANK/YAW deadzone: matched to pitch (small round neutral)
 	aimBankExpo      = 1.0,   -- BANK/YAW ramp: fully linear, matched to pitch
 	-- OUTER cursor bound: the aim reticle is CLAMPED to a circle CENTRED on the screen that covers this
-	-- fraction of the screen AREA (0.875 = 7/8 — big, nearly the whole screen). Past the rim the command just
-	-- stays saturated (full turn/loop). radius = sqrt(areaFrac · W · H / π); BirdController.computeMouseAim
-	-- does the clamp. A value this large reaches the top/bottom edges and most of the width. PLAYTEST-PROVISIONAL.
-	aimCursorAreaFrac = 0.875,
+	-- fraction of the screen AREA (0.75 = 3/4 — player ask 2026-06-30, tightened from 7/8). Past the rim the
+	-- command just stays saturated (full turn/loop). radius = sqrt(areaFrac · W · H / π);
+	-- BirdController.computeMouseAim does the clamp. Smaller = a tighter cursor circle. PLAYTEST-PROVISIONAL.
+	aimCursorAreaFrac = 0.75,
 	aimRollGain      = 2.6,   -- bank-to-turn strength (2.0->2.6: more mouse authority per player ask)
 	aimPitchGain     = 3.3,   -- elevator: pulls the nose toward the target (2.6->3.3: more authority; full deflection still saturates -> loop)
 	aimYawGain       = 0.78,  -- rudder, coordinated WITH the bank (0.6->0.78: scaled with the bank bump)

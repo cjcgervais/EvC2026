@@ -630,9 +630,11 @@ local function updateCamera(dt)
 	if aimZoom.factor > 1e-3 then
 		targetFOV = targetFOV + ((CAM.aimFOV or 45) - targetFOV) * aimZoom.factor
 	end
+	-- Floor lowered 50 -> 12 so the right-click zoom (aimFOV) can actually reach a strong telescope
+	-- magnification (the old 50 floor was capping it). Normal dive/climb/base FOVs are all well above this.
 	camera.FieldOfView = math.clamp(
 		camera.FieldOfView + (targetFOV - camera.FieldOfView) * math.clamp(dt * 6, 0, 1),
-		50, 110
+		12, 110
 	)
 
 	-- Fade the eagle locally while right-click zooming so its opaque body can't block the telescoped

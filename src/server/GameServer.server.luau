@@ -857,11 +857,15 @@ end
 
 -- Classify the eagle's current bank into a strike type. roll = +banked-right (matches the client's
 -- curBank). Authoritative: read from the Body's CFrame, never from any client-sent value.
+-- INVERTED side-mapping (player ask 2026-06-30): rolling LEFT raises/bares the talon on the RIGHT side
+-- (and vice-versa), so a left bank fires the RIGHT strike and a right bank fires the LEFT strike. Front
+-- stays front. (The cone offsets in GameConfig.Combat.strikes are unchanged — "right" still covers the
+-- bird's right-front — only which bank selects which side is flipped here.)
 local function classifyBank(body)
 	local roll = math.asin(math.clamp(-body.CFrame.RightVector.Y, -1, 1)) -- + = banked right (right wing down)
 	local thr = math.rad((GameConfig.Combat and GameConfig.Combat.bankStrikeThresholdDeg) or 18)
-	if roll > thr then return "right"
-	elseif roll < -thr then return "left"
+	if roll > thr then return "left"       -- banked RIGHT bares the LEFT side
+	elseif roll < -thr then return "right" -- banked LEFT bares the RIGHT side
 	else return "forward" end
 end
 
