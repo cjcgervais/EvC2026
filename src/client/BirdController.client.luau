@@ -371,7 +371,9 @@ UserInputService.InputChanged:Connect(function(input, gameProcessed)
 	if freeLook.active then
 		local s = CAM.freeLookSensitivity * 0.01
 		freeLook.yaw   = freeLook.yaw   - input.Delta.X * s
-		freeLook.pitch = math.clamp(freeLook.pitch - input.Delta.Y * s, -FREE_LOOK_PITCH_LIMIT, FREE_LOOK_PITCH_LIMIT)
+		-- Pitch sign FLIPPED (+Delta.Y) so mouse-up looks up / mouse-down looks down (was inverted). Yaw/pan
+		-- is correct as-is. The arrow-key pitch below is flipped to MATCH so both inputs agree.
+		freeLook.pitch = math.clamp(freeLook.pitch + input.Delta.Y * s, -FREE_LOOK_PITCH_LIMIT, FREE_LOOK_PITCH_LIMIT)
 	end
 	-- (Mouse-aim reads the absolute cursor position in onFlightStep; nothing to accumulate here.)
 end)
@@ -382,8 +384,9 @@ RunService.RenderStepped:Connect(function(dt)
 	local s = CAM.freeLookSensitivity * 2.5 * dt
 	if UserInputService:IsKeyDown(Enum.KeyCode.Left)  then freeLook.yaw   = freeLook.yaw   + s end
 	if UserInputService:IsKeyDown(Enum.KeyCode.Right) then freeLook.yaw   = freeLook.yaw   - s end
-	if UserInputService:IsKeyDown(Enum.KeyCode.Up)    then freeLook.pitch = math.clamp(freeLook.pitch + s, -FREE_LOOK_PITCH_LIMIT, FREE_LOOK_PITCH_LIMIT) end
-	if UserInputService:IsKeyDown(Enum.KeyCode.Down)  then freeLook.pitch = math.clamp(freeLook.pitch - s, -FREE_LOOK_PITCH_LIMIT, FREE_LOOK_PITCH_LIMIT) end
+	-- Up/Down flipped to match the corrected mouse-pitch sign (more +pitch = look down): Up = look up = -s.
+	if UserInputService:IsKeyDown(Enum.KeyCode.Up)    then freeLook.pitch = math.clamp(freeLook.pitch - s, -FREE_LOOK_PITCH_LIMIT, FREE_LOOK_PITCH_LIMIT) end
+	if UserInputService:IsKeyDown(Enum.KeyCode.Down)  then freeLook.pitch = math.clamp(freeLook.pitch + s, -FREE_LOOK_PITCH_LIMIT, FREE_LOOK_PITCH_LIMIT) end
 end)
 
 --------------------------------------------------------------------------------
@@ -453,8 +456,14 @@ local function updateCamera(dt)
 		if blended.Magnitude > EPS then followDir = blended.Unit end
 	end
 	local desiredChase = -followDir
-	local prevChase = cameraState.chaseDir or desiredChase
-	cameraState.chaseDir = rotateTowards(prevChase, desiredChase, (CAM.chaseTurnRate or 3.6) * dt)
+	cameraState.chaseDir = cameraState.chaseDir or desiredChase
+	-- FREEZE the chase basis while free-looking so the view is WORLD-referenced (holds its aspect while the
+	-- bird loops); only track the bird's motion when NOT free-looking. Without this the base offset kept
+	-- following the bird's heading through the loop -> the ~180° flip even in free-look. On exit the slew
+	-- resumes and rate-limits the basis back to "behind the bird" — smooth, no snap.
+	if not freeLook.active then
+		cameraState.chaseDir = rotateTowards(cameraState.chaseDir, desiredChase, (CAM.chaseTurnRate or 3.6) * dt)
+	end
 	local chaseDir = cameraState.chaseDir
 
 	-- Camera-up = world-up made perpendicular to the chase direction: keeps the horizon level in normal
@@ -490,7 +499,9 @@ local function updateCamera(dt)
 	local camPos  = position + cameraOffset
 	-- Look slightly AHEAD of the bird along its flight path (the bird then sits a touch low in frame for a
 	-- forward-leaning, lead-the-target feel). camUp is the continuous up reference -> no inverted roll snap.
-	local lookTarget = position + followDir * (dist * 0.12)
+	-- In free-look, look straight at the bird (no flight-path lead) so the orbit is fully world-referenced
+	-- and the look target doesn't wobble as the bird's heading swings through a loop; lead only in chase mode.
+	local lookTarget = freeLook.active and position or (position + followDir * (dist * 0.12))
 	local targetCF = CFrame.lookAt(camPos, lookTarget, camUp)
 
 	-- Bank tilt: roll the camera slightly with the bird in a turn, but FADE it out as the bird inverts
@@ -804,9 +815,10 @@ local function onFlightStep(dt)
 	local kbYaw   = rampAxis(yawRamp,   kb.yaw,   tapB, rampB, dt)
 
 	-- 1d. Mouse-aim autopilot. While aiming: EASE the applied aim toward the live target and draw the
-	-- reticle. While FREE-LOOK is held: FREEZE the aim (hold the last command) so the bird MAINTAINS its
-	-- maneuver — e.g. keeps pulling a vertical loop — while you orbit the camera, then resumes on release.
-	-- Either way the keyboard AUGMENTS on top (still works in free-look for manual nudges).
+	-- reticle. While FREE-LOOK is active: NEUTRALISE the aim (ease to 0) so the bird HOLDS its current
+	-- attitude — the plant has no auto-level (STABILITY_RATE=0), so zero rotational input keeps the nose/
+	-- bank exactly where it is (flies where it points via grip). The keyboard SUMS on top below, so QWEASD
+	-- still modify the held attitude and it REMAINS on release. Resumes mouse-aim cleanly on toggle-back.
 	if aimOn and camera then
 		local aPitch, aRoll, aYaw = computeMouseAim()
 		local resp = math.clamp(((C and C.aimResponse) or 7) * dt, 0, 1)
@@ -817,7 +829,13 @@ local function onFlightStep(dt)
 		aimDot.Position    = UDim2.fromOffset(aimCursor.cursorX, aimCursor.cursorY) -- ring: your cursor (desired direction)
 		noseMarker.Position = UDim2.fromOffset(aimCursor.noseX, aimCursor.noseY)    -- amber: the bird's nose (boresight)
 	else
-		-- Free-look (or mouse-aim off): aimApplied is held FROZEN (not eased to 0) so the maneuver continues.
+		-- FREE-LOOK (or mouse-aim off): ease the aim command to 0 so the bird holds its attitude and is
+		-- modifiable ONLY by keyboard. It must NOT keep applying the last command — a frozen rate (no auto-
+		-- level to stop it) kept rotating the nose every frame -> the nose-over into a dive on release.
+		local resp = math.clamp(((C and C.aimResponse) or 7) * dt, 0, 1)
+		aimApplied.pitch = aimApplied.pitch + (0 - aimApplied.pitch) * resp
+		aimApplied.roll  = aimApplied.roll  + (0 - aimApplied.roll)  * resp
+		aimApplied.yaw   = aimApplied.yaw   + (0 - aimApplied.yaw)   * resp
 		aimGui.Enabled = false
 	end
 	inputState.pitch = math.clamp(kbPitch + aimApplied.pitch, -1, 1)
