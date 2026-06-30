@@ -578,7 +578,16 @@ GameConfig.Controls = {
 	-- Flight.AEROBATIC_MIN_SPEED) — a slow bird mushes instead of looping (Energy-Maneuverability).
 	-- ALL PLAYTEST-PROVISIONAL.
 	mouseAim     = true,
-	aimMarkerDistance = 600,  -- studs the nose cross is projected out front of the bird
+	aimMarkerDistance = 600,  -- studs the nose cross is projected out front of the bird FOR THE AIM-ERROR math
+	-- BEAK-ZONE STRIKE RETICLES (melee-aim UI, 2026-06-30). The DRAWN amber nose cross + the two side talon
+	-- reticles sit CLOSE to the beak (beakReticleDistance) so they read as the actual strike reach — DECOUPLED
+	-- from aimMarkerDistance, which stays at its tuned 600 for the steering aim-error geometry (moving the
+	-- DRAWN reticle in must NOT change the loved feel — handoff caution). The two side reticles are offset this
+	-- many studs along the bird's RIGHT axis near the beak; the one armed by the live bank LIGHTS UP using the
+	-- INVERTED mapping (matches GameServer.classifyBank): bank RIGHT arms LEFT, bank LEFT arms RIGHT, level =
+	-- the forward (nose-cross) strike. Client-side bank read = zero latency; server stays strike-authoritative.
+	beakReticleDistance     = 70,  -- studs out front the melee reticles are drawn (the talon/strike zone)
+	strikeReticleSideOffset = 26,  -- studs the L/R talon reticles sit to either side of the beak (along RightVector)
 	aimResponse  = 13.0,      -- per-sec ease of the APPLIED input toward target. RAISED 9->13: the PD damping
 	                          -- below now does the smoothing, so the ease no longer has to add lag (lag = phase =
 	                          -- the porpoise). Faster ease = crisper, less floaty; PD keeps it from overshooting.

@@ -183,7 +183,10 @@ local flapThrottle = 0
 -- computeMouseAim each frame and consumed by the render block in onFlightStep. cursorX/Y = the free
 -- mouse cursor (desired direction); noseX/Y = the projected nose cross (boresight), clamped to the
 -- screen. x/y are legacy normalized fields kept only so resetInput's recentre is a no-op-safe write.
-local aimCursor = { x = 0, y = 0, cursorX = 0, cursorY = 0, noseX = 0, noseY = 0 }
+-- leftX/Y, rightX/Y = the two beak-zone TALON reticles (drawn near the beak, offset along RightVector);
+-- armed = which strike the live bank has armed ("left"/"right"/"forward"), inverted-mapped from curBank.
+local aimCursor = { x = 0, y = 0, cursorX = 0, cursorY = 0, noseX = 0, noseY = 0,
+	leftX = 0, leftY = 0, rightX = 0, rightY = 0, armed = "forward" }
 
 -- The APPLIED mouse-aim input, eased toward the raw target each frame (Controls.aimResponse) so the
 -- bird follows the reticle softly/flightily rather than snapping. Summed with keyboard in onFlightStep.
@@ -221,9 +224,10 @@ noseMarker.AnchorPoint = Vector2.new(0.5, 0.5)
 noseMarker.Size = UDim2.fromOffset(34, 34)
 noseMarker.BackgroundTransparency = 1
 noseMarker.Parent = aimGui
+local noseStroke -- hoisted: the FORWARD strike lights this hot (see paintStrikeReticles)
 do
 	local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(1, 0); c.Parent = noseMarker
-	local s = Instance.new("UIStroke"); s.Thickness = 2; s.Color = Color3.fromRGB(255, 200, 90); s.Transparency = 0.1; s.Parent = noseMarker
+	noseStroke = Instance.new("UIStroke"); noseStroke.Thickness = 2; noseStroke.Color = Color3.fromRGB(255, 200, 90); noseStroke.Transparency = 0.1; noseStroke.Parent = noseMarker
 	local pip = Instance.new("Frame") -- centre dot so the boresight reads even against busy terrain
 	pip.AnchorPoint = Vector2.new(0.5, 0.5)
 	pip.Position = UDim2.fromScale(0.5, 0.5)
@@ -243,6 +247,47 @@ aimDot.Parent = aimGui
 do
 	local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(1, 0); c.Parent = aimDot
 	local s = Instance.new("UIStroke"); s.Thickness = 2.5; s.Color = Color3.fromRGB(70, 255, 120); s.Transparency = 0; s.Parent = aimDot
+end
+
+-- LEFT / RIGHT STRIKE RETICLES (the beak-zone talon-aim markers, 2026-06-30). Two ring+chevron markers
+-- that sit near the beak (positioned each frame from computeMouseAim). The one the live BANK arms LIGHTS UP
+-- (inverted mapping: bank RIGHT arms the LEFT talon, bank LEFT arms the RIGHT — matches GameServer.classifyBank);
+-- ~level arms the FORWARD strike (the nose cross lights instead). This is the visual timing/aiming aid for the
+-- P6 directional strike: bank to arm a side, line a crow up in the lit reticle, LEFT-CLICK to throw that talon.
+local STRIKE_DIM = Color3.fromRGB(150, 110, 95) -- unarmed talon reticle (muted)
+local STRIKE_LIT = Color3.fromRGB(255, 95, 70)  -- armed talon reticle (hot — "this side fires")
+local strikeReticles = {}
+do
+	local chevrons = { left = "\u{25C0}", right = "\u{25B6}" } -- ◀ / ▶ point outward to that talon
+	for _, key in ipairs({ "left", "right" }) do
+		local f = Instance.new("Frame")
+		f.Name = "Strike_" .. key
+		f.AnchorPoint = Vector2.new(0.5, 0.5)
+		f.Size = UDim2.fromOffset(24, 24)
+		f.BackgroundTransparency = 1
+		f.Parent = aimGui
+		local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(1, 0); c.Parent = f
+		local stroke = Instance.new("UIStroke"); stroke.Thickness = 2; stroke.Color = STRIKE_DIM; stroke.Transparency = 0.5; stroke.Parent = f
+		local txt = Instance.new("TextLabel")
+		txt.AnchorPoint = Vector2.new(0.5, 0.5); txt.Position = UDim2.fromScale(0.5, 0.5)
+		txt.Size = UDim2.fromScale(1, 1); txt.BackgroundTransparency = 1
+		txt.Font = Enum.Font.GothamBold; txt.TextSize = 13; txt.Text = chevrons[key]
+		txt.TextColor3 = STRIKE_DIM; txt.TextTransparency = 0.4; txt.Parent = f
+		strikeReticles[key] = { frame = f, stroke = stroke, text = txt }
+	end
+end
+
+-- Light the talon reticle the live bank has armed; dim the other; tint the nose cross hot for FORWARD.
+local function paintStrikeReticles(armed)
+	for key, r in pairs(strikeReticles) do
+		local lit = (key == armed)
+		r.stroke.Color = lit and STRIKE_LIT or STRIKE_DIM
+		r.stroke.Transparency = lit and 0 or 0.55
+		r.text.TextColor3 = lit and STRIKE_LIT or STRIKE_DIM
+		r.text.TextTransparency = lit and 0 or 0.5
+		r.frame.Size = lit and UDim2.fromOffset(32, 32) or UDim2.fromOffset(24, 24)
+	end
+	noseStroke.Color = (armed == "forward") and STRIKE_LIT or Color3.fromRGB(255, 200, 90)
 end
 
 -- Formation toggle state (crows).
@@ -868,16 +913,35 @@ local function computeMouseAim()
 	local yaw  = clamp(-hCmd * (C.aimYawGain or 0.6), -1, 1)
 	if C.invertPitch then pitch = -pitch end
 
-	-- Marker screen positions for the render block (cross clamped on-screen).
+	-- Marker screen positions for the render block. The CURSOR (green ring) follows the mouse (the forward aim).
 	local margin = 24
 	aimCursor.cursorX, aimCursor.cursorY = mouse.X, mouse.Y
-	if inFront then
-		aimCursor.noseX = math.clamp(noseVP.X + inset.X, margin, vp.X + inset.X - margin)
-		aimCursor.noseY = math.clamp(noseVP.Y + inset.Y, margin, vp.Y + inset.Y - margin)
-	else
-		aimCursor.noseX = vp.X * 0.5 + inset.X
-		aimCursor.noseY = vp.Y * 0.5 + inset.Y
+
+	-- BEAK-ZONE melee reticles: the amber nose cross + the two side talon reticles are drawn CLOSE to the beak
+	-- (beakReticleDistance, ~70 studs) so they read as the actual strike reach — DECOUPLED from the 600-stud
+	-- aim-error projection above (noseVP/noseDir stays tuned, so the steering FEEL is untouched). The side points
+	-- are offset along the bird's RIGHT axis so the talons sit either side of the beak and bank WITH the bird.
+	local beakDist = C.beakReticleDistance or 70
+	local sideOff  = C.strikeReticleSideOffset or 26
+	local beakPoint = cf.Position + birdLook * beakDist
+	local rightV = cf.RightVector
+	local function projWin(world) -- world -> window-space (incl. GUI inset), screen-centre fallback if behind
+		local v = camera:WorldToViewportPoint(world)
+		if v.Z <= 0 then return vp.X * 0.5 + inset.X, vp.Y * 0.5 + inset.Y end
+		return math.clamp(v.X + inset.X, margin, vp.X + inset.X - margin),
+		       math.clamp(v.Y + inset.Y, margin, vp.Y + inset.Y - margin)
 	end
+	aimCursor.noseX,  aimCursor.noseY  = projWin(beakPoint)
+	aimCursor.leftX,  aimCursor.leftY  = projWin(beakPoint - rightV * sideOff)
+	aimCursor.rightX, aimCursor.rightY = projWin(beakPoint + rightV * sideOff)
+
+	-- ARMED side from the LIVE bank (curBank above), inverted mapping == GameServer.classifyBank: bank RIGHT
+	-- (curBank > thr) arms the LEFT talon, bank LEFT arms the RIGHT, within the threshold = FORWARD. Client read
+	-- for zero-latency lighting; the server still owns the authoritative strike on the click EDGE.
+	local thr = math.rad((GameConfig.Combat and GameConfig.Combat.bankStrikeThresholdDeg) or 18)
+	if curBank > thr then aimCursor.armed = "left"
+	elseif curBank < -thr then aimCursor.armed = "right"
+	else aimCursor.armed = "forward" end
 
 	return pitch, roll, yaw
 end
@@ -935,7 +999,10 @@ local function onFlightStep(dt)
 		aimApplied.yaw   = aimApplied.yaw   + (aYaw   - aimApplied.yaw)   * resp
 		aimGui.Enabled = true
 		aimDot.Position    = UDim2.fromOffset(aimCursor.cursorX, aimCursor.cursorY) -- ring: your cursor (desired direction)
-		noseMarker.Position = UDim2.fromOffset(aimCursor.noseX, aimCursor.noseY)    -- amber: the bird's nose (boresight)
+		noseMarker.Position = UDim2.fromOffset(aimCursor.noseX, aimCursor.noseY)    -- amber: the bird's nose (boresight) at the beak
+		strikeReticles.left.frame.Position  = UDim2.fromOffset(aimCursor.leftX, aimCursor.leftY)
+		strikeReticles.right.frame.Position = UDim2.fromOffset(aimCursor.rightX, aimCursor.rightY)
+		paintStrikeReticles(aimCursor.armed) -- light the talon the live bank has armed (inverted mapping)
 	else
 		-- FREE-LOOK (or mouse-aim off): ease the aim command to 0 so the bird holds its attitude and is
 		-- modifiable ONLY by keyboard. It must NOT keep applying the last command — a frozen rate (no auto-
