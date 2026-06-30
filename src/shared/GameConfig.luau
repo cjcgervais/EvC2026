@@ -317,29 +317,34 @@ GameConfig.Profiles = {
 GameConfig.Combat = {
 	eagleHits = 3,   -- unparried crow rams the eagle survives (1 ram = health/eagleHits)
 
-	-- ACTIVE-DEFENSE WEAPONS (eagle only). Hold the mouse button to EXTEND; while extended
-	-- (and past the startup lag), a crow that contacts the eagle within the weapon's frontal
-	-- cone DIES and the eagle takes ZERO damage. One catch per extension window — a second
-	-- simultaneous crow from another angle still lands its hit (the swarm's lever). Releasing,
-	-- or draining the window, retracts the weapon into a cooldown. Server owns all these timers
-	-- (anti-cheat): the client only sends hold intent. Rear/uncovered angles are never safe.
-	-- ALL PLAYTEST-PROVISIONAL (research: >50% single-angle uptime is the "always-on" trap, so
-	-- the talon's 67% uptime leans on the one-catch rule + the narrow rear blind spot).
-	weapons = {
-		-- LEFT mouse. The bread-and-butter: wide frontal/underside cone, long window, fast reset.
-		talon = {
-			extendWindow      = 4.0,   -- s it can stay extended (drains while held)
-			cooldown          = 2.0,   -- s lockout after it retracts/empties
-			startup           = 0.15,  -- s of VULNERABLE activation lag before it can catch (no reactive flick)
-			coverHalfAngleDeg = 100,   -- half-angle of the coverage cone around the nose (front + sides + under)
-		},
-		-- RIGHT mouse. Head-on counter: narrow cone, short window, long reset — a committed read.
-		beak = {
-			extendWindow      = 2.0,
-			cooldown          = 4.0,
-			startup           = 0.12,
-			coverHalfAngleDeg = 50,    -- narrow head-on cone
-		},
+	-- DIRECTIONAL STRIKE (eagle only) — the central-thesis combat model (player ask 2026-06-30: "the
+	-- banking side the bird is flying to — left talon strike, right talon strike, or forward — determines
+	-- the type of strike and its duration and downtime"). ONE button (LEFT-CLICK) fires a strike; the
+	-- eagle's BANK at the click instant picks WHICH of three strikes, each with its own startup→active
+	-- duration→cooldown (downtime) and an OFFSET coverage cone:
+	--   bank LEFT  (|roll| > threshold, left wing down)  -> LEFT talon  (cone offset to the bird's left-front)
+	--   bank RIGHT (|roll| > threshold, right wing down) -> RIGHT talon (cone offset right-front)
+	--   ~LEVEL     (|roll| < threshold)                  -> FORWARD     (narrow head-on, beak-flavored)
+	-- During a strike's ACTIVE window (past startup), the offset cone BOTH parries an incoming crow ram
+	-- (crow dies, eagle unharmed — the old catch) AND deals offensive damage to a crow inside the cone
+	-- within reach (the eagle can HUNT, not only counter). ONE catch-or-hit per window.
+	--
+	-- WHY THIS IS BALANCED (1-v-4 — preserve this reasoning): the eagle can only be banked ONE way at a
+	-- time, so it covers/strikes ONE angle per commitment. Four crows from spread angles → striking left
+	-- leaves right/rear open → the swarm still wins by SATURATION (the whole asymmetry). Directionality
+	-- SHARPENS the "one catch per window / multi-angle beats one cover" lever, it doesn't weaken it. Tune
+	-- the windows/downtimes so a skilled eagle covers a READ but cannot spam-cover all sides (research
+	-- guardrail: >50% single-angle uptime = the "always-on" trap). The OFFENSIVE damage is the lever to
+	-- watch hardest — if 1-v-4 turns too eagle-favored, drop the damage/reach/duration (or zero the
+	-- offensive pass and keep it defense-only first). Server owns every timer + the bank classification
+	-- (anti-cheat): the client sends only a fire EDGE, never a direction. ALL PLAYTEST-PROVISIONAL.
+	bankStrikeThresholdDeg = 18,  -- |roll| beyond this picks a side; within it = forward
+	strikes = {
+		-- Bread-and-butter side talons: wider cone offset to that side, medium window + reset.
+		left    = { startup = 0.12, duration = 0.45, cooldown = 1.2, coverHalfAngleDeg = 70, coneOffsetDeg = -55, damage = "talon", reachFraction = 0.7 },
+		right   = { startup = 0.12, duration = 0.45, cooldown = 1.2, coverHalfAngleDeg = 70, coneOffsetDeg =  55, damage = "talon", reachFraction = 0.7 },
+		-- Committed head-on: narrow forward cone, quicker startup, shorter window, longer downtime.
+		forward = { startup = 0.10, duration = 0.30, cooldown = 1.6, coverHalfAngleDeg = 40, coneOffsetDeg =   0, damage = "beak",  reachFraction = 0.8 },
 	},
 }
 

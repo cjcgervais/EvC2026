@@ -52,12 +52,12 @@ The server sets `CharacterAutoLoads = false` and represents each player's bird(s
 - **`FlightPhysics` API:** `.new(profile, position)`; `:Update(dt, input)` with `input = {pitch, roll, yaw, flap, dive}`; `:SetThermalForce(v)`; `:SetWind(v)`. Readable fields: `orientation` (CFrame), `velocity`, `speed`, `verticalSpeed`, `stamina`, `isFlapping`, `isDiving`, `isStalling`, `flapPhase`, `aoaDeg`.
 - **`GameConfig`** tables consumed by name across client/server: `Profiles.Eagle/.Crow`, `Flight`, `Squad`, `Thermals`, `Round`, `Camera`, `UI`. Eagle/Crow profiles are kept structurally identical so `FlightPhysics` is class-agnostic — **all asymmetry is in the numbers.**
 - **Remotes** (`ReplicatedStorage.Remotes`, created by `GameServer` at startup):
-  - RemoteEvents: `TeamAssigned`(S→C: teamName, profile), `AttackRequest`(C→S), `TakeDamage`(S→C: attackerName, target, damage), `ScoreUpdate`(S→C: scores), `GameNotification`(S→C: text, color), `SwapCrow`(C→S: index), `SetFormation`(C→S: formationName), `Respawn`(C→S: manual self-reset, debounced).
+  - RemoteEvents: `TeamAssigned`(S→C: teamName, profile), `Strike`(C→S: fire EDGE, no args — server reads the eagle's authoritative bank to pick left/right/forward strike), `AttackRequest`(C→S: legacy click-melee, kept harmless), `TakeDamage`(S→C: attackerName, target, damage), `ScoreUpdate`(S→C: scores), `GameNotification`(S→C: text, color), `SwapCrow`(C→S: index), `SetFormation`(C→S: formationName), `Respawn`(C→S: manual self-reset, debounced). *(Retired: `WeaponHold` — the old hold-to-extend talon/beak, replaced by `Strike`.)*
   - RemoteFunction: `GetThermals`(C→S) → array of `{position, radius, minHeight, maxHeight, strength}`.
 - **UI `_G` hooks:** `GameUI` exposes `_G.UpdateStaminaUI(ratio)` and `_G.SetStallWarning(isStalling)`; `BirdController` calls them.
 
 ### Controls (as implemented in `BirdController`)
-W/S = pitch, A/D = roll (banking), Q/E = yaw, **LeftShift** = flap, **LeftCtrl** = dive, **Space** = free rotational camera (orbits while the bird holds its flight path), MouseButton1 = attack, **1–4** = possess crow N, **F** = toggle tight/loose formation, **R** = manual respawn/reset.
+W/S = pitch, A/D = roll (banking), Q/E = yaw, **LeftShift** = flap, **LeftCtrl** = dive, **Space** = free rotational camera (TOGGLE — orbits while the bird holds its flight path), **MouseButton1** = directional STRIKE (the eagle's bank at the click picks LEFT/RIGHT talon or a FORWARD strike; server-authoritative), **MouseButton2** = aim/zoom (hold to pull the camera in), **1–4** = possess crow N, **F** = toggle tight/loose formation, **R** = manual respawn/reset.
 
 ## Working conventions
 - **Refine incrementally; do not regenerate the codebase.** It's modular for exactly this — change one module/feature, then Studio-test.

@@ -21,10 +21,12 @@
 	  Left Ctrl    -> FLAP THROTTLE down (sticky: ramps DOWN-thrust/descent; centre = glide)
 	  Spacebar     -> FREE-LOOK camera (TOGGLE): tap to orbit the camera freely around the bird while
 	                  the bird HOLDS its current flight input (aim autopilot suspended); tap again to resume aim.
-	  Mouse Left   -> EXTEND TALONS (hold): eagle active defense/offense — catches a crow in the
-	                  front/underside cone (kill, no damage taken). Server-owned window+cooldown.
-	  Mouse Right  -> EXTEND BEAK (hold): narrow head-on cone, shorter window, longer cooldown.
-	                  (Crows have no weapons — their attack is the suicide ram.)
+	  Mouse Left   -> STRIKE (tap): the eagle's BANK at the click picks the strike — bank LEFT = left
+	                  talon, bank RIGHT = right talon, ~LEVEL = forward — each with its own active window
+	                  + downtime. The server reads the authoritative bank and owns all timing (anti-cheat).
+	                  A strike covers/kills a ramming crow on that side AND hunts a crow in the cone.
+	                  (Crows have no strike — their attack is the suicide ram.)
+	  Mouse Right  -> AIM-ZOOM (hold): pull the camera in for a closer look (works in chase + free-look).
 	  1-4          -> SwapCrow(index)
 	  F            -> toggle formation tight/loose (SetFormation)
 	  R            -> manual respawn / reset (Respawn)
@@ -81,22 +83,23 @@ end
 --------------------------------------------------------------------------------
 local Remotes      = ReplicatedStorage:WaitForChild("Remotes")
 local TeamAssigned = Remotes:WaitForChild("TeamAssigned")
-local AttackRequest = Remotes:WaitForChild("AttackRequest") -- legacy; superseded by WeaponHold
-local WeaponHold   = Remotes:WaitForChild("WeaponHold")
+local AttackRequest = Remotes:WaitForChild("AttackRequest") -- legacy; superseded by Strike
+local Strike       = Remotes:WaitForChild("Strike")
 local SwapCrow     = Remotes:WaitForChild("SwapCrow")
 local SetFormation = Remotes:WaitForChild("SetFormation")
 local Respawn      = Remotes:WaitForChild("Respawn")
 local GetThermals  = Remotes:WaitForChild("GetThermals")
 
--- Eagle active-defense input: hold Left = talons, Right = beak. The server owns the extend/
--- cooldown timers (WeaponHold carries only intent), and ignores holds from crows (no weapons).
--- We mirror the held state locally so we only fire on a true edge (press/release), not per frame.
-local weaponHeld = { talon = false, beak = false }
-local function setWeaponHold(name, holding)
-	holding = holding and true or false
-	if weaponHeld[name] == holding then return end
-	weaponHeld[name] = holding
-	WeaponHold:FireServer(name, holding)
+-- Eagle strike input: LEFT-CLICK fires a strike EDGE (a tap, not a hold). We send NOTHING the server
+-- must trust — no direction, no hit claim; the server reads the eagle's authoritative bank to pick
+-- left/right/forward and owns every timer (anti-cheat). A tiny local debounce avoids double-fires on a
+-- single press. The server ignores strikes from crows (their attack is the suicide ram).
+local lastStrikeFire = 0
+local function fireStrike()
+	local t = os.clock()
+	if t - lastStrikeFire < 0.12 then return end
+	lastStrikeFire = t
+	Strike:FireServer()
 end
 
 --------------------------------------------------------------------------------
@@ -330,11 +333,11 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 		return
 	end
 
-	-- LEFT mouse = eagle strike (hold to extend the talons; the server gates the parry + cooldown).
+	-- LEFT mouse = STRIKE (tap edge; the eagle's bank picks left/right/forward, server-owned).
 	-- RIGHT mouse = AIM-ZOOM (hold to zoom the camera in; camera-only, no server intent). RMB was freed
 	-- from "beak" per the 2026-06-30 control rework — it now zooms anywhere, in chase or free-look.
 	if input.UserInputType == Enum.UserInputType.MouseButton1 then
-		setWeaponHold("talon", true)
+		fireStrike()
 	elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
 		aimZoom.active = true
 	end
@@ -358,10 +361,8 @@ UserInputService.InputEnded:Connect(function(input)
 	-- NOTE: Space no longer turns free-look off on key-release — it's a TOGGLE (handled in InputBegan).
 	-- Focus loss (WindowFocusReleased) still force-clears it so you never get stuck looking around.
 
-	-- Retract the talons on LMB-up; release the aim-zoom on RMB-up.
-	if input.UserInputType == Enum.UserInputType.MouseButton1 then
-		setWeaponHold("talon", false)
-	elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
+	-- LEFT-CLICK is a tap (no release action). Release the aim-zoom on RMB-up.
+	if input.UserInputType == Enum.UserInputType.MouseButton2 then
 		aimZoom.active = false
 	end
 end)
@@ -999,9 +1000,6 @@ local function resetInput()
 	inputState.flap, inputState.dive = false, false
 	flapThrottle = 0
 	inputState.flapThrottle = 0
-	-- Release active-defense weapons too (focus loss / death / between lives).
-	setWeaponHold("talon", false)
-	setWeaponHold("beak", false)
 end
 
 local function teardownDrive()
@@ -1052,10 +1050,8 @@ local function acquire()
 	-- genuine release (or focus loss / death without Space) turns it off.
 	setFreeLook(UserInputService:IsKeyDown(Enum.KeyCode.Space))
 
-	-- Re-assert LMB strike intent for the new bird (the server resets weapon timers on every
-	-- (re)spawn/swap; resetInput just cleared our mirror) from the physically held mouse button.
-	-- (RMB is camera aim-zoom now — its `aimZoom` state is module-level, so a held RMB survives the swap.)
-	if UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then setWeaponHold("talon", true) end
+	-- Nothing to re-assert for the new bird: LEFT-CLICK strike is a tap (no held intent), and RMB
+	-- aim-zoom is module-level camera state (a held RMB survives the swap on its own).
 
 	if not target then return end
 

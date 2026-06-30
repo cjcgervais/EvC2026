@@ -574,17 +574,18 @@ local function findMyBird()
 end
 
 --------------------------------------------------------------------------------
--- WEAPON METERS (eagle only) — talon (Left) + beak (Right) extend/cooldown gauges, fed by
--- the server via Body attributes Talon/BeakMeter (0..1) and Talon/BeakActive (bool). The
--- frame stays hidden for crows (those attributes are never set on a crow body).
+-- STRIKE METER (eagle only) — the directional-strike gauge. One bar (ready / active / cooldown)
+-- plus an ARMED-DIRECTION indicator (L / F / R) whose lit chip = the strike a LEFT-CLICK would
+-- throw at the current bank. Fed by the server via Body attributes StrikeMeter (0..1), StrikeActive
+-- (bool), StrikeArmedDir ("left"|"forward"|"right"). Hidden for crows (those attrs are eagle-only).
 --------------------------------------------------------------------------------
 local weaponsFrame
-local talonFill, beakFill
+local strikeFill, armedChips
 do
 	weaponsFrame = Instance.new("Frame")
-	weaponsFrame.Name = "WeaponsFrame"
-	weaponsFrame.Size = UDim2.new(0, 200, 0, 60)
-	weaponsFrame.Position = UDim2.new(1, -215, 1, -85) -- bottom-right
+	weaponsFrame.Name = "StrikeFrame"
+	weaponsFrame.Size = UDim2.new(0, 214, 0, 60)
+	weaponsFrame.Position = UDim2.new(1, -229, 1, -85) -- bottom-right
 	weaponsFrame.BackgroundColor3 = UI.hudColor
 	weaponsFrame.BackgroundTransparency = UI.hudTransparency
 	weaponsFrame.BorderSizePixel = 0
@@ -592,49 +593,59 @@ do
 	weaponsFrame.Parent = screenGui
 	local fc = Instance.new("UICorner"); fc.CornerRadius = UDim.new(0, 8); fc.Parent = weaponsFrame
 
-	local function makeRow(y, text)
-		local label = Instance.new("TextLabel")
-		label.Size = UDim2.new(0, 60, 0, 20)
-		label.Position = UDim2.new(0, 10, 0, y)
-		label.BackgroundTransparency = 1
-		label.Font = Enum.Font.GothamBold
-		label.TextSize = 13
-		label.TextColor3 = Color3.fromRGB(235, 235, 235)
-		label.TextXAlignment = Enum.TextXAlignment.Left
-		label.Text = text
-		label.Parent = weaponsFrame
+	local title = Instance.new("TextLabel")
+	title.Size = UDim2.new(0, 70, 0, 20); title.Position = UDim2.new(0, 10, 0, 6)
+	title.BackgroundTransparency = 1; title.Font = Enum.Font.GothamBold; title.TextSize = 14
+	title.TextColor3 = Color3.fromRGB(235, 235, 235); title.TextXAlignment = Enum.TextXAlignment.Left
+	title.Text = "STRIKE"; title.Parent = weaponsFrame
 
-		local bg = Instance.new("Frame")
-		bg.Size = UDim2.new(1, -80, 0, 16)
-		bg.Position = UDim2.new(0, 70, 0, y + 2)
-		bg.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-		bg.BorderSizePixel = 0
-		bg.Parent = weaponsFrame
-		local bgc = Instance.new("UICorner"); bgc.CornerRadius = UDim.new(0, 4); bgc.Parent = bg
-
-		local fill = Instance.new("Frame")
-		fill.Size = UDim2.new(1, 0, 1, 0)
-		fill.BackgroundColor3 = Color3.fromRGB(120, 200, 120)
-		fill.BorderSizePixel = 0
-		fill.Parent = bg
-		local fillc = Instance.new("UICorner"); fillc.CornerRadius = UDim.new(0, 4); fillc.Parent = fill
-		return fill
+	-- Armed-direction chips (the lit one = the strike your bank will throw right now).
+	armedChips = {}
+	local order = { "left", "forward", "right" }
+	local chipText = { left = "\u{25C0} L", forward = "\u{25B2} F", right = "R \u{25B6}" }
+	for i, key in ipairs(order) do
+		local chip = Instance.new("TextLabel")
+		chip.Name = "Chip_" .. key
+		chip.Size = UDim2.new(0, 40, 0, 18)
+		chip.Position = UDim2.new(0, 92 + (i - 1) * 40, 0, 8)
+		chip.BackgroundTransparency = 1
+		chip.Font = Enum.Font.GothamBold
+		chip.TextSize = 13
+		chip.TextColor3 = Color3.fromRGB(90, 100, 110) -- dim until armed
+		chip.Text = chipText[key]
+		chip.Parent = weaponsFrame
+		armedChips[key] = chip
 	end
 
-	talonFill = makeRow(8, "TALON")
-	beakFill = makeRow(32, "BEAK")
+	local bg = Instance.new("Frame")
+	bg.Size = UDim2.new(1, -20, 0, 16)
+	bg.Position = UDim2.new(0, 10, 0, 36)
+	bg.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+	bg.BorderSizePixel = 0
+	bg.Parent = weaponsFrame
+	local bgc = Instance.new("UICorner"); bgc.CornerRadius = UDim.new(0, 4); bgc.Parent = bg
+
+	strikeFill = Instance.new("Frame")
+	strikeFill.Size = UDim2.new(1, 0, 1, 0)
+	strikeFill.BackgroundColor3 = Color3.fromRGB(120, 200, 120)
+	strikeFill.BorderSizePixel = 0
+	strikeFill.Parent = bg
+	local fillc = Instance.new("UICorner"); fillc.CornerRadius = UDim.new(0, 4); fillc.Parent = strikeFill
 end
 
--- Colour a weapon bar by state: bright green when actively COVERING (can parry now), blue when
--- charged/ready, amber while cooling down. Width = meter (0..1).
-local function paintWeapon(fill, meter, active)
-	fill.Size = UDim2.new(math.clamp(meter, 0, 1), 0, 1, 0)
+-- Paint the strike bar by state (green = active/can hit, blue = ready, amber = cooling down) and
+-- light the armed-direction chip matching the live bank.
+local function paintStrike(meter, active, armedDir)
+	strikeFill.Size = UDim2.new(math.clamp(meter, 0, 1), 0, 1, 0)
 	if active then
-		fill.BackgroundColor3 = Color3.fromRGB(90, 230, 120)
+		strikeFill.BackgroundColor3 = Color3.fromRGB(90, 230, 120)
 	elseif meter >= 1 then
-		fill.BackgroundColor3 = Color3.fromRGB(90, 160, 230)
+		strikeFill.BackgroundColor3 = Color3.fromRGB(90, 160, 230)
 	else
-		fill.BackgroundColor3 = Color3.fromRGB(220, 130, 70)
+		strikeFill.BackgroundColor3 = Color3.fromRGB(220, 130, 70)
+	end
+	for key, chip in pairs(armedChips) do
+		chip.TextColor3 = (key == armedDir) and Color3.fromRGB(255, 210, 90) or Color3.fromRGB(90, 100, 110)
 	end
 end
 
@@ -780,13 +791,11 @@ RunService.RenderStepped:Connect(function()
 	speedLabel.Text = "SPD: " .. tostring(math.floor(speed + 0.5))
 	altLabel.Text = "ALT: " .. tostring(math.floor(body.Position.Y + 0.5))
 
-	-- Weapon meters (eagle only): the server sets Talon/BeakMeter on the eagle Body.
-	local tMeter = body:GetAttribute("TalonMeter")
-	if typeof(tMeter) == "number" then
+	-- Strike meter (eagle only): the server sets StrikeMeter/StrikeActive/StrikeArmedDir on the eagle Body.
+	local sMeter = body:GetAttribute("StrikeMeter")
+	if typeof(sMeter) == "number" then
 		weaponsFrame.Visible = true
-		paintWeapon(talonFill, tMeter, body:GetAttribute("TalonActive") == true)
-		local bMeter = body:GetAttribute("BeakMeter")
-		paintWeapon(beakFill, (typeof(bMeter) == "number") and bMeter or 0, body:GetAttribute("BeakActive") == true)
+		paintStrike(sMeter, body:GetAttribute("StrikeActive") == true, body:GetAttribute("StrikeArmedDir"))
 	else
 		weaponsFrame.Visible = false
 	end

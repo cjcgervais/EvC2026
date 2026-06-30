@@ -370,8 +370,8 @@ local function CreateRemotes()
 
 	-- Exact canonical names other scripts depend on.
 	event("TeamAssigned")     -- S->C: teamName, profile
-	event("AttackRequest")    -- C->S  (legacy click-melee; superseded by WeaponHold, kept harmless)
-	event("WeaponHold")       -- C->S: weapon ("talon"|"beak"), holding (bool) — eagle active defense
+	event("AttackRequest")    -- C->S  (legacy click-melee; superseded by Strike, kept harmless)
+	event("Strike")           -- C->S: fire EDGE (no args). Server reads the eagle's bank -> left/right/forward strike
 	event("TakeDamage")       -- S->C: attackerName, targetPlayer, damage
 	event("ScoreUpdate")      -- S->C: scores
 	event("GameNotification") -- S->C: text, color
@@ -833,100 +833,152 @@ local function onAttackRequest(player)
 end
 
 --------------------------------------------------------------------------------
--- EAGLE ACTIVE-DEFENSE WEAPONS (talons / beak) — server-owned extend/cooldown state
+-- EAGLE DIRECTIONAL STRIKE (left/right talon · forward) — server-owned timers + bank classify
 --------------------------------------------------------------------------------
--- The eagle holds L/R mouse to EXTEND a weapon (client sends intent via WeaponHold). The
--- server owns the timers so a client can't fake "always extended". A weapon that is `active`
--- past its `startup` lag and hasn't yet caught a crow this window can PARRY a contact inside
--- its frontal cone (tryParry, from processCollisions): the crow dies, the eagle is unharmed.
--- Releasing or draining the window drops the weapon into a cooldown. State + a HUD meter are
--- mirrored onto the eagle Body as attributes (Talon/BeakMeter 0..1, Talon/BeakActive) for GameUI.
-local function newWeaponState()
-	return {
-		talon = { holding = false, state = "ready", windowLeft = 0, cooldownLeft = 0, startupLeft = 0, caught = false },
-		beak  = { holding = false, state = "ready", windowLeft = 0, cooldownLeft = 0, startupLeft = 0, caught = false },
-	}
+-- The eagle taps LEFT-CLICK to fire a strike (client sends the Strike EDGE only — no direction,
+-- no hit claim). The SERVER reads the authoritative bank from the Body and picks the strike type
+-- (GameConfig.Combat.bankStrikeThresholdDeg), runs the per-type startup→duration→cooldown timers,
+-- and owns the offset coverage cone. During the active window (past startup) the offset cone BOTH
+-- parries an incoming ram (tryStrikeCatch, from processCollisions: crow dies, eagle unharmed) AND
+-- deals offensive damage to a crow inside the cone within reach (the proactive hunt). ONE
+-- catch-or-hit per window (the `caught` flag). State + a HUD meter/armed-dir are mirrored onto the
+-- eagle Body as attributes (StrikeMeter 0..1, StrikeActive bool, StrikeArmedDir "left|right|forward").
+
+-- Classify the eagle's current bank into a strike type. roll = +banked-right (matches the client's
+-- curBank). Authoritative: read from the Body's CFrame, never from any client-sent value.
+local function classifyBank(body)
+	local roll = math.asin(math.clamp(-body.CFrame.RightVector.Y, -1, 1)) -- + = banked right (right wing down)
+	local thr = math.rad((GameConfig.Combat and GameConfig.Combat.bankStrikeThresholdDeg) or 18)
+	if roll > thr then return "right"
+	elseif roll < -thr then return "left"
+	else return "forward" end
 end
 
-local function stepWeapon(w, cfg, dt)
-	if w.state == "cooldown" then
-		w.cooldownLeft -= dt
-		if w.cooldownLeft <= 0 then w.state = "ready" end
-	elseif w.state == "active" then
-		if w.startupLeft > 0 then w.startupLeft = math.max(0, w.startupLeft - dt) end
-		w.windowLeft -= dt
-		if w.windowLeft <= 0 or not w.holding then
-			-- window emptied OR button released -> retract and commit to a cooldown
-			w.state = "cooldown"
-			w.cooldownLeft = cfg.cooldown
-		end
-	else -- "ready"
-		if w.holding then
-			w.state = "active"
-			w.windowLeft = cfg.extendWindow
-			w.startupLeft = cfg.startup or 0
-			w.caught = false
-		end
-	end
+-- The coverage/strike cone axis for a strike type: the nose rotated by coneOffsetDeg about the bird's
+-- up axis (so a side strike covers that side's front quadrant). +offset = toward the bird's right.
+local function strikeConeAxis(body, cfg)
+	local off = math.rad(cfg.coneOffsetDeg or 0)
+	return body.CFrame.LookVector * math.cos(off) + body.CFrame.RightVector * math.sin(off)
 end
 
--- Step every eagle's weapon timers once per Heartbeat and mirror a HUD meter onto the Body.
-local function updateEagleWeapons(dt)
-	local weapons = GameConfig.Combat and GameConfig.Combat.weapons
-	if not weapons then return end
-	for _, entry in pairs(Birds) do
-		if entry.team == "Eagles" and isBirdAlive(entry) then
-			if not entry.weapons then entry.weapons = newWeaponState() end
-			for wname, cfg in pairs(weapons) do
-				local w = entry.weapons[wname]
-				if w then
-					stepWeapon(w, cfg, dt)
-					-- Mirror to the Body for GameUI: meter 0..1 + whether it can currently parry.
-					local meter, active
-					if w.state == "active" then
-						meter = (cfg.extendWindow > 0) and math.clamp(w.windowLeft / cfg.extendWindow, 0, 1) or 0
-						active = (w.startupLeft <= 0)
-					elseif w.state == "cooldown" then
-						meter = (cfg.cooldown > 0) and math.clamp(1 - w.cooldownLeft / cfg.cooldown, 0, 1) or 1
-						active = false
-					else
-						meter, active = 1, false
-					end
-					local cap = (wname == "talon") and "Talon" or "Beak"
-					entry.body:SetAttribute(cap .. "Meter", meter)
-					entry.body:SetAttribute(cap .. "Active", active)
-				end
-			end
+local function newStrikeState()
+	return { state = "ready", stype = nil, startupLeft = 0, durationLeft = 0, cooldownLeft = 0, caught = false }
+end
+
+-- Advance one strike state machine: ready -> active (startup→duration) -> cooldown -> ready.
+local function stepStrike(s, dt)
+	local strikes = GameConfig.Combat and GameConfig.Combat.strikes
+	if s.state == "cooldown" then
+		s.cooldownLeft -= dt
+		if s.cooldownLeft <= 0 then s.state, s.stype = "ready", nil end
+	elseif s.state == "active" then
+		local cfg = (strikes and strikes[s.stype]) or {}
+		if s.startupLeft > 0 then s.startupLeft = math.max(0, s.startupLeft - dt) end
+		s.durationLeft -= dt
+		if s.durationLeft <= 0 then
+			s.state = "cooldown"
+			s.cooldownLeft = cfg.cooldown or 1.2
 		end
 	end
 end
 
--- Client hold intent for an eagle's weapon. Only the possessed eagle has weapons; crows ignore.
-local function onWeaponHold(player, weapon, holding)
+-- A Strike EDGE from a client: classify the bank, then (if idle) start that strike type. Rate-limited
+-- like the old attack; the state machine's cooldown is the real re-fire gate. Only the possessed eagle
+-- can strike; crows have no strikes (their attack is the suicide ram), so the server ignores them.
+local function onStrike(player)
+	if not roundActive then return end
+	local now = os.clock()
+	if lastAttackAt[player] and (now - lastAttackAt[player]) < ATTACK_COOLDOWN then return end
 	local entry = getActiveBird(player)
 	if not entry or entry.team ~= "Eagles" then return end
-	if not entry.weapons then entry.weapons = newWeaponState() end
-	local w = entry.weapons[tostring(weapon)]
-	if w then w.holding = holding and true or false end
+	entry.strike = entry.strike or newStrikeState()
+	local s = entry.strike
+	if s.state ~= "ready" then return end -- busy (startup/active/cooldown) — ignore the trigger
+	local strikes = GameConfig.Combat and GameConfig.Combat.strikes
+	local stype = classifyBank(entry.body)
+	local cfg = strikes and strikes[stype]
+	if not cfg then return end
+	lastAttackAt[player] = now
+	s.state = "active"
+	s.stype = stype
+	s.startupLeft = cfg.startup or 0
+	s.durationLeft = cfg.duration or 0.3
+	s.caught = false
 end
 
--- Did the eagle catch this ramming crow? True if a weapon is active (past startup), hasn't
--- already caught a crow this window, and its frontal cone covers the direction to the crow.
-local function tryParry(eagle, crow)
-	local W = eagle.weapons
-	local weapons = GameConfig.Combat and GameConfig.Combat.weapons
-	if not W or not weapons then return false end
+-- Step every eagle's strike timers once per Heartbeat, run the offensive cone pass, and mirror the
+-- HUD attributes. Eagles are snapshot first so the offensive applyDamage (which removes Birds entries)
+-- can't corrupt a live `pairs(Birds)` iteration.
+local function updateEagleStrikes(dt)
+	local strikes = GameConfig.Combat and GameConfig.Combat.strikes
+	if not strikes then return end
+	local eagles = {}
+	for _, entry in pairs(Birds) do
+		if entry.team == "Eagles" and isBirdAlive(entry) then eagles[#eagles + 1] = entry end
+	end
+	for _, entry in ipairs(eagles) do
+		if isBirdAlive(entry) then
+			entry.strike = entry.strike or newStrikeState()
+			local s = entry.strike
+			stepStrike(s, dt)
+
+			-- OFFENSIVE pass: while active (past startup) and not yet spent this window, a crow inside the
+			-- offset cone within reach takes the strike's damage. One hit per window (shares `caught` with
+			-- the defensive parry, so a strike lands EITHER a kill-catch OR an offensive hit, never both).
+			if s.state == "active" and s.startupLeft <= 0 and not s.caught then
+				local cfg = strikes[s.stype]
+				if cfg then
+					local p = entry.profile
+					local reach = (p.bodyRadius + MAX_BODY_RADIUS + ATTACK_BUFFER) * (cfg.reachFraction or 0.7)
+					local target, dist = findNearestEnemy(entry, reach + 6)
+					if target and dist and dist <= reach then
+						local dir = target.body.Position - entry.body.Position
+						if dir.Magnitude > 1e-3 then
+							local axis = strikeConeAxis(entry.body, cfg)
+							if dir.Unit:Dot(axis) >= math.cos(math.rad(cfg.coverHalfAngleDeg or 60)) then
+								local dmg = (cfg.damage == "beak") and (p.beakDamage or 22) or (p.talonDamage or 34)
+								s.caught = true
+								applyDamage(target, dmg, entry, cfg.damage or "talon")
+							end
+						end
+					end
+				end
+			end
+
+			-- HUD mirror: meter (0..1), whether it can parry/hit right now, and the LIVE armed direction
+			-- (the strike a click would throw at the current bank — lights the L/F/R indicator).
+			local meter, active = 1, false
+			if s.state == "active" then
+				local cfg = strikes[s.stype] or {}
+				meter = (cfg.duration and cfg.duration > 0) and math.clamp(s.durationLeft / cfg.duration, 0, 1) or 0
+				active = (s.startupLeft <= 0)
+			elseif s.state == "cooldown" then
+				local cfg = strikes[s.stype] or {}
+				meter = (cfg.cooldown and cfg.cooldown > 0) and math.clamp(1 - s.cooldownLeft / cfg.cooldown, 0, 1) or 1
+				active = false
+			end
+			entry.body:SetAttribute("StrikeMeter", meter)
+			entry.body:SetAttribute("StrikeActive", active)
+			entry.body:SetAttribute("StrikeArmedDir", classifyBank(entry.body))
+		end
+	end
+end
+
+-- Did the eagle's active strike catch this ramming crow? True if the strike is active (past startup),
+-- hasn't already caught/hit this window, and its OFFSET cone covers the direction to the crow.
+local function tryStrikeCatch(eagle, crow)
+	local s = eagle.strike
+	local strikes = GameConfig.Combat and GameConfig.Combat.strikes
+	if not s or not strikes then return false end
+	if s.state ~= "active" or s.startupLeft > 0 or s.caught then return false end
+	local cfg = strikes[s.stype]
+	if not cfg then return false end
 	local dir = crow.body.Position - eagle.body.Position
 	if dir.Magnitude < 1e-3 then return false end
-	local fwd = dir.Unit:Dot(eagle.body.CFrame.LookVector)
-	for wname, cfg in pairs(weapons) do
-		local w = W[wname]
-		if w and w.state == "active" and w.startupLeft <= 0 and not w.caught then
-			if fwd >= math.cos(math.rad(cfg.coverHalfAngleDeg or 90)) then
-				w.caught = true
-				return true
-			end
-		end
+	local axis = strikeConeAxis(eagle.body, cfg)
+	if dir.Unit:Dot(axis) >= math.cos(math.rad(cfg.coverHalfAngleDeg or 60)) then
+		s.caught = true
+		return true
 	end
 	return false
 end
@@ -984,12 +1036,12 @@ local function processCollisions()
 				-- Identify the eagle and the crow (the only enemy pairing). The crow's sole
 				-- attack is the suicide ram, so a committed contact ALWAYS kills the crow; the
 				-- eagle takes one of its `eagleHits` UNLESS it was covering this contact zone
-				-- with an extended talon/beak (parry gating = iteration 3).
+				-- with an ACTIVE directional strike whose offset cone faces the crow (tryStrikeCatch).
 				local eagle, crow
 				if a.team == "Eagles" then eagle, crow = a, b else eagle, crow = b, a end
 
-				if tryParry(eagle, crow) then
-					-- CAUGHT: the crow dies on the talons/beak and the eagle takes NO hit.
+				if tryStrikeCatch(eagle, crow) then
+					-- CAUGHT: the crow dies on the strike and the eagle takes NO hit.
 					applyDamage(crow, 1e9, eagle, "talon")
 				else
 					-- UNPARRIED ram: one of the eagle's `eagleHits`; the crow dies regardless.
@@ -1604,8 +1656,8 @@ local function connectRemotes()
 	Remotes.AttackRequest.OnServerEvent:Connect(function(player)
 		pcall(onAttackRequest, player)
 	end)
-	Remotes.WeaponHold.OnServerEvent:Connect(function(player, weapon, holding)
-		pcall(onWeaponHold, player, weapon, holding)
+	Remotes.Strike.OnServerEvent:Connect(function(player)
+		pcall(onStrike, player)
 	end)
 	Remotes.SwapCrow.OnServerEvent:Connect(function(player, index)
 		pcall(onSwapCrow, player, index)
@@ -1628,8 +1680,8 @@ local function onHeartbeat(dt)
 	rebuildBirdIndex()
 	-- AI flight for server-owned crows.
 	pcall(updateAICrows, dt)
-	-- Step eagle talon/beak extend/cooldown timers (before collisions, so tryParry reads fresh state).
-	pcall(updateEagleWeapons, dt)
+	-- Step eagle strike timers + offensive cone (before collisions, so tryStrikeCatch reads fresh state).
+	pcall(updateEagleStrikes, dt)
 	-- Anti-cheat movement validation (before crash sweep, so a rubber-band corrects the
 	-- position the crash check then reads).
 	pcall(processAntiCheat, dt)
