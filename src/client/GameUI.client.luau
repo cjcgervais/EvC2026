@@ -453,17 +453,23 @@ chCorner.CornerRadius = UDim.new(1, 0)
 chCorner.Parent = crosshair
 
 --------------------------------------------------------------------------------
--- CONTROL HINT (bottom center) — tells the player about free-look + camera pan.
+-- CONTROL HINT (bottom center) — headlines SPACE (the critical situational-awareness
+-- toggle) and lists the live bindings. RichText so SPACE pops as the headline. Player ask
+-- 2026-06-30: "the controls HUD [should] tell of this critical button"; and the old hint was
+-- STALE ("hold SPACE" — free-look is a TOGGLE now). Every binding here matches the build:
+-- SPACE = toggle free-look, MOUSE steers flight, LEFT-CLICK = strike, RIGHT-CLICK = aim/zoom,
+-- SHIFT/CTRL = flap throttle.
 --------------------------------------------------------------------------------
 local controlHint = Instance.new("TextLabel")
 controlHint.Name = "ControlHint"
-controlHint.Size = UDim2.new(0, 460, 0, 22)
-controlHint.Position = UDim2.new(0.5, -230, 1, -34)
+controlHint.Size = UDim2.new(0, 620, 0, 24)
+controlHint.Position = UDim2.new(0.5, -310, 1, -36)
 controlHint.BackgroundTransparency = 1
-controlHint.Text = "MOUSE aims (cross chases cursor)  \194\183  SHIFT/CTRL flap throttle  \194\183  hold SPACE free-look"
+controlHint.RichText = true
+controlHint.Text = "<b><font color=\"#ffd24a\">SPACE</font></b> = toggle <b>FREE-LOOK</b> (look around!)   \194\183   MOUSE steers   \194\183   LEFT-CLICK strike   \194\183   RIGHT-CLICK aim/zoom   \194\183   SHIFT/CTRL flap"
 controlHint.TextColor3 = Color3.fromRGB(235, 240, 245)
 controlHint.TextStrokeTransparency = 0.5
-controlHint.TextTransparency = 0.15
+controlHint.TextTransparency = 0.1
 controlHint.Font = UI.fontMedium
 controlHint.TextScaled = true
 controlHint.ZIndex = 4

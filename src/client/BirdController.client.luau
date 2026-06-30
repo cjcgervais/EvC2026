@@ -144,6 +144,14 @@ local cameraState = {
 	userZoom = 0,
 }
 
+-- AIM-ZOOM (hold RIGHT-CLICK): pulls the chase distance + FOV in for a closer read of whatever
+-- you're flying toward / watching. `active` is the held edge (set in InputBegan/Ended); `factor`
+-- eases 0->1 toward active each frame in updateCamera (Camera.aimZoomLerp) and is folded into the
+-- chase distance + FOV. Works in chase AND free-look. Camera-only — it NEVER touches flight input
+-- or the steering cursor (verified: it doesn't change MouseBehavior, so the mouse-aim read is intact).
+-- Module-level (not cleared by resetInput) so a held RMB survives a crow-swap.
+local aimZoom = { active = false, factor = 0 }
+
 -- Free-look (Spacebar) — LAW: hold Space to look ALL AROUND while flying. The camera
 -- orbits the bird freely and MUST NEVER alter the flight input (it writes only freeLook.*,
 -- never inputState.*; flight controls are keyboard-only and `isDiving` reads the bird's nose,
@@ -322,12 +330,13 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 		return
 	end
 
-	-- Eagle active defense: hold Left = talons, Right = beak (extend; the server gates the parry
-	-- and the cooldown). Crows have no weapons, so the server ignores these for a crow.
+	-- LEFT mouse = eagle strike (hold to extend the talons; the server gates the parry + cooldown).
+	-- RIGHT mouse = AIM-ZOOM (hold to zoom the camera in; camera-only, no server intent). RMB was freed
+	-- from "beak" per the 2026-06-30 control rework — it now zooms anywhere, in chase or free-look.
 	if input.UserInputType == Enum.UserInputType.MouseButton1 then
 		setWeaponHold("talon", true)
 	elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
-		setWeaponHold("beak", true)
+		aimZoom.active = true
 	end
 end)
 
@@ -349,11 +358,11 @@ UserInputService.InputEnded:Connect(function(input)
 	-- NOTE: Space no longer turns free-look off on key-release — it's a TOGGLE (handled in InputBegan).
 	-- Focus loss (WindowFocusReleased) still force-clears it so you never get stuck looking around.
 
-	-- Retract the eagle's active-defense weapons on mouse-up.
+	-- Retract the talons on LMB-up; release the aim-zoom on RMB-up.
 	if input.UserInputType == Enum.UserInputType.MouseButton1 then
 		setWeaponHold("talon", false)
 	elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
-		setWeaponHold("beak", false)
+		aimZoom.active = false
 	end
 end)
 
@@ -442,6 +451,21 @@ local function updateCamera(dt)
 		+ (targetDistance - cameraState.currentDistance) * 0.1
 
 	local dist = cameraState.currentDistance
+
+	-- AIM-ZOOM (hold RMB): ease the zoom factor toward the held state, then pull the chase distance IN toward
+	-- Camera.aimDistance. Folded into `dist` so BOTH the chase offset and the free-look orbit (both built from
+	-- `dist` below) tighten when zooming. Camera-only; the mouse-aim cursor read is untouched.
+	local zoomTarget = aimZoom.active and 1 or 0
+	aimZoom.factor = aimZoom.factor + (zoomTarget - aimZoom.factor) * math.clamp(CAM.aimZoomLerp or 0.22, 0, 1)
+	if aimZoom.factor > 1e-3 then
+		dist = dist + ((CAM.aimDistance or 18) - dist) * aimZoom.factor
+	end
+	-- FREE-LOOK (P5 "unstick"): pull the orbit PIVOT in to a near value so the sweep is controllable instead
+	-- of a huge twitchy arc around a distant pivot (the chase distance is far back at stoop speed). Composes
+	-- with aim-zoom above (min keeps the tighter of the two). Only affects free-look; chase distance is intact.
+	if freeLook.active then
+		dist = math.min(dist, CAM.freeLookDistance or 45)
+	end
 
 	-- CONTINUOUS, RATE-LIMITED CHASE DIRECTION (the no-snap / anti-sickness fix, RESEARCH §v4). The old
 	-- camera rebuilt its azimuth from the bird's HORIZONTAL heading, which REVERSES ~180° over the top of a
@@ -551,6 +575,12 @@ local function updateCamera(dt)
 	-- Crest damping: when the facing spikes (loop top) soften the follow so the camera glides through instead
 	-- of whipping. crestBlend was computed above (it also drives the loop turn-over). Camera-only.
 	local smoothing  = CAM.followSmoothing * (1 - crestBlend * (CAM.crestDamp or 0.75))
+	-- FREE-LOOK CRISPNESS (P5 "it feels like it gets stuck"): the orbit used to inherit the heavy chase
+	-- smoothing (0.18 ≈ 16%/frame) so the view crawled after the mouse. While free-looking, track near-1:1
+	-- with the much higher freeLookSmoothing instead. The single biggest "unstick". Chase smoothing unchanged.
+	if freeLook.active then
+		smoothing = CAM.freeLookSmoothing or smoothing
+	end
 
 	-- Frame-rate independent smoothing toward the target.
 	local alpha = math.clamp(1 - math.exp(-smoothing * 60 * dt), 0, 1)
@@ -572,6 +602,10 @@ local function updateCamera(dt)
 		targetFOV = CAM.diveFOV
 	elseif flightEngine.verticalSpeed > 30 then
 		targetFOV = CAM.climbFOV
+	end
+	-- AIM-ZOOM narrows the FOV LAST so it composes with (doesn't get stomped by) the attitude/speed FOV.
+	if aimZoom.factor > 1e-3 then
+		targetFOV = targetFOV + ((CAM.aimFOV or 45) - targetFOV) * aimZoom.factor
 	end
 	camera.FieldOfView = math.clamp(
 		camera.FieldOfView + (targetFOV - camera.FieldOfView) * math.clamp(dt * 6, 0, 1),
@@ -1018,10 +1052,10 @@ local function acquire()
 	-- genuine release (or focus loss / death without Space) turns it off.
 	setFreeLook(UserInputService:IsKeyDown(Enum.KeyCode.Space))
 
-	-- Re-assert weapon-hold intent for the new bird (the server resets weapon timers on every
-	-- (re)spawn/swap; resetInput just cleared our mirror) from the physically held mouse buttons.
+	-- Re-assert LMB strike intent for the new bird (the server resets weapon timers on every
+	-- (re)spawn/swap; resetInput just cleared our mirror) from the physically held mouse button.
+	-- (RMB is camera aim-zoom now — its `aimZoom` state is module-level, so a held RMB survives the swap.)
 	if UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then setWeaponHold("talon", true) end
-	if UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then setWeaponHold("beak", true) end
 
 	if not target then return end
 

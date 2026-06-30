@@ -191,8 +191,15 @@ GameConfig.Profiles = {
 		-- short, so level flight bled speed until it stalled. 520/12≈43 lets it sustain/slowly
 		-- gain at cruise. It still trades altitude for top speed (energy fighter) — the dive,
 		-- not the flap, is its speed source. PLAYTEST-PROVISIONAL.
-		flapThrust = 600 * GRAV_SCALE,       -- forward force from a flap (520->600: sustains airspeed in a climb so a vertical loop keeps energy)
-		flapClimbForce = 400 * GRAV_SCALE,   -- raised 300->400 (Chad: "allow for better climb"). Base was
+		-- P2 (player ask 2026-06-30 "more power for flaps"): flapThrust 600->800, flapClimbForce 400->500.
+		-- Flap power is the eagle's ENERGY ENGINE — more of it = faster re-acceleration after a turn/zoom =
+		-- stronger boom-and-zoom (harder for crows to catch). Punch comes from THRUST, not lightness — mass is
+		-- deliberately kept at 16 (momentum / energy-retention = the eagle identity). The 1-v-4 counter-levers
+		-- live with the CROWS (numbers, possession, formation, collision trades) — Crow flap is NOT auto-scaled.
+		-- (Option B — a wingbeat-phase "felt surge" per downstroke — is the juicy follow-up to prototype live;
+		-- kept as continuous force here so it's safe to ship UNPLAYTESTED. Watch for porpoising if you add it.)
+		flapThrust = 800 * GRAV_SCALE,       -- forward force from a flap (600->800: more punch / faster re-accel — P2)
+		flapClimbForce = 500 * GRAV_SCALE,   -- raised 400->500 (P2: "more power for flaps" -> stronger climb). Base was
 		                        -- ABOVE gravity (196); ×GRAV_SCALE keeps it above the new (lower) gravity by the same
 		                        -- ratio, so a flapping eagle keeps climbing even after a
 		                        -- steep climb has bled its airspeed (lift ~0) — a real eagle muscles up
@@ -211,13 +218,15 @@ GameConfig.Profiles = {
 		rollInertia = 0.55,     -- 0..1 sluggishness; higher = heavier-feeling controls
 
 		-- ENERGY / STAMINA (flapping & hard manoeuvres cost stamina) ---------
-		-- Chad: "longer stamina." Budget widened: 140 cap / 6 flap cost ≈ 23s of sustained
-		-- flapping (was 100/9 ≈ 11s) and faster regen (9), so a climb ends from the ceiling
-		-- or a deliberate glide, not premature fatigue. Suits the eagle's endurance identity.
-		maxStamina = 240,       -- raised 140->240 ("longer stamina"); the flap throttle scales cost by effort so partial throttle lasts even longer
-		staminaFlapCost = 6,    -- per second at FULL up-throttle (scaled by |throttle| in FlightPhysics)
+		-- P3 (player ask 2026-06-30 "more stamina for flapping" — a deliberate shift: longer LEASH, not just
+		-- punch): budget widened again. 320 cap / 5 cost ≈ 64s of sustained full-throttle flapping (was 240/6
+		-- ≈ 40s), regen 16. Stamina STAYS the limiter (boom-and-zoom identity survives): with P2's stronger
+		-- flap this must end from fatigue or the ceiling, not become "free" power. Eagle-only — Crow stamina is
+		-- a 1-v-4 lever left for the matchup pass. Suits the eagle's energy-fighter / endurance identity.
+		maxStamina = 320,       -- raised 240->320 (P3 "more stamina"); flap throttle scales cost by effort so partial throttle lasts even longer
+		staminaFlapCost = 5,    -- per second at FULL up-throttle (6->5: longer leash); scaled by |throttle| in FlightPhysics
 		staminaDiveCost = 4,    -- per second of powered dive / down-throttle
-		staminaRegen = 14,      -- per second when gliding (9->14: recovers faster between climbs)
+		staminaRegen = 16,      -- per second when gliding (14->16: recovers a touch faster between climbs)
 		climbCeilingBonus = 1.0,-- relative climb ceiling (eagle climbs higher)
 
 		-- COMBAT / ENDURANCE -------------------------------------------------
@@ -465,7 +474,25 @@ GameConfig.Camera = {
 	shakeAtSpeed = 200,
 	shakeMagnitude = 0.6,
 	-- Spacebar free-look: orbit the camera while the bird holds its flight path.
-	freeLookSensitivity = 0.35,
+	-- Raised 0.35 -> 0.7 (player ask 2026-06-30: free-look "gets stuck"/feels limiting — want a crisp,
+	-- near-1:1 War-Thunder-arcade pan). Drives both the mouse orbit (·0.01) and the arrow-key orbit (·2.5).
+	freeLookSensitivity = 0.7,
+	-- FREE-LOOK CRISPNESS (player ask 2026-06-30 "it feels like it gets stuck"). The orbit used to reuse the
+	-- heavy chase followSmoothing (0.18 ≈ 16%/frame) → the view crawled after the mouse ("molasses"). When
+	-- free-look is active the final camera lerp uses THIS smoothing instead → near-1:1 tracking. It's the single
+	-- biggest "unstick" knob: higher = crisper (toward 1:1), lower = floatier. ~1.0 ≈ 63%/frame at 60fps.
+	freeLookSmoothing = 1.0,
+	-- While free-looking, the orbit PIVOT radius is pulled in to this near value (instead of the full chase
+	-- distance, which is far back at stoop speed → huge twitchy arcs). Keeps the sweep controllable. The
+	-- aim-zoom (RMB) tightens it further. Only affects the free-look orbit; chase distance is untouched.
+	freeLookDistance = 45,
+	-- AIM-ZOOM (hold RIGHT-CLICK — player ask 2026-06-30 "right click is aim/zoom… zoom anywhere"). A held RMB
+	-- smoothly pulls the chase distance toward aimDistance and the FOV toward aimFOV for a closer read of
+	-- whatever you're flying toward / watching; release returns. Works in BOTH chase and free-look. Camera-only
+	-- (never touches flight or the steering cursor). aimZoomLerp = per-frame ease of the 0→1 zoom factor.
+	aimFOV      = 45,  -- narrower FOV while zoomed (from baseFOV 70) — magnifies the target
+	aimDistance = 18,  -- chase distance pulled toward this while zooming (clamped within [minDistance,maxDistance])
+	aimZoomLerp = 0.22, -- per-frame ease of the zoom factor toward 0/1 (higher = snappier zoom)
 	-- Mouse-wheel zoom: scroll adjusts a user offset folded into the chase distance.
 	-- The final distance is clamped to [minDistance, maxDistance] so you can't clip
 	-- into the bird or fly the camera off to infinity.
