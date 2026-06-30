@@ -41,7 +41,7 @@ local GameConfig = {}
 --------------------------------------------------------------------------------
 local METERS_PER_STUD = 0.28           -- Roblox canonical scale (2019 World panel)
 local REAL_G          = 9.81           -- m/s²
-local GRAVITY_G       = 2.0            -- fraction of real gravity — THE sweep knob (see above)
+local GRAVITY_G       = 1.3            -- fraction of real gravity — THE sweep knob (2.0->1.5->1.3: more loft + less climb-speed bleed, since the along-climb gravity decel scales with this)
 local GRAVITY         = REAL_G * GRAVITY_G / METERS_PER_STUD  -- studs/s² (≈70.1 at GRAVITY_G=2)
 local LEGACY_GRAVITY  = 196.2          -- the gravity the v2 feel was originally calibrated at
 local GRAV_SCALE      = GRAVITY / LEGACY_GRAVITY              -- multiplies every gravity-coupled force
@@ -62,16 +62,22 @@ GameConfig.Flight = {
 	-- below spawn (0.9*glide) and cruise. See FlightPhysics.computeCL and the calibration note
 	-- in project-open-questions. Raising it raises lift everywhere (lower stall speeds).
 	-- v3: scaled by GRAV_SCALE in lockstep with gravity so stall/cruise/terminal speeds stay put
-	-- (the g and ρ in v_stall cancel — see the WORLD SCALE block). Base 0.033 was the v2 value at
-	-- gravity 196.2; do NOT edit this directly to change feel — sweep GRAVITY_G instead.
-	AIR_DENSITY = 0.033 * GRAV_SCALE,
+	-- (the g and ρ in v_stall cancel — see the WORLD SCALE block). The BASE (the 0.0xx literal) is the
+	-- real loft lever: it sets lift-vs-weight independent of gravity, so raising it lowers stall speeds
+	-- and gives more loft / readier climb. Raised 0.033 -> 0.044 (session: "need more loft / go up more
+	-- readily"). Sweep GRAVITY_G for accel "punch"; edit THIS base for outright lift/loft.
+	AIR_DENSITY = 0.044 * GRAV_SCALE,
 	WIND_BASE = Vector3.new(0, 0, 0), -- ambient wind; per-map override allowed
 	-- Control authority scales with airspeed: below MIN you can barely steer
 	-- (this is what makes a stalled/slow bird helpless and gives speed meaning).
 	CONTROL_AUTHORITY_MIN_SPEED = 20,  -- studs/s where control ~0
 	CONTROL_AUTHORITY_FULL_SPEED = 90, -- studs/s where control is full
-	-- Aerobatics (loop / barrel roll) unlock above this airspeed.
-	AEROBATIC_MIN_SPEED = 110,
+	-- Aerobatics (loop / barrel roll) unlock above this airspeed. NOTE (session: holistic redesign):
+	-- with STABILITY_RATE = 0 the weathervane this gate suppresses is already inert, so this is now a
+	-- near-cosmetic safety hook — the GRIP assist (not a weathervane) governs the nose at all speeds.
+	-- Lowered 110->60 so it can NEVER fight a slow loop top: loop COMMIT is owned by the controller's
+	-- ride-the-edge AoA protection (Controls.aimStallBandDeg) + powered-lift floor, not by this number.
+	AEROBATIC_MIN_SPEED = 60,
 	TERMINAL_VELOCITY = 400,
 	-- STATIC AERODYNAMIC STABILITY (rad/s base): how fast the airframe weathervanes its
 	-- ORIENTATION toward the airflow. This self-limits angle-of-attack (anti-stall) WITHOUT
@@ -167,12 +173,15 @@ GameConfig.Profiles = {
 		-- and cruise (130). See FlightPhysics.computeCL. PLAYTEST-PROVISIONAL.
 		cl0 = 0.30,             -- baseline lift at zero AoA (THE fix for "not enough lift")
 		liftSlopePerDeg = 0.11, -- lift-curve slope (~= 2*pi per radian, thin-airfoil theory)
-		clMax = 1.6,            -- peak lift (raised session 7: more lift, more forgiving high-AoA, stall speed ~65->61)
+		clMax = 1.95,           -- peak lift (raised 1.6->1.95: "need more lift authority" — climbs/turns harder before stall)
 		postStallCl = 0.70,     -- lift retained past the stall (a recoverable mush, not a cliff)
 		stallPadDeg = 6,        -- degrees beyond stallAngle over which lift rolls off
 		parasiticDrag = 0.020,  -- low parasitic drag -> great glide/dive
-		inducedDragK = 0.85,    -- induced-drag coefficient (cost of lift: drag ~ k*CL^2)
-		stallAngleDeg = 24,     -- critical AoA before lift rolls off (widened session 7: stalled too easily climbing)
+		inducedDragK = 0.58,    -- induced-drag coefficient. CD_i = k·CL² so a hard pull bleeds energy ∝ load-factor²
+		                        -- (RESEARCH §v4 drag polar — the principled EM cost). 0.85->0.65->0.58: the eagle is the
+		                        -- ENERGY fighter and should RETAIN energy through a pull, but the n² cost is deliberately
+		                        -- NOT removed — pitching still costs energy, just no longer "way too much".
+		stallAngleDeg = 27,     -- critical AoA before lift rolls off (24->27: pull harder before it lets go)
 		stabilityRate = 1.0,    -- weathervane strength multiplier (moot while STABILITY_RATE = 0)
 		recoverNoseDownRate = 0, -- past-stall auto-recovery DISABLED (no auto-level; nose stays where pointed)
 
@@ -182,7 +191,7 @@ GameConfig.Profiles = {
 		-- short, so level flight bled speed until it stalled. 520/12≈43 lets it sustain/slowly
 		-- gain at cruise. It still trades altitude for top speed (energy fighter) — the dive,
 		-- not the flap, is its speed source. PLAYTEST-PROVISIONAL.
-		flapThrust = 520 * GRAV_SCALE,       -- forward force from a flap (v3: ×GRAV_SCALE holds T/W & T/D vs the lighter weight)
+		flapThrust = 600 * GRAV_SCALE,       -- forward force from a flap (520->600: sustains airspeed in a climb so a vertical loop keeps energy)
 		flapClimbForce = 400 * GRAV_SCALE,   -- raised 300->400 (Chad: "allow for better climb"). Base was
 		                        -- ABOVE gravity (196); ×GRAV_SCALE keeps it above the new (lower) gravity by the same
 		                        -- ratio, so a flapping eagle keeps climbing even after a
@@ -205,14 +214,16 @@ GameConfig.Profiles = {
 		-- Chad: "longer stamina." Budget widened: 140 cap / 6 flap cost ≈ 23s of sustained
 		-- flapping (was 100/9 ≈ 11s) and faster regen (9), so a climb ends from the ceiling
 		-- or a deliberate glide, not premature fatigue. Suits the eagle's endurance identity.
-		maxStamina = 140,
-		staminaFlapCost = 6,    -- per second of flapping
-		staminaDiveCost = 4,    -- per second of powered dive
-		staminaRegen = 9,       -- per second when gliding
+		maxStamina = 240,       -- raised 140->240 ("longer stamina"); the flap throttle scales cost by effort so partial throttle lasts even longer
+		staminaFlapCost = 6,    -- per second at FULL up-throttle (scaled by |throttle| in FlightPhysics)
+		staminaDiveCost = 4,    -- per second of powered dive / down-throttle
+		staminaRegen = 14,      -- per second when gliding (9->14: recovers faster between climbs)
 		climbCeilingBonus = 1.0,-- relative climb ceiling (eagle climbs higher)
 
 		-- COMBAT / ENDURANCE -------------------------------------------------
-		health = 100,           -- ~= 4 crows (see project-open-questions memory)
+		health = 99,            -- 3 clean "hits": the discrete combat model (GameConfig.Combat.eagleHits)
+		                        -- makes one UNPARRIED crow ram cost health/eagleHits = 33, so exactly
+		                        -- 3 rams down the eagle. HP bar retained (reads as 3 chunks).
 		beakDamage = 22,        -- close peck
 		talonDamage = 34,       -- grab/strike, the bread-and-butter eagle kill
 		diveAttackMultiplier = 3.46, -- RESEARCH: stoop ~3.46x level-flight lethality
@@ -285,6 +296,45 @@ GameConfig.Profiles = {
 }
 
 --------------------------------------------------------------------------------
+-- COMBAT — the asymmetric talon/beak ↔ suicide-ram model (HANDOFF session 11).
+--------------------------------------------------------------------------------
+-- The contract (see docs/HANDOFF.md + .loop/talon-beak-combat/state.md):
+--  • Eagle survives `eagleHits` UNPARRIED crow rams; one ram = health/eagleHits damage.
+--  • A Crow's only attack is the suicide ram: a committed eagle↔crow contact ALWAYS
+--    kills the crow, and costs the eagle one hit UNLESS the eagle was covering that
+--    contact zone with the right extended weapon (talons/beak). [zone/parry = iter 3]
+--  • Eagle wins: all crows dead & eagle alive.  Crows win: eagle takes its 3rd hit
+--    (≥1 crow survives).  Tie: the eagle's last hit and the last crow's death coincide.
+GameConfig.Combat = {
+	eagleHits = 3,   -- unparried crow rams the eagle survives (1 ram = health/eagleHits)
+
+	-- ACTIVE-DEFENSE WEAPONS (eagle only). Hold the mouse button to EXTEND; while extended
+	-- (and past the startup lag), a crow that contacts the eagle within the weapon's frontal
+	-- cone DIES and the eagle takes ZERO damage. One catch per extension window — a second
+	-- simultaneous crow from another angle still lands its hit (the swarm's lever). Releasing,
+	-- or draining the window, retracts the weapon into a cooldown. Server owns all these timers
+	-- (anti-cheat): the client only sends hold intent. Rear/uncovered angles are never safe.
+	-- ALL PLAYTEST-PROVISIONAL (research: >50% single-angle uptime is the "always-on" trap, so
+	-- the talon's 67% uptime leans on the one-catch rule + the narrow rear blind spot).
+	weapons = {
+		-- LEFT mouse. The bread-and-butter: wide frontal/underside cone, long window, fast reset.
+		talon = {
+			extendWindow      = 4.0,   -- s it can stay extended (drains while held)
+			cooldown          = 2.0,   -- s lockout after it retracts/empties
+			startup           = 0.15,  -- s of VULNERABLE activation lag before it can catch (no reactive flick)
+			coverHalfAngleDeg = 100,   -- half-angle of the coverage cone around the nose (front + sides + under)
+		},
+		-- RIGHT mouse. Head-on counter: narrow cone, short window, long reset — a committed read.
+		beak = {
+			extendWindow      = 2.0,
+			cooldown          = 4.0,
+			startup           = 0.12,
+			coverHalfAngleDeg = 50,    -- narrow head-on cone
+		},
+	},
+}
+
+--------------------------------------------------------------------------------
 -- SQUAD / FORMATION (Crow only) — see RESEARCH: tightness is the core risk knob.
 --------------------------------------------------------------------------------
 GameConfig.Squad = {
@@ -310,6 +360,18 @@ GameConfig.Squad = {
 	-- on the possessed crow's target when within engageRadius.
 	engageRadius = 45,
 	swapCooldown = 0.35,         -- seconds between possession swaps (anti-spam)
+
+	-- OBSTACLE AVOIDANCE (AI crows only — queue #8). A forward Spherecast look-ahead steers the
+	-- bird around spires/ground so it stops attriting itself on terrain (which let bot waves
+	-- crash before reaching the eagle). Applied ONLY in updateAICrows, so it never affects the
+	-- player-controlled crow (Chad's rule: the crow you fly into the eagle gets NO avoidance).
+	avoidance = {
+		lookaheadTime = 1.2,  -- s; look-ahead distance = speed * this (clamped below)
+		minDistance   = 50,   -- studs floor on the probe distance
+		maxDistance   = 320,  -- studs ceiling (cover a full-speed crow's stopping arc)
+		spherePad     = 8,    -- extra studs of body radius for a wider berth
+		weight        = 3.5,  -- how hard avoidance overrides boids as a hit becomes imminent
+	},
 }
 
 --------------------------------------------------------------------------------
@@ -336,8 +398,20 @@ GameConfig.Thermals = {
 -- real scored match the moment a second team joins. Set false for production.
 -- (Consumed by GameServer.RoundLoop.)
 --------------------------------------------------------------------------------
+-- VISUAL — cosmetic-only knobs (no gameplay/balance effect).
+GameConfig.Visual = {
+	birdScale = 1.8,  -- VISUAL scale of bird models so they read at range. Collision + attack reach
+	                  -- still use profile.bodyRadius, so this does NOT change combat distances/balance.
+}
+
 GameConfig.Debug = {
 	soloFlight = true,
+	-- aiCrowOpponents: when a lone HUMAN Eagle is present with no human Crow, spawn a fully
+	-- AI-controlled crow squad that HUNTS and rams the eagle, respawning in fresh waves of
+	-- `Squad.size` so a solo player can practice the talon/beak parry without a second human.
+	-- The bots count for NOTHING in scoring (round logic still keys off human players); they
+	-- exist only in the soloFlight branch and are cleared the moment a real match can be fielded.
+	aiCrowOpponents = true,
 }
 
 --------------------------------------------------------------------------------
@@ -381,7 +455,7 @@ GameConfig.Round = {
 -- CAMERA — consumed by BirdController (do not rename keys; client reads these)
 --------------------------------------------------------------------------------
 GameConfig.Camera = {
-	baseDistance = 26,
+	baseDistance = 40,
 	baseFOV = 70,
 	diveFOV = 95,
 	climbFOV = 62,
@@ -395,9 +469,9 @@ GameConfig.Camera = {
 	-- Mouse-wheel zoom: scroll adjusts a user offset folded into the chase distance.
 	-- The final distance is clamped to [minDistance, maxDistance] so you can't clip
 	-- into the bird or fly the camera off to infinity.
-	zoomStep      = 6,   -- studs of distance change per wheel notch
+	zoomStep      = 24,  -- studs of distance change per wheel notch (bigger range -> bigger step)
 	minDistance   = 10,  -- closest the chase cam may sit
-	maxDistance   = 120, -- farthest the chase cam may pull back
+	maxDistance   = 800, -- farthest the chase cam may pull back (raised 340->800: zoom way out for situational awareness)
 	-- Camera HEIGHT vs zoom: the chase cam rides at `heightFactor × dist` above the bird up close,
 	-- rising toward `zoomTopDownHeight × dist` as you wheel out — so zoomed out gives a higher,
 	-- more top-down view of the eagle.
@@ -407,8 +481,15 @@ GameConfig.Camera = {
 	-- cam softens its follow so the view glides through the flip instead of whipping. crestAngRate
 	-- is the facing angular speed (rad/s) at which damping reaches full; crestDamp is the max
 	-- fraction by which follow smoothing is reduced. Camera-only — never touches flight.
-	crestAngRate = 3.5,
-	crestDamp    = 0.75,
+	crestAngRate = 3.0,  -- facing rotation rate (rad/s) at which crest damping reaches full (lower = damps earlier)
+	crestDamp    = 0.85, -- max fraction the follow is softened at the crest (higher = smoother loop top)
+	-- NO-SNAP CHASE (deep-research RESEARCH §v4, anti motion-sickness). The chase direction is a single
+	-- CONTINUOUS full-3D vector (bird->camera), slewed toward "behind the bird's motion" at a CAPPED
+	-- angular rate — NOT rebuilt from the bird's horizontal heading (which reverses ~180° over a loop top
+	-- and SNAPS the camera, the old nausea bug). Combined with Roblox CFrame:Lerp (shortest-path quaternion
+	-- slerp), a full 360° loop arcs smoothly with no azimuth snap and no over/under pole flip.
+	chaseTurnRate   = 3.6,  -- rad/s cap on how fast the chase direction slews (>= the bird's loop rate so it keeps up, but smooths fast flicks). THE no-snap knob.
+	lookAheadFactor = 0.3,  -- how much the chase blends toward the VELOCITY vector vs the nose (0 = pure nose, 1 = pure velocity); a little lead reads the flight path
 }
 
 --------------------------------------------------------------------------------
@@ -436,6 +517,62 @@ GameConfig.Controls = {
 	-- then holds where you pointed it — there's no auto-level). PLAYTEST-PROVISIONAL.
 	pitchTapFraction = 0.30, -- pitch authority on the first instant a key is pressed (the "tap" amount)
 	pitchRampTime    = 0.55, -- seconds of holding to ramp from the tap fraction up to full (1.0)
+
+	-- BANKING / YAW SMOOTHING (keyboard A/D, Q/E): the same tap->ramp shape as pitch so a tap eases
+	-- the bank in (refined) instead of slamming to full deflection ("all or nothing"). Tone-down lever.
+	bankTapFraction = 0.22, -- roll/yaw authority on the first instant the key is pressed
+	bankRampTime    = 0.50, -- seconds of holding to ramp from the tap fraction up to full
+
+	-- MOUSE-AIM (the default flight control; NOT free-look). WAR THUNDER instructor model: two
+	-- on-screen markers — a freely MOVEABLE CURSOR (your desired direction of flight) and a NOSE
+	-- CROSS projected out front of the bird (its boresight / where it actually points). The bird
+	-- steers so the nose cross is ALWAYS APPROACHING the cursor; the control error is the screen-space
+	-- gap between them. Centre the cursor on the cross = fly straight. Hold the cursor at the screen
+	-- EDGE and the gap is unreachable (the chase cam keeps the heading near centre) -> the command
+	-- stays saturated -> a sustained FULL TURN or LOOP (uncapped — this is the key difference from the
+	-- old attitude-command model, which capped at an attitude and could not loop). Eased (aimResponse)
+	-- so it feels soft & flighty; keyboard is ADDITIVE (tighten a turn / hard dodge, dominates at full).
+	-- Hold SPACE to free-look (suspends aim, mouse drives the camera). Loops need cruise speed (>110,
+	-- Flight.AEROBATIC_MIN_SPEED) — a slow bird mushes instead of looping (Energy-Maneuverability).
+	-- ALL PLAYTEST-PROVISIONAL.
+	mouseAim     = true,
+	aimMarkerDistance = 600,  -- studs the nose cross is projected out front of the bird
+	aimResponse  = 13.0,      -- per-sec ease of the APPLIED input toward target. RAISED 9->13: the PD damping
+	                          -- below now does the smoothing, so the ease no longer has to add lag (lag = phase =
+	                          -- the porpoise). Faster ease = crisper, less floaty; PD keeps it from overshooting.
+	-- COORDINATED-FLIGHT INSTRUCTOR (War Thunder mouse-aim model; deep-research RESEARCH §v4). The cursor
+	-- direction is resolved into the bird's BODY frame; the controller flies a REAL coordinated turn toward
+	-- it — BANK + RUDDER together roll the lift vector onto the target, ELEVATOR pulls the nose through it.
+	-- TWO research-grounded upgrades over the old pure-proportional law:
+	--   (1) SYMMETRIC deadzone + EXPO on BOTH axes (WT "nonlinearity", documented 1.0–2.5): gentle near
+	--       centre for fine aim, ramping to FULL authority at the edge — so a clean vertical LOOP still
+	--       gets full pitch, and a slight sideways cursor no longer snaps into a hard bank.
+	--   (2) PD (rate/derivative) DAMPING: subtract a term proportional to the bird's current body rate
+	--       (FlightPhysics.pitchVel/rollVel). Pure-P over this inertial plant is underdamped -> the
+	--       coordinated-turn porpoise; the rate feedback critically-damps it WITHOUT killing loop authority
+	--       (at full deflection the P term saturates anyway; the damp only bites near equilibrium).
+	-- LOOP COMMIT: the nose-up pull is NOT faded early. It rides to the stall edge and the protection only
+	-- bites within aimStallBandDeg of stall — and is SUSPENDED entirely while powered (flap throttle up),
+	-- since the wings keep lift past stall then (FLAP_LIFT_FLOOR). This is what lets a started loop finish.
+	aimPitchDeadzone = 0.05,  -- PITCH deadzone: dead-ahead is steady; tiny so vertical authority stays
+	aimPitchExpo     = 1.8,   -- PITCH response curve past the deadzone (WT nonlinearity 1.0–2.5): fine near centre, full at edge
+	aimBankDeadzone  = 0.10,  -- BANK/YAW deadzone: slight horizontal cursor => NO bank (fly straight)
+	aimBankExpo      = 1.8,   -- BANK/YAW response curve (aligned with pitch, 2.2->1.8: consistent feel both axes)
+	aimRollGain      = 2.0,   -- bank-to-turn strength
+	aimPitchGain     = 2.6,   -- elevator: pulls the nose toward the target (full deflection still saturates -> loop)
+	aimYawGain       = 0.6,   -- rudder, coordinated WITH the bank (both fire together toward the target)
+	aimLevelGain     = 0.9,   -- wings-levelling toward straight flight when there's no bank demand (anti stuck-in-bank)
+	aimPitchDamp     = 0.35,  -- PD: nose-pitch-rate feedback (rad/s normalised) — kills the climb/pull porpoise
+	aimRollDamp      = 0.30,  -- PD: roll-rate feedback — kills the bank oscillation in a sustained turn
+	aimStallBandDeg  = 4,     -- degrees below stall where the nose-up PULL eases (4, narrow: ride the edge -> loop commits)
+	invertPitch      = false, -- false = cursor ABOVE the nose pitches UP (the cross rises to meet it)
+
+	-- FLAP THROTTLE (sticky, NOT momentary): hold SHIFT to ramp UP-thrust (climb), CTRL to ramp DOWN-thrust
+	-- (powered descent). It HOLDS where you set it so you can set a climb power and then fly a hands-free
+	-- defensive climbing spiral on the mouse (War Thunder feel). 0 = glide (stamina regen). The HUD shows
+	-- the resulting flap frequency + power-per-stroke. Feeds FlightPhysics via input.flapThrottle, which
+	-- scales flap thrust / climb force / dive thrust / stamina cost / wingbeat frequency by the effort.
+	flapThrottleRate = 1.1,   -- units/sec the throttle ramps while Shift/Ctrl held (full -1..1 sweep in ~1.8s)
 }
 
 --------------------------------------------------------------------------------

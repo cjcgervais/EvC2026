@@ -91,8 +91,12 @@ local Birds = {}
 local PlayerData = {}
 
 -- Per-crow-player squad.
--- squad = { player, formationName, possessedIndex, members = {Model,...} }
+-- squad = { player, formationName, possessedIndex, members = {Model,...}, aggressive = bool }
 local Squads = {}
+
+-- Solo-test AI crow squad (no human owner). Keyed in `Squads` under this sentinel so
+-- updateAICrows steps it like any other squad. See GameConfig.Debug.aiCrowOpponents.
+local BOT_SQUAD_KEY = "__BOT_CROWS__"
 
 -- Score, shown via ScoreUpdate. Keys match client UI ("Eagles"/"Crows").
 local Scores = { Eagles = 0, Crows = 0 }
@@ -190,23 +194,42 @@ end
 -- WORLD SETUP
 --------------------------------------------------------------------------------
 local function SetupLighting()
-	-- A clear, high-altitude sky so the aerial arena reads well.
-	Lighting.ClockTime = 14
-	Lighting.Brightness = 2.5
-	Lighting.Ambient = Color3.fromRGB(120, 130, 150)
-	Lighting.OutdoorAmbient = Color3.fromRGB(140, 150, 170)
-	Lighting.FogEnd = 16000 -- v3: see across the much bigger real-scale arena
-	Lighting.FogColor = Color3.fromRGB(180, 200, 225)
-	Lighting.GeographicLatitude = 30
+	-- BRIGHT, HIGH-CONTRAST midday sky tuned so distant terrain/landmarks render crisply for the
+	-- OODA read (Chad): low atmosphere density + ColorCorrection contrast = legible features far out.
+	Lighting.ClockTime = 13.5
+	Lighting.Brightness = 3
+	Lighting.ExposureCompensation = 0.15
+	Lighting.Ambient = Color3.fromRGB(120, 132, 150)
+	Lighting.OutdoorAmbient = Color3.fromRGB(155, 165, 185)
+	Lighting.FogEnd = 1e6 -- Atmosphere governs view distance; keep classic fog from clipping far features
+	Lighting.FogColor = Color3.fromRGB(190, 208, 230)
+	Lighting.GeographicLatitude = 25
+	Lighting.ShadowSoftness = 0.2
 
-	if not Lighting:FindFirstChildOfClass("Atmosphere") then
-		local atmo = Instance.new("Atmosphere")
-		atmo.Density = 0.3
-		atmo.Haze = 1.2
-		atmo.Color = Color3.fromRGB(199, 215, 235)
-		atmo.Decay = Color3.fromRGB(106, 140, 180)
-		atmo.Parent = Lighting
-	end
+	-- LOW density so the perimeter mountains + cardinal beacons read from across the arena; a little
+	-- haze for depth and a bright sky tint for contrast.
+	local atmo = Lighting:FindFirstChildOfClass("Atmosphere") or Instance.new("Atmosphere")
+	atmo.Density = 0.18
+	atmo.Offset = 0.1
+	atmo.Haze = 0.6
+	atmo.Glare = 0.2
+	atmo.Color = Color3.fromRGB(210, 222, 240)
+	atmo.Decay = Color3.fromRGB(120, 150, 190)
+	atmo.Parent = Lighting
+
+	-- Higher contrast + a touch more saturation = features pop and read at a glance (OODA).
+	local cc = Lighting:FindFirstChildOfClass("ColorCorrectionEffect") or Instance.new("ColorCorrectionEffect")
+	cc.Brightness = 0.03
+	cc.Contrast = 0.18
+	cc.Saturation = 0.12
+	cc.Parent = Lighting
+
+	local bloom = Lighting:FindFirstChildOfClass("BloomEffect") or Instance.new("BloomEffect")
+	bloom.Intensity = 0.55
+	bloom.Size = 24
+	bloom.Threshold = 1.1
+	bloom.Parent = Lighting
+
 	if not Lighting:FindFirstChild("Sky") then
 		local sky = Instance.new("Sky")
 		sky.Name = "Sky"
@@ -220,6 +243,11 @@ end
 -- forest you clip in a turn. Sized in real metres at 0.28 m/stud. World-bounds are intentionally
 -- soft (huge floor + fog) for now — hard perimeter walls are a later balance pass (they'd add the
 -- very crash-frustration Chad asked to remove).
+-- v4 ENVIRONMENT (Chad: real terrain mountains/canyons + scale/OODA reference, bright & high
+-- contrast so it renders far). Built from LARGE anchored parts (not voxel Terrain) so distant
+-- features never LOD-cull, colours are fully controllable for contrast/orientation, and there is
+-- zero per-voxel loop (build-safe). Bounded ~26 parts. World-bounds stay soft (a mountain ring you
+-- can see the edge of, not hard walls). AI crows now steer around all of it (queue #8 avoidance).
 local function BuildMap()
 	-- Keep the Roblox engine's own gravity coherent with the flight model's (birds are CFrame-driven
 	-- so they read GameConfig.Flight.GRAVITY directly, but this keeps debris/landings/ragdolls sane).
@@ -231,52 +259,75 @@ local function BuildMap()
 	map.Name = "Map"
 	map.Parent = Workspace
 
-	-- Vast baseplate (≈4.5 km square at 0.28 m/stud) so the ground is rarely a hazard.
-	local base = Instance.new("Part")
-	base.Name = "Baseplate"
-	base.Anchored = true
-	base.Size = Vector3.new(16000, 40, 16000)
-	base.Position = Vector3.new(0, -20, 0)
-	base.Material = Enum.Material.Grass
-	base.Color = Color3.fromRGB(70, 110, 60)
-	base.TopSurface = Enum.SurfaceType.Smooth
-	base.Parent = map
+	local function addPart(props)
+		local p = Instance.new("Part")
+		p.Anchored = true
+		p.TopSurface = Enum.SurfaceType.Smooth
+		p.BottomSurface = Enum.SurfaceType.Smooth
+		for k, v in pairs(props) do p[k] = v end
+		p.Parent = map
+		return p
+	end
 
-	-- Sparse tall spires spread across the arena (polar layout: angle, radius, height in studs).
-	-- Heights reach into the mid soaring band; diameters are thin relative to the 16 000-stud world.
-	local spires = {
-		{ ang = 0.4,  rad = 1400, h = 1100 },
-		{ ang = 1.7,  rad = 2600, h = 1700 },
-		{ ang = 2.9,  rad = 1800, h = 800  },
-		{ ang = 3.8,  rad = 3400, h = 2000 },
-		{ ang = 4.6,  rad = 2200, h = 1300 },
-		{ ang = 5.5,  rad = 3000, h = 1500 },
-		{ ang = 6.0,  rad = 900,  h = 600  },
+	-- GROUND: vast, brighter, higher-contrast floor (≈4.5 km square at 0.28 m/stud).
+	addPart({
+		Name = "Baseplate", Size = Vector3.new(16000, 40, 16000),
+		Position = Vector3.new(0, -20, 0), Material = Enum.Material.Grass,
+		Color = Color3.fromRGB(96, 142, 74),
+	})
+	-- Distinct ground LANDMARKS for orientation/scale (a lake + a desert basin you fly over).
+	addPart({ Name = "Lake", Size = Vector3.new(2600, 8, 1900), Position = Vector3.new(-3800, 1, 2600),
+		Material = Enum.Material.Glass, Color = Color3.fromRGB(58, 120, 190), Transparency = 0.25 })
+	addPart({ Name = "Desert", Size = Vector3.new(3000, 10, 3000), Position = Vector3.new(3600, 1, -3200),
+		Material = Enum.Material.Sand, Color = Color3.fromRGB(216, 194, 142) })
+
+	-- PERIMETER MOUNTAIN RING: a real horizon that reads as the (soft) world edge and gives
+	-- long-range orientation. Deterministic varied heights/widths (no rng → no surprises).
+	local R, ring = 6600, 14
+	for i = 1, ring do
+		local a = (i / ring) * math.pi * 2
+		local h = 1600 + (i * 137) % 900
+		local w = 900 + (i * 71) % 520
+		addPart({
+			Name = "Mtn" .. i,
+			Size = Vector3.new(w, h, w),
+			Position = Vector3.new(math.cos(a) * R, h * 0.5 - 20, math.sin(a) * R),
+			Material = Enum.Material.Rock,
+			Color = Color3.fromRGB(104 + (i * 13) % 44, 96, 86),
+		})
+	end
+
+	-- INTERIOR MESAS/BUTTES — sparse rock blocks to fly through (canyon feel) and use as cover.
+	local buttes = {
+		{ x = -2000, z = 1300,  w = 520, h = 900  }, -- kept clear of the ±1200 spawn zone
+		{ x = 1900,  z = -1500, w = 620, h = 1300 },
+		{ x = 200,   z = 2200,  w = 460, h = 720  },
+		{ x = -2300, z = -1800, w = 720, h = 1500 },
+		{ x = 2600,  z = 1900,  w = 540, h = 1000 },
 	}
-	for i, s in ipairs(spires) do
-		local base2D = Vector3.new(math.cos(s.ang) * s.rad, 0, math.sin(s.ang) * s.rad)
-		local height = s.h
-		local diameter = 90
-		local spire = Instance.new("Part")
-		spire.Name = "Spire" .. i
-		spire.Anchored = true
-		spire.Shape = Enum.PartType.Cylinder
-		spire.Size = Vector3.new(height, diameter, diameter) -- cylinder long-axis is X; rotate upright
-		spire.CFrame = CFrame.new(base2D + Vector3.new(0, height * 0.5, 0))
-			* CFrame.Angles(0, 0, math.rad(90))
-		spire.Material = Enum.Material.Rock
-		spire.Color = Color3.fromRGB(105, 100, 95)
-		spire.Parent = map
+	for i, b in ipairs(buttes) do
+		addPart({
+			Name = "Butte" .. i, Size = Vector3.new(b.w, b.h, b.w),
+			Position = Vector3.new(b.x, b.h * 0.5 - 20, b.z),
+			Material = Enum.Material.Rock, Color = Color3.fromRGB(120, 104, 92),
+		})
+	end
 
-		-- A flat perch cap on top of each spire.
-		local perch = Instance.new("Part")
-		perch.Name = "Perch" .. i
-		perch.Anchored = true
-		perch.Size = Vector3.new(diameter + 60, 12, diameter + 60)
-		perch.Position = base2D + Vector3.new(0, height + 6, 0)
-		perch.Material = Enum.Material.Slate
-		perch.Color = Color3.fromRGB(85, 82, 80)
-		perch.Parent = map
+	-- CARDINAL BEACONS — four tall, bright, distinctly-coloured Neon pillars at N/E/S/W. They glow
+	-- (render from far) so the pilot always knows heading at a glance — the core OODA reference.
+	local cardinals = {
+		{ n = "N", pos = Vector3.new(0, 0, -4200), c = Color3.fromRGB(230, 70, 70) },   -- red   = North
+		{ n = "E", pos = Vector3.new(4200, 0, 0),  c = Color3.fromRGB(80, 150, 245) },  -- blue  = East
+		{ n = "S", pos = Vector3.new(0, 0, 4200),  c = Color3.fromRGB(245, 205, 70) },  -- gold  = South
+		{ n = "W", pos = Vector3.new(-4200, 0, 0), c = Color3.fromRGB(235, 235, 240) }, -- white = West
+	}
+	for _, c in ipairs(cardinals) do
+		local h = 2200
+		addPart({
+			Name = "Beacon" .. c.n, Size = Vector3.new(220, h, 220),
+			Position = c.pos + Vector3.new(0, h * 0.5 - 20, 0),
+			Material = Enum.Material.Neon, Color = c.c,
+		})
 	end
 end
 
@@ -319,7 +370,8 @@ local function CreateRemotes()
 
 	-- Exact canonical names other scripts depend on.
 	event("TeamAssigned")     -- S->C: teamName, profile
-	event("AttackRequest")    -- C->S
+	event("AttackRequest")    -- C->S  (legacy click-melee; superseded by WeaponHold, kept harmless)
+	event("WeaponHold")       -- C->S: weapon ("talon"|"beak"), holding (bool) — eagle active defense
 	event("TakeDamage")       -- S->C: attackerName, targetPlayer, damage
 	event("ScoreUpdate")      -- S->C: scores
 	event("GameNotification") -- S->C: text, color
@@ -411,6 +463,11 @@ local function spawnBird(player, team, profileName, spawnPos, isAI)
 		model:Destroy()
 		return nil
 	end
+
+	-- VISUAL scale-up so birds read clearly at range (Chad). Collision + attack reach still use
+	-- profile.bodyRadius (a config number, unchanged), so this is cosmetic — no balance effect.
+	local vscale = (GameConfig.Visual and GameConfig.Visual.birdScale) or 1
+	if vscale ~= 1 then pcall(function() model:ScaleTo(vscale) end) end
 
 	-- Position & initial velocity (a little forward push so it starts flying).
 	model:PivotTo(CFrame.new(spawnPos) * CFrame.Angles(0, math.random() * math.pi * 2, 0))
@@ -534,6 +591,68 @@ local function clearBirds(player)
 	Squads[player] = nil
 end
 
+-- Spawn a fully AI-controlled crow squad with NO human owner, for solo testing
+-- (GameConfig.Debug.aiCrowOpponents). EVERY member is AI; the squad is flagged `aggressive`
+-- so squadGoal hunts the eagle from any range. Stored under BOT_SQUAD_KEY in Squads so
+-- updateAICrows steps it like a normal squad.
+local function spawnAICrowSquad()
+	-- Spawn the wave a few hundred studs off the eagle (if any) so it engages quickly, instead of
+	-- a random map corner it might never reach. Fall back to a random point at SPAWN_HEIGHT.
+	local center
+	for _, e in pairs(Birds) do
+		if e.team == "Eagles" and isBirdAlive(e) then
+			local ep = e.body.Position
+			local ang = math.random() * math.pi * 2
+			center = ep + Vector3.new(math.cos(ang) * 700, math.random(-80, 160), math.sin(ang) * 700)
+			break
+		end
+	end
+	center = center or Vector3.new(math.random(-1200, 1200), SPAWN_HEIGHT, math.random(-1200, 1200))
+	local squad = {
+		player = nil,
+		formationName = GameConfig.Squad.defaultFormation or "loose",
+		possessedIndex = 1,
+		members = {},
+		aggressive = true,
+	}
+	local size = GameConfig.Squad.size or 4
+	for i = 1, size do
+		local offset = Vector3.new((i - (size + 1) / 2) * 12, (i % 2) * 6, 0)
+		local entry = spawnBird(nil, "Crows", "Crow", center + offset, true) -- isAI = true for ALL
+		if entry then
+			entry.squad = squad
+			table.insert(squad.members, entry.model)
+		end
+	end
+	Squads[BOT_SQUAD_KEY] = squad
+	return squad
+end
+
+-- Tear down the bot squad + its birds (when a real match can be fielded, or to reset).
+local function clearBotSquad()
+	local squad = Squads[BOT_SQUAD_KEY]
+	if not squad then return end
+	for _, model in ipairs(squad.members) do
+		if Birds[model] then Birds[model] = nil end
+		if model then pcall(function() model:Destroy() end) end
+	end
+	Squads[BOT_SQUAD_KEY] = nil
+end
+
+-- Keep a living bot wave on the field: if every member of the current squad is dead (or there
+-- is no squad), wipe it and spawn a fresh wave of `Squad.size` so the solo player always has
+-- crows to parry. Called from the soloFlight branch of the round loop.
+local function ensureBotCrowSquad()
+	local squad = Squads[BOT_SQUAD_KEY]
+	if squad then
+		for _, model in ipairs(squad.members) do
+			if isBirdAlive(Birds[model]) then return end -- at least one alive: keep this wave
+		end
+		clearBotSquad() -- whole wave down -> respawn a fresh one
+	end
+	spawnAICrowSquad()
+end
+
 --------------------------------------------------------------------------------
 -- COMBAT (server-authoritative)
 --------------------------------------------------------------------------------
@@ -578,11 +697,32 @@ local function findNearestEnemy(attackerEntry, maxRange)
 	end)
 end
 
+-- Nearest enemy by a DIRECT linear scan (no spatial hash, no radius). Bird counts are tiny, so
+-- this is cheap — and it lets an aggressive bot squad hunt the eagle across the whole 16k map
+-- WITHOUT asking the hash for a map-spanning radius (a huge radius makes forEachInRadius walk
+-- millions of empty cells and hangs the server — that bug froze Studio once already).
+local function findNearestEnemyLinear(attackerEntry)
+	local team = attackerEntry.team
+	local pos = attackerEntry.body.Position
+	local best, bestD2
+	for _, e in pairs(Birds) do
+		if e.team ~= team and isBirdAlive(e) then
+			local d = (e.body.Position - pos).Magnitude
+			local d2 = d * d
+			if not bestD2 or d2 < bestD2 then best, bestD2 = e, d2 end
+		end
+	end
+	return best
+end
+
 -- If a squad has no living possessed crow, promote the next living member so the
 -- crow player keeps flying without a manual swap (also the seam for queue item #5).
 -- The client re-acquires automatically off the "Possessed" attribute flip.
 local function autoRepossess(squad)
 	if not squad then return end
+	-- Ownerless bot squads have no human to repossess to — leave every member AI (promoting
+	-- one would set isAI=false with no network owner, freezing it out of updateAICrows).
+	if not squad.player then return end
 	local curModel = squad.members[squad.possessedIndex]
 	local curEntry = curModel and Birds[curModel]
 	if curEntry and curEntry.possessed and isBirdAlive(curEntry) then return end
@@ -693,15 +833,114 @@ local function onAttackRequest(player)
 end
 
 --------------------------------------------------------------------------------
+-- EAGLE ACTIVE-DEFENSE WEAPONS (talons / beak) — server-owned extend/cooldown state
+--------------------------------------------------------------------------------
+-- The eagle holds L/R mouse to EXTEND a weapon (client sends intent via WeaponHold). The
+-- server owns the timers so a client can't fake "always extended". A weapon that is `active`
+-- past its `startup` lag and hasn't yet caught a crow this window can PARRY a contact inside
+-- its frontal cone (tryParry, from processCollisions): the crow dies, the eagle is unharmed.
+-- Releasing or draining the window drops the weapon into a cooldown. State + a HUD meter are
+-- mirrored onto the eagle Body as attributes (Talon/BeakMeter 0..1, Talon/BeakActive) for GameUI.
+local function newWeaponState()
+	return {
+		talon = { holding = false, state = "ready", windowLeft = 0, cooldownLeft = 0, startupLeft = 0, caught = false },
+		beak  = { holding = false, state = "ready", windowLeft = 0, cooldownLeft = 0, startupLeft = 0, caught = false },
+	}
+end
+
+local function stepWeapon(w, cfg, dt)
+	if w.state == "cooldown" then
+		w.cooldownLeft -= dt
+		if w.cooldownLeft <= 0 then w.state = "ready" end
+	elseif w.state == "active" then
+		if w.startupLeft > 0 then w.startupLeft = math.max(0, w.startupLeft - dt) end
+		w.windowLeft -= dt
+		if w.windowLeft <= 0 or not w.holding then
+			-- window emptied OR button released -> retract and commit to a cooldown
+			w.state = "cooldown"
+			w.cooldownLeft = cfg.cooldown
+		end
+	else -- "ready"
+		if w.holding then
+			w.state = "active"
+			w.windowLeft = cfg.extendWindow
+			w.startupLeft = cfg.startup or 0
+			w.caught = false
+		end
+	end
+end
+
+-- Step every eagle's weapon timers once per Heartbeat and mirror a HUD meter onto the Body.
+local function updateEagleWeapons(dt)
+	local weapons = GameConfig.Combat and GameConfig.Combat.weapons
+	if not weapons then return end
+	for _, entry in pairs(Birds) do
+		if entry.team == "Eagles" and isBirdAlive(entry) then
+			if not entry.weapons then entry.weapons = newWeaponState() end
+			for wname, cfg in pairs(weapons) do
+				local w = entry.weapons[wname]
+				if w then
+					stepWeapon(w, cfg, dt)
+					-- Mirror to the Body for GameUI: meter 0..1 + whether it can currently parry.
+					local meter, active
+					if w.state == "active" then
+						meter = (cfg.extendWindow > 0) and math.clamp(w.windowLeft / cfg.extendWindow, 0, 1) or 0
+						active = (w.startupLeft <= 0)
+					elseif w.state == "cooldown" then
+						meter = (cfg.cooldown > 0) and math.clamp(1 - w.cooldownLeft / cfg.cooldown, 0, 1) or 1
+						active = false
+					else
+						meter, active = 1, false
+					end
+					local cap = (wname == "talon") and "Talon" or "Beak"
+					entry.body:SetAttribute(cap .. "Meter", meter)
+					entry.body:SetAttribute(cap .. "Active", active)
+				end
+			end
+		end
+	end
+end
+
+-- Client hold intent for an eagle's weapon. Only the possessed eagle has weapons; crows ignore.
+local function onWeaponHold(player, weapon, holding)
+	local entry = getActiveBird(player)
+	if not entry or entry.team ~= "Eagles" then return end
+	if not entry.weapons then entry.weapons = newWeaponState() end
+	local w = entry.weapons[tostring(weapon)]
+	if w then w.holding = holding and true or false end
+end
+
+-- Did the eagle catch this ramming crow? True if a weapon is active (past startup), hasn't
+-- already caught a crow this window, and its frontal cone covers the direction to the crow.
+local function tryParry(eagle, crow)
+	local W = eagle.weapons
+	local weapons = GameConfig.Combat and GameConfig.Combat.weapons
+	if not W or not weapons then return false end
+	local dir = crow.body.Position - eagle.body.Position
+	if dir.Magnitude < 1e-3 then return false end
+	local fwd = dir.Unit:Dot(eagle.body.CFrame.LookVector)
+	for wname, cfg in pairs(weapons) do
+		local w = W[wname]
+		if w and w.state == "active" and w.startupLeft <= 0 and not w.caught then
+			if fwd >= math.cos(math.rad(cfg.coverHalfAngleDeg or 90)) then
+				w.caught = true
+				return true
+			end
+		end
+	end
+	return false
+end
+
+--------------------------------------------------------------------------------
 -- COLLISIONS (the signature lose-lose mechanic)
 --------------------------------------------------------------------------------
--- Heartbeat proximity check between ENEMY birds. When two enemy bodies overlap at high
--- RELATIVE speed each bird RECEIVES the other's `collisionDamageDealt` (scaled by relative
--- speed), modified by its OWN `collisionDamageTaken` vulnerability multiplier. So a heavy
--- eagle shrugs off a single crow but four rams down it, while the fragile crow that rams it
--- dies in the trade — see the matchup math in GameConfig's collision comments.
--- TODO: deep balance tuning — the speed-scaling curve is still a first pass (queue item #3).
--- Target: ~4 full-speed crow rams kill an eagle while each ramming crow dies (a true trade).
+-- Heartbeat proximity check between ENEMY birds (the only enemy pairing is eagle↔crow).
+-- ASYMMETRIC MODEL (HANDOFF session 11 / GameConfig.Combat): a committed contact above
+-- COLLISION_SPEED_MIN is a crow SUICIDE RAM — the crow ALWAYS dies, and the eagle takes one
+-- of its `eagleHits` (= health/eagleHits damage). The parry that lets the eagle negate the
+-- hit by covering the contact zone with an extended talon/beak lands in iteration 3; for now
+-- every committed ram costs the eagle a hit. A simultaneous ram by another crow this frame is
+-- a separate pair → its own hit, which is how multi-angle swarming will beat one parry (iter 3).
 local function processCollisions()
 	local now = os.clock()
 
@@ -741,23 +980,25 @@ local function processCollisions()
 				if relSpeed < COLLISION_SPEED_MIN then return end
 
 				lastCollisionAt[key] = now
-				-- Scale 0..1 from min->ref relative speed.
-				local scale = math.clamp(
-					(relSpeed - COLLISION_SPEED_MIN)
-						/ math.max(1, (COLLISION_SPEED_REF - COLLISION_SPEED_MIN)),
-					0, 1
-				)
-				-- Each bird RECEIVES the OTHER's collisionDamageDealt (scaled by relative speed),
-				-- then modified by its OWN collisionDamageTaken vulnerability multiplier:
-				--   eagle hit by crow:  30 * scale * 0.85  (≈26 full-speed -> ~4 rams kill it)
-				--   crow  hit by eagle:  60 * scale * 1.40  (≈84 full-speed -> the crow dies)
-				local aDmg = (b.profile.collisionDamageDealt * scale) * a.profile.collisionDamageTaken
-				local bDmg = (a.profile.collisionDamageDealt * scale) * b.profile.collisionDamageTaken
 
-				-- Apply to both; re-check B is alive in case A's hit cascaded a despawn.
-				applyDamage(a, aDmg, b, "collision")
-				if isBirdAlive(b) then
-					applyDamage(b, bDmg, a, "collision")
+				-- Identify the eagle and the crow (the only enemy pairing). The crow's sole
+				-- attack is the suicide ram, so a committed contact ALWAYS kills the crow; the
+				-- eagle takes one of its `eagleHits` UNLESS it was covering this contact zone
+				-- with an extended talon/beak (parry gating = iteration 3).
+				local eagle, crow
+				if a.team == "Eagles" then eagle, crow = a, b else eagle, crow = b, a end
+
+				if tryParry(eagle, crow) then
+					-- CAUGHT: the crow dies on the talons/beak and the eagle takes NO hit.
+					applyDamage(crow, 1e9, eagle, "talon")
+				else
+					-- UNPARRIED ram: one of the eagle's `eagleHits`; the crow dies regardless.
+					local eagleHits = (GameConfig.Combat and GameConfig.Combat.eagleHits) or 3
+					local hitDamage = (eagle.profile.health or 99) / eagleHits
+					applyDamage(eagle, hitDamage, crow, "collision")
+					if isBirdAlive(crow) then
+						applyDamage(crow, 1e9, eagle, "collision")    -- the sacrifice
+					end
 				end
 			end)
 		end
@@ -936,8 +1177,16 @@ local function squadGoal(squad)
 	if not possessed then return nil end
 
 	local goal = possessed.body.Position
-	-- If an enemy is within engageRadius of the possessed crow, converge on it.
-	local enemy = findNearestEnemy(possessed, GameConfig.Squad.engageRadius)
+	-- Aggressive (bot) squads HUNT: converge on the nearest eagle from ANY distance, via a LINEAR
+	-- scan (NOT the spatial hash — a map-spanning hash radius walks millions of empty cells and
+	-- hangs the server). Player squads swarm only once the possessed crow is within engageRadius
+	-- (a cheap, bounded hash query; the human leads and squadmates support).
+	local enemy
+	if squad.aggressive then
+		enemy = findNearestEnemyLinear(possessed)
+	else
+		enemy = findNearestEnemy(possessed, GameConfig.Squad.engageRadius)
+	end
 	if enemy then
 		goal = enemy.body.Position
 	end
@@ -957,6 +1206,34 @@ local function squadNeighbors(squad, selfEntry)
 		end
 	end
 	return neighbors
+end
+
+-- Obstacle-avoidance steering for an AI crow (queue #8): a forward Spherecast look-ahead. If
+-- terrain is in the bird's path, return a world-space steer-away UNIT direction (surface normal
+-- + a tangential slide so it ARCS around instead of stalling head-on) and an urgency 0..1 that
+-- rises as the hit nears. Returns nil when the path is clear. Called ONLY from updateAICrows, so
+-- it never touches the player-controlled crow (Chad's rule: the crow you ram with gets none).
+local function avoidObstacle(entry)
+	local cfg = GameConfig.Squad.avoidance
+	if not cfg then return nil end
+	local body = entry.body
+	local vel = body.AssemblyLinearVelocity
+	local speed = vel.Magnitude
+	if speed < 1 then return nil end
+	local dir = vel / speed
+	local look = math.clamp(speed * (cfg.lookaheadTime or 1.2), cfg.minDistance or 50, cfg.maxDistance or 320)
+	local hit = BirdCollision.lookAhead(body.Position, dir, look, entry.profile.bodyRadius + (cfg.spherePad or 8), getCollisionParams())
+	if not hit then return nil end
+	local dist = (hit.Position - body.Position).Magnitude
+	local urgency = 1 - math.clamp(dist / look, 0, 1)
+	local normal = hit.Normal
+	local tangent = dir - normal * dir:Dot(normal)
+	local tm = tangent.Magnitude
+	local tunit = (tm > 1e-3) and (tangent / tm) or Vector3.new()
+	local steerAway = normal * 0.7 + tunit * 0.3
+	local sm = steerAway.Magnitude
+	if sm < 1e-3 then return normal, urgency end
+	return steerAway / sm, urgency
 end
 
 -- Step every AI crow once per Heartbeat: boids -> input -> light flight step -> apply.
@@ -983,6 +1260,14 @@ local function updateAICrows(dt)
 				}
 				local neighbors = squadNeighbors(squad, entry)
 				local steer = Boids.computeSteering(selfState, neighbors, goal, formationCfg)
+				-- Obstacle avoidance (#8): bias steering away from imminent terrain so the crow
+				-- arcs around spires/ground instead of crashing while it hunts. AI-only by construction.
+				local avoidDir, urgency = avoidObstacle(entry)
+				if avoidDir then
+					local base = steer.Magnitude
+					if base < 1 then base = GameConfig.Squad.boids.maxSteerForce end
+					steer = steer + avoidDir * base * (GameConfig.Squad.avoidance.weight or 3.5) * urgency
+				end
 				local input = Boids.steeringToInput(body.CFrame, body.AssemblyLinearVelocity, steer, entry.profile)
 
 				-- Run the SAME flight engine the player uses, then write the result back
@@ -1186,6 +1471,9 @@ local function resolveRound(reason)
 	elseif reason == "crowsDown" then
 		Scores.Eagles += 1
 		notify("Eagle wins the round!", GameConfig.UI and GameConfig.UI.eagleAccent)
+	elseif reason == "tie" then
+		-- The eagle's last hit and the last crow's death coincided — no score (a true draw).
+		notify("Both fall — the round is a draw!", Color3.fromRGB(220, 220, 120))
 	else
 		notify("Round over.", Color3.fromRGB(220, 220, 220))
 	end
@@ -1197,6 +1485,7 @@ local function RoundLoop()
 	while true do
 		-- Only run a scored round when both sides can actually be fielded.
 		if eaglesExist() and crowsExist() then
+			clearBotSquad() -- a real match preempts the solo-test bot crows
 			-- INTERMISSION before the round.
 			roundActive = false
 			notify("Intermission…", Color3.fromRGB(200, 200, 200))
@@ -1218,8 +1507,10 @@ local function RoundLoop()
 				task.wait(1)
 				elapsed += 1
 				if not roundActive then break end
-				if not anyEagleAlive() then result = "eagleDown" break end
-				if not anyCrowAlive() then result = "crowsDown" break end
+				local eAlive, cAlive = anyEagleAlive(), anyCrowAlive()
+				if not eAlive and not cAlive then result = "tie" break end   -- both fell together
+				if not eAlive then result = "eagleDown" break end
+				if not cAlive then result = "crowsDown" break end
 			end
 
 			resolveRound(result)
@@ -1242,6 +1533,13 @@ local function RoundLoop()
 					clearBirds(rec.player) -- purge any leftover/destroyed refs first
 					spawnFor(rec.player)
 				end
+			end
+			-- Solo Eagle vs AI: keep a fresh wave of bot crows on the field to parry. They
+			-- count for nothing in scoring; they exist only while a lone human eagle is here.
+			if GameConfig.Debug.aiCrowOpponents and eaglesExist() and not crowsExist() then
+				ensureBotCrowSquad()
+			else
+				clearBotSquad()
 			end
 			roundActive = true -- enable AI-crow sim + collisions for solo testing
 			task.wait(2)
@@ -1306,6 +1604,9 @@ local function connectRemotes()
 	Remotes.AttackRequest.OnServerEvent:Connect(function(player)
 		pcall(onAttackRequest, player)
 	end)
+	Remotes.WeaponHold.OnServerEvent:Connect(function(player, weapon, holding)
+		pcall(onWeaponHold, player, weapon, holding)
+	end)
 	Remotes.SwapCrow.OnServerEvent:Connect(function(player, index)
 		pcall(onSwapCrow, player, index)
 	end)
@@ -1327,6 +1628,8 @@ local function onHeartbeat(dt)
 	rebuildBirdIndex()
 	-- AI flight for server-owned crows.
 	pcall(updateAICrows, dt)
+	-- Step eagle talon/beak extend/cooldown timers (before collisions, so tryParry reads fresh state).
+	pcall(updateEagleWeapons, dt)
 	-- Anti-cheat movement validation (before crash sweep, so a rubber-band corrects the
 	-- position the crash check then reads).
 	pcall(processAntiCheat, dt)

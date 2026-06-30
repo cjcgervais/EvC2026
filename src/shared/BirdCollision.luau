@@ -49,6 +49,17 @@ function BirdCollision.makeParams(ignore)
 	return params
 end
 
+-- Forward look-ahead probe for AI steering: sweep a sphere of `radius` from `fromPos` a
+-- distance of `distance` studs along `dir`. Returns the RaycastResult (.Position/.Normal/
+-- .Distance) or nil. The AI crows use this to STEER around terrain (obstacle avoidance) rather
+-- than only crashing on it in resolve(). Pure look-ahead — it moves nothing.
+function BirdCollision.lookAhead(fromPos, dir, distance, radius, params)
+	if not dir or distance <= EPS then return nil end
+	local d = dir.Magnitude
+	if d < EPS then return nil end
+	return workspace:Spherecast(fromPos, radius, (dir / d) * distance, params)
+end
+
 -- Core resolve. `radius` is the bird's body radius (the swept sphere radius). `crashSpeed`
 -- is the closing-speed threshold above which the impact is lethal.
 function BirdCollision.resolve(fromPos, toPos, velocity, radius, params, crashSpeed)

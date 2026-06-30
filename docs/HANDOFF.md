@@ -2,6 +2,42 @@
 
 Read this first. It tells the next agent exactly where the project stands, the one decision that's already been made for you, and the prioritized work queue. Pair it with `CLAUDE.md` (architecture + contracts), `docs/RESEARCH.md` (why the numbers are what they are), and project memory (`MEMORY.md` index).
 
+> ## 🦅 TOP PRIORITY (2026-06-30): flight-feel & sandbox grind — START HERE → [`docs/HANDOFF-flight-sandbox.md`](HANDOFF-flight-sandbox.md)
+> Playtest-2: the player **loves the flight + the (now-fixed) free-look** — kernel and maneuvers confirmed
+> great. Four focused feel/QoL improvements remain, fully scoped with exact pointers and acceptance criteria
+> in the sandbox handoff: **P1** map renders too late at speed (almost certainly `Workspace.StreamingEnabled`
+> defaulting ON — disable it, ~26 anchored parts don't need streaming); **P2** make free-look pan feel like
+> War Thunder arcade (crisp 1:1 smoothing + higher sensitivity, all camera-only); **P3** a richer sandbox
+> (mid-field parallax/texture for a sense of speed + a no-combat **Sandbox mode** flag); **P4** more
+> power/acceleration per flap, **balance-aware** (Eagle change — reason about 1-v-4; stamina stays the
+> limiter). The three Playtest-1 free-look bugs below are **FIXED & player-confirmed** — don't regress them.
+>
+> ---
+>
+> ## ⚙️ (2026-06-29) flight + camera holistic redesign — IMPLEMENTED & largely player-confirmed
+> The mouse-aim control law, energy tuning, and chase camera were rebuilt holistically on a `deep-research`
+> pass (26 sources, 23 verified claims) instead of more band-aids. **What landed** (full rationale +
+> citations in **[`docs/RESEARCH.md`](RESEARCH.md) §v4**; problem statement in
+> **[`docs/HANDOFF-flight-tuning.md`](HANDOFF-flight-tuning.md)**):
+> - **Mouse instructor → PD coordinated-flight controller**: symmetric deadzone+expo on both pitch & bank
+>   (WT "nonlinearity"), rate/derivative damping to kill the turn porpoise, and a "ride-the-edge" AoA
+>   protection (suspended while powered) so a started **loop now commits** instead of mushing.
+> - **Chase camera → continuous, rate-limited full-3D chase direction** + shortest-path `CFrame:Lerp`:
+>   **no azimuth snap / no pole flip through a full 360° loop** (the motion-sickness fix).
+> - **Free-look → Space TOGGLE** (was hold); the world-referenced orbit holds its aspect.
+> - Plant: `inducedDragK` eased for energy retention (keeps the n² EM cost); aerobatic-speed gate lowered.
+> **NEXT AGENT: this needs a HUMAN Studio playtest** against the acceptance criteria in the flight-tuning
+> doc, then re-tag the kernel. Tune against the §v4 target numbers, not by eyeball. The kernel is NOT back in
+> its `v1.0-eagle-flight` HUMAN-VERIFIED state until that playtest passes.
+>
+> ### ▶ Playtest 1 (2026-06-29) — 3 FREE-LOOK-mode bugs, fixes prescribed
+> First live test of the branch surfaced three **free-look-only** issues (mouse-aim mode tested OK). Full
+> root-cause + copy-paste-ready fixes (all in `BirdController.client.luau`) in
+> **[`docs/HANDOFF-freelook-fixes.md`](HANDOFF-freelook-fixes.md)**: (1) bird noses over into a dive when
+> controls are released in free-look (frozen aim command should ease to 0 → hold attitude, keyboard-modifiable);
+> (2) camera 180° flip during a loop in free-look (freeze the chase basis while free-looking → world-referenced);
+> (3) free-look mouse pitch inverted (one sign flip). Do these next, then re-playtest.
+
 ---
 
 ## Status (2026-06-23)
