@@ -211,7 +211,8 @@ local function SetupLighting()
 	-- off at 1e6, and with StreamingEnabled = false every part renders) — it hazes distant parts to the sky
 	-- colour, so a high value reads as a short render distance. Dropped 0.18 → 0.05 + Haze 0.6 → 0.12 so the
 	-- perimeter mountain ring (R≈6600) and the far map edges stay crisp from across the 16k arena. Keep a
-	-- whisper for aerial-perspective depth so distance still reads. Raise toward 0.1 if the far edge looks bare.
+	-- whisper for aerial-perspective depth so distance still reads (it hazes the far peak ring R≈7400 bluer —
+	-- the intended depth cue). Raise toward 0.1 if the far edge looks bare; lower if the far peaks read too soft.
 	local atmo = Lighting:FindFirstChildOfClass("Atmosphere") or Instance.new("Atmosphere")
 	atmo.Density = 0.03  -- "EAGLE VISION" — even thinner so distant terrain reads from across the whole arena
 	atmo.Offset = 0.1
@@ -280,33 +281,88 @@ local function BuildMap()
 		return p
 	end
 
-	-- GROUND: vast, brighter, higher-contrast floor (≈4.5 km square at 0.28 m/stud).
+	-- GROUND: vast, brighter, higher-contrast floor (≈4.5 km square at 0.28 m/stud). Top sits at Y=0.
 	addPart({
 		Name = "Baseplate", Size = Vector3.new(16000, 40, 16000),
 		Position = Vector3.new(0, -20, 0), Material = Enum.Material.Grass,
 		Color = Color3.fromRGB(96, 142, 74),
 	})
-	-- Distinct ground LANDMARKS for orientation/scale (a lake + a desert basin you fly over).
+
+	-- A distant SEA beyond the western mountains — a real coastline/horizon for "I can see where I'm flying"
+	-- depth. A huge thin water plane PAST the ring so it reads as the edge of the world without touching combat.
+	addPart({ Name = "Sea", Size = Vector3.new(6000, 14, 18000), Position = Vector3.new(-11000, -4, 0),
+		Material = Enum.Material.Glass, Color = Color3.fromRGB(48, 104, 168), Transparency = 0.18, Reflectance = 0.25 })
+
+	-- GROUND COLOUR PATCHES (thin, at Y≈1): break up the uniform grass so altitude/speed/heading read at a
+	-- glance from far up (a flat green plain gives no perspective cue). Deterministic; all clear of the ±1200 core.
+	local patches = {
+		{ n = "Forest",    x = -2600, z = -3400, w = 2800, l = 2200, c = Color3.fromRGB(54, 96, 58),   m = Enum.Material.Grass },
+		{ n = "Plateau",   x =  4200, z =  2600, w = 3000, l = 2400, c = Color3.fromRGB(168, 150, 104), m = Enum.Material.Ground },
+		{ n = "Snowfield", x = -1200, z =  5200, w = 3200, l = 2600, c = Color3.fromRGB(226, 232, 240), m = Enum.Material.Snow },
+		{ n = "Marsh",     x =  2400, z = -4600, w = 2200, l = 2000, c = Color3.fromRGB(86, 120, 92),   m = Enum.Material.LeafyGrass },
+	}
+	for _, p in ipairs(patches) do
+		addPart({ Name = p.n, Size = Vector3.new(p.w, 6, p.l), Position = Vector3.new(p.x, 1, p.z),
+			Material = p.m, Color = p.c })
+	end
+
+	-- Distinct ground LANDMARKS you fly over (a lake + a desert basin).
 	addPart({ Name = "Lake", Size = Vector3.new(2600, 8, 1900), Position = Vector3.new(-3800, 1, 2600),
 		Material = Enum.Material.Glass, Color = Color3.fromRGB(58, 120, 190), Transparency = 0.25 })
 	addPart({ Name = "Desert", Size = Vector3.new(3000, 10, 3000), Position = Vector3.new(3600, 1, -3200),
 		Material = Enum.Material.Sand, Color = Color3.fromRGB(216, 194, 142) })
 
-	-- PERIMETER MOUNTAIN RING: a real horizon that reads as the (soft) world edge and gives
-	-- long-range orientation. Deterministic varied heights/widths (no rng → no surprises).
-	local R, ring = 6600, 14
-	for i = 1, ring do
-		local a = (i / ring) * math.pi * 2
-		local h = 1600 + (i * 137) % 900
-		local w = 900 + (i * 71) % 520
-		addPart({
-			Name = "Mtn" .. i,
-			Size = Vector3.new(w, h, w),
-			Position = Vector3.new(math.cos(a) * R, h * 0.5 - 20, math.sin(a) * R),
-			Material = Enum.Material.Rock,
-			Color = Color3.fromRGB(104 + (i * 13) % 44, 96, 86),
-		})
+	-- A RIVER winding down into the lake — thin water segments at Y≈1. Pure scenery/orientation that threads
+	-- BETWEEN landmarks (not the spawn core); deterministic rotated segments so it snakes rather than runs straight.
+	local river = {
+		{ x = 1400,  z = 3800, w = 340, l = 2400, rot = 18 },
+		{ x = -200,  z = 2950, w = 340, l = 2200, rot = 70 },
+		{ x = -1900, z = 2650, w = 340, l = 1800, rot = 92 },
+	}
+	for i, r in ipairs(river) do
+		addPart({ Name = "River" .. i, Size = Vector3.new(r.w, 6, r.l),
+			CFrame = CFrame.new(r.x, 1, r.z) * CFrame.Angles(0, math.rad(r.rot), 0),
+			Material = Enum.Material.Glass, Color = Color3.fromRGB(64, 128, 196), Transparency = 0.25 })
 	end
+
+	-- LAYERED MOUNTAINS for depth & perspective: three concentric rings at increasing radius + height with
+	-- offset phases so the ranges OVERLAP and read as real depth from altitude (the thin Atmosphere hazes the
+	-- far ring bluer — aerial perspective). Deterministic varied heights/widths (no rng → no surprises).
+	local function ringMtns(o)
+		for i = 1, o.count do
+			local a = (i / o.count) * math.pi * 2 + o.phase
+			local h = o.hBase + (i * o.hStep) % o.hSpan
+			local w = o.wBase + (i * 53) % o.wSpan
+			local px, pz = math.cos(a) * o.r, math.sin(a) * o.r
+			addPart({
+				Name = o.name .. i, Size = Vector3.new(w, h, w),
+				Position = Vector3.new(px, h * 0.5 - 20, pz),
+				Material = o.material or Enum.Material.Rock, Color = o.color(i),
+			})
+			if o.snow then -- a smaller white summit block so the far peaks read from kilometres out
+				addPart({
+					Name = o.name .. i .. "Cap", Size = Vector3.new(w * 0.6, h * 0.18, w * 0.6),
+					Position = Vector3.new(px, h - 20, pz),
+					Material = Enum.Material.Snow, Color = Color3.fromRGB(232, 238, 246),
+				})
+			end
+		end
+	end
+
+	-- FOOTHILLS: a low green-brown apron ringing the open basin (R≈3600) — the near-perspective layer. Low
+	-- enough (≤~720) that combat (eagle spawns Y=600 and climbs into the tall sky) happens ABOVE them.
+	ringMtns({ name = "Foot", count = 18, r = 3600, phase = 0.0, hBase = 360, hStep = 47, hSpan = 360,
+		wBase = 520, wSpan = 360, material = Enum.Material.Ground,
+		color = function(i) return Color3.fromRGB(96, 110, 76 + (i * 7) % 24) end })
+	-- MID RANGE: brown rock mountains (R≈5400), the middle layer, phase-offset from the foothills so they layer.
+	ringMtns({ name = "Mid", count = 14, r = 5400, phase = 0.22, hBase = 1300, hStep = 137, hSpan = 760,
+		wBase = 760, wSpan = 460, material = Enum.Material.Rock,
+		color = function(i) return Color3.fromRGB(104 + (i * 13) % 40, 92, 84) end })
+	-- FAR PEAKS: tall, snow-capped, cool-toned (aerial perspective) range at the rim (R≈7400) — the far horizon
+	-- the player gauges "where am I flying" against.
+	ringMtns({ name = "Peak", count = 13, r = 7400, phase = 0.42, hBase = 2200, hStep = 211, hSpan = 1200,
+		wBase = 980, wSpan = 560, material = Enum.Material.Rock, snow = true,
+		color = function() return Color3.fromRGB(120, 128, 150) end })
 
 	-- INTERIOR MESAS/BUTTES — sparse rock blocks to fly through (canyon feel) and use as cover.
 	local buttes = {
