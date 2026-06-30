@@ -379,17 +379,19 @@ GameConfig.Squad = {
 	-- bird around spires/ground so it stops attriting itself on terrain (which let bot waves
 	-- crash before reaching the eagle). Applied ONLY in updateAICrows, so it never affects the
 	-- player-controlled crow (Chad's rule: the crow you fly into the eagle gets NO avoidance).
-	-- Tuned UP 2026-06-30 (player: "crows attack buildings and crash before I can test strikes"). The avoid
-	-- now looks FURTHER ahead and overrides the eagle-chase HARDER so the crow banks away in time instead of
-	-- ramping avoidance only once it's already too close to turn at speed. Paired with a non-lethal AI-crow
-	-- terrain slide in updateAICrows (a bot can no longer suicide on a building) so the player always has crows
-	-- to engage. (The PLAYER-flown crow still gets no avoidance and real terrain crashes — Chad's rule.)
+	-- GENTLE avoidance (re-tuned 2026-06-30 after the strong version made bots FLEE the map — player: "the AI
+	-- crows fly away from me… 18-20 km away; they should be mobbing me"). The real anti-suicide guarantee is
+	-- the NON-LETHAL AI-crow terrain slide in updateAICrows (a bot can't die on a building), so avoidance only
+	-- needs to be a light nudge that peels a crow off a wall it's about to graze — NOT a hard override that
+	-- fights the eagle-chase and sends it veering off into open sky. Weight back to 3.0, shorter lookahead, and
+	-- NO urgency floor (far-away terrain ⇒ ~0 avoidance), so the chase goal dominates and the swarm closes in.
+	-- (The PLAYER-flown crow still gets no avoidance and real terrain crashes — Chad's rule.)
 	avoidance = {
-		lookaheadTime = 2.2,  -- s; look-ahead distance = speed * this (raised 1.2->2.2: see walls sooner)
-		minDistance   = 70,   -- studs floor on the probe distance
-		maxDistance   = 600,  -- studs ceiling (raised 320->600: a fast crow needs a long turn arc)
-		spherePad     = 14,   -- extra studs of body radius for a wider berth (8->14)
-		weight        = 7.0,  -- how hard avoidance overrides boids (3.5->7.0: terrain wins over the chase)
+		lookaheadTime = 1.5,  -- s; look-ahead distance = speed * this
+		minDistance   = 60,   -- studs floor on the probe distance
+		maxDistance   = 350,  -- studs ceiling
+		spherePad     = 10,   -- extra studs of body radius for a wider berth
+		weight        = 3.0,  -- light nudge off imminent terrain — does NOT dominate the eagle-chase
 	},
 }
 
@@ -603,10 +605,10 @@ GameConfig.Controls = {
 	aimBankDeadzone  = 0.006, -- BANK/YAW deadzone: matched to pitch (small round neutral)
 	aimBankExpo      = 1.0,   -- BANK/YAW ramp: fully linear, matched to pitch
 	-- OUTER cursor bound: the aim reticle is CLAMPED to a circle CENTRED on the screen that covers this
-	-- fraction of the screen AREA (0.75 = 3/4 — player ask 2026-06-30, tightened from 7/8). Past the rim the
-	-- command just stays saturated (full turn/loop). radius = sqrt(areaFrac · W · H / π);
+	-- fraction of the screen AREA (0.5 = HALF the screen — player ask 2026-06-30, tightened 7/8 → 3/4 → 1/2).
+	-- Past the rim the command just stays saturated (full turn/loop). radius = sqrt(areaFrac · W · H / π);
 	-- BirdController.computeMouseAim does the clamp. Smaller = a tighter cursor circle. PLAYTEST-PROVISIONAL.
-	aimCursorAreaFrac = 0.625,
+	aimCursorAreaFrac = 0.5,
 	aimRollGain      = 2.6,   -- bank-to-turn strength (2.0->2.6: more mouse authority per player ask)
 	aimPitchGain     = 3.3,   -- elevator: pulls the nose toward the target (2.6->3.3: more authority; full deflection still saturates -> loop)
 	aimYawGain       = 0.78,  -- rudder, coordinated WITH the bank (0.6->0.78: scaled with the bank bump)

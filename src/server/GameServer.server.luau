@@ -213,10 +213,10 @@ local function SetupLighting()
 	-- perimeter mountain ring (R≈6600) and the far map edges stay crisp from across the 16k arena. Keep a
 	-- whisper for aerial-perspective depth so distance still reads. Raise toward 0.1 if the far edge looks bare.
 	local atmo = Lighting:FindFirstChildOfClass("Atmosphere") or Instance.new("Atmosphere")
-	atmo.Density = 0.05
+	atmo.Density = 0.03  -- "EAGLE VISION" — even thinner so distant terrain reads from across the whole arena
 	atmo.Offset = 0.1
-	atmo.Haze = 0.12
-	atmo.Glare = 0.15
+	atmo.Haze = 0.07
+	atmo.Glare = 0.1
 	atmo.Color = Color3.fromRGB(210, 222, 240)
 	atmo.Decay = Color3.fromRGB(120, 150, 190)
 	atmo.Parent = Lighting
@@ -1292,9 +1292,10 @@ local function avoidObstacle(entry)
 	local hit = BirdCollision.lookAhead(body.Position, dir, look, entry.profile.bodyRadius + (cfg.spherePad or 8), getCollisionParams())
 	if not hit then return nil end
 	local dist = (hit.Position - body.Position).Magnitude
-	-- Urgency ramps EARLY (sqrt curve) so the crow starts banking away the moment terrain is seen, not only
-	-- once it's too close to turn at speed. Plus a floor so even a far detection produces a real nudge.
-	local urgency = math.max(0.35, math.sqrt(1 - math.clamp(dist / look, 0, 1)))
+	-- Urgency ramps with closeness (sqrt = a touch earlier than linear), but NO floor — far-away terrain
+	-- detection gives ~0 avoidance, so the eagle-chase dominates until a wall is genuinely imminent. (A floor
+	-- here made the bots veer off constantly and flee the map.)
+	local urgency = math.sqrt(1 - math.clamp(dist / look, 0, 1))
 	local normal = hit.Normal
 	local tangent = dir - normal * dir:Dot(normal)
 	local tm = tangent.Magnitude
