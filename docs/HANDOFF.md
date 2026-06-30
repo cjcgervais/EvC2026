@@ -17,6 +17,14 @@ Read this first. It tells the next agent exactly where the project stands, the o
 > **NEXT AGENT: this needs a HUMAN Studio playtest** against the acceptance criteria in the flight-tuning
 > doc, then re-tag the kernel. Tune against the §v4 target numbers, not by eyeball. The kernel is NOT back in
 > its `v1.0-eagle-flight` HUMAN-VERIFIED state until that playtest passes.
+>
+> ### ▶ Playtest 1 (2026-06-29) — 3 FREE-LOOK-mode bugs, fixes prescribed
+> First live test of the branch surfaced three **free-look-only** issues (mouse-aim mode tested OK). Full
+> root-cause + copy-paste-ready fixes (all in `BirdController.client.luau`) in
+> **[`docs/HANDOFF-freelook-fixes.md`](HANDOFF-freelook-fixes.md)**: (1) bird noses over into a dive when
+> controls are released in free-look (frozen aim command should ease to 0 → hold attitude, keyboard-modifiable);
+> (2) camera 180° flip during a loop in free-look (freeze the chase basis while free-looking → world-referenced);
+> (3) free-look mouse pitch inverted (one sign flip). Do these next, then re-playtest.
 
 ---
 
