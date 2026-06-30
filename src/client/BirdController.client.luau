@@ -189,6 +189,11 @@ local aimCursor = { x = 0, y = 0, cursorX = 0, cursorY = 0, noseX = 0, noseY = 0
 -- bird follows the reticle softly/flightily rather than snapping. Summed with keyboard in onFlightStep.
 local aimApplied = { pitch = 0, roll = 0, yaw = 0 }
 
+-- The aim reticle's world-ray direction (the cursor → world direction), stashed by computeMouseAim each
+-- frame while aiming. The right-click telescope (updateCamera) swings the look toward this so a zoom
+-- looks OUTWARD at what you're aiming at, not at the eagle. nil until the first aim frame.
+local aimWorldDir = nil
+
 -- Tap->ramp smoothing for roll and yaw (mirrors pitchRamp) so keyboard banking eases in.
 local rollRamp = { sign = 0, mag = 0 }
 local yawRamp  = { sign = 0, mag = 0 }
@@ -428,6 +433,31 @@ local function computeThermalForce(position)
 end
 
 --------------------------------------------------------------------------------
+-- BIRD FADE (right-click telescope) — fade the eagle locally while zooming so its opaque body can't
+-- block the outward view. LocalTransparencyModifier is CLIENT-ONLY (it doesn't replicate or change the
+-- part's real Transparency), exactly what Roblox uses to fade your own character up close. Idempotent:
+-- clears all modifiers once when the zoom releases. Driven by aimZoom.factor from updateCamera.
+--------------------------------------------------------------------------------
+local birdFadeApplied = false
+local function applyBirdFade(factor)
+	if not birdModel then birdFadeApplied = false return end
+	if factor <= 0.02 then
+		if birdFadeApplied then
+			for _, p in ipairs(birdModel:GetDescendants()) do
+				if p:IsA("BasePart") then p.LocalTransparencyModifier = 0 end
+			end
+			birdFadeApplied = false
+		end
+		return
+	end
+	local m = math.clamp(factor * (CAM.aimFadeBird or 0.85), 0, 1)
+	for _, p in ipairs(birdModel:GetDescendants()) do
+		if p:IsA("BasePart") then p.LocalTransparencyModifier = m end
+	end
+	birdFadeApplied = true
+end
+
+--------------------------------------------------------------------------------
 -- CAMERA — spectacular chase cam with speed pull-back, bank tilt, shake, and a
 -- Spacebar free-look orbit that decouples the camera from the bird's heading.
 --------------------------------------------------------------------------------
@@ -453,20 +483,13 @@ local function updateCamera(dt)
 
 	local dist = cameraState.currentDistance
 
-	-- AIM-ZOOM (hold RMB): ease the zoom factor toward the held state, then pull the chase distance IN toward
-	-- Camera.aimDistance. Folded into `dist` so BOTH the chase offset and the free-look orbit (both built from
-	-- `dist` below) tighten when zooming. Camera-only; the mouse-aim cursor read is untouched.
+	-- RIGHT-CLICK = OUTWARD TELESCOPE (player ask 2026-06-30): right-click zooms toward where you're AIMING /
+	-- LOOKING (narrows FOV + swings the look toward the reticle + fades the eagle so its opaque body can't
+	-- block the view) — it does NOT dolly the camera into the eagle. Eagle-distance is the MOUSE WHEEL's job
+	-- (`userZoom`, above), and it works in chase AND free-look (no special-casing — the wheel feeds `dist`
+	-- directly). Here we only ease the zoom factor toward the held RMB state; the look/FOV/fade use it below.
 	local zoomTarget = aimZoom.active and 1 or 0
 	aimZoom.factor = aimZoom.factor + (zoomTarget - aimZoom.factor) * math.clamp(CAM.aimZoomLerp or 0.22, 0, 1)
-	if aimZoom.factor > 1e-3 then
-		dist = dist + ((CAM.aimDistance or 18) - dist) * aimZoom.factor
-	end
-	-- FREE-LOOK (P5 "unstick"): pull the orbit PIVOT in to a near value so the sweep is controllable instead
-	-- of a huge twitchy arc around a distant pivot (the chase distance is far back at stoop speed). Composes
-	-- with aim-zoom above (min keeps the tighter of the two). Only affects free-look; chase distance is intact.
-	if freeLook.active then
-		dist = math.min(dist, CAM.freeLookDistance or 45)
-	end
 
 	-- CONTINUOUS, RATE-LIMITED CHASE DIRECTION (the no-snap / anti-sickness fix, RESEARCH §v4). The old
 	-- camera rebuilt its azimuth from the bird's HORIZONTAL heading, which REVERSES ~180° over the top of a
@@ -563,6 +586,14 @@ local function updateCamera(dt)
 	-- In free-look, look straight at the bird (no flight-path lead) so the orbit is fully world-referenced
 	-- and the look target doesn't wobble as the bird's heading swings through a loop; lead only in chase mode.
 	local lookTarget = freeLook.active and position or (position + followDir * (dist * 0.12))
+	-- RIGHT-CLICK TELESCOPE: while zooming (and NOT free-looking), swing the look toward the aim reticle's
+	-- world direction so you zoom OUTWARD to whatever you're aiming at, not at the eagle. aimWorldDir is the
+	-- cursor's world ray (stashed by computeMouseAim). In free-look the camera already points where you've
+	-- panned, so there the right-click just magnifies (FOV) the outward view — no look swing needed.
+	if aimZoom.factor > 1e-3 and not freeLook.active and aimWorldDir then
+		local aimPoint = camPos + aimWorldDir * (CAM.aimLookDistance or 2000)
+		lookTarget = lookTarget:Lerp(aimPoint, aimZoom.factor)
+	end
 	local targetCF = CFrame.lookAt(camPos, lookTarget, camUp)
 
 	-- Bank tilt: roll the camera slightly with the bird in a turn, but FADE it out as the bird inverts
@@ -612,6 +643,10 @@ local function updateCamera(dt)
 		camera.FieldOfView + (targetFOV - camera.FieldOfView) * math.clamp(dt * 6, 0, 1),
 		50, 110
 	)
+
+	-- Fade the eagle locally while right-click zooming so its opaque body can't block the telescoped
+	-- outward view (this is the "the eagle is just big and in the way" fix).
+	applyBirdFade(aimZoom.factor)
 end
 
 --------------------------------------------------------------------------------
@@ -779,6 +814,7 @@ local function computeMouseAim()
 	local localTarget
 	if inFront then
 		local aimDir  = camera:ViewportPointToRay(mouse.X - inset.X, mouse.Y - inset.Y).Direction
+		aimWorldDir = aimDir -- stash for the right-click telescope (look toward what you're aiming at)
 		local noseDir = camera:ViewportPointToRay(noseVP.X, noseVP.Y).Direction
 		local d = math.clamp(noseDir:Dot(aimDir), -1, 1)
 		local targetLook = birdLook

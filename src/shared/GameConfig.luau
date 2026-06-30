@@ -487,17 +487,17 @@ GameConfig.Camera = {
 	-- free-look is active the final camera lerp uses THIS smoothing instead → near-1:1 tracking. It's the single
 	-- biggest "unstick" knob: higher = crisper (toward 1:1), lower = floatier. ~1.0 ≈ 63%/frame at 60fps.
 	freeLookSmoothing = 1.0,
-	-- While free-looking, the orbit PIVOT radius is pulled in to this near value (instead of the full chase
-	-- distance, which is far back at stoop speed → huge twitchy arcs). Keeps the sweep controllable. The
-	-- aim-zoom (RMB) tightens it further. Only affects the free-look orbit; chase distance is untouched.
-	freeLookDistance = 45,
-	-- AIM-ZOOM (hold RIGHT-CLICK — player ask 2026-06-30 "right click is aim/zoom… zoom anywhere"). A held RMB
-	-- smoothly pulls the chase distance toward aimDistance and the FOV toward aimFOV for a closer read of
-	-- whatever you're flying toward / watching; release returns. Works in BOTH chase and free-look. Camera-only
-	-- (never touches flight or the steering cursor). aimZoomLerp = per-frame ease of the 0→1 zoom factor.
-	aimFOV      = 45,  -- narrower FOV while zoomed (from baseFOV 70) — magnifies the target
-	aimDistance = 18,  -- chase distance pulled toward this while zooming (clamped within [minDistance,maxDistance])
-	aimZoomLerp = 0.22, -- per-frame ease of the zoom factor toward 0/1 (higher = snappier zoom)
+	-- RIGHT-CLICK = OUTWARD TELESCOPE (player ask 2026-06-30: "right click zoom shall be for looking outward
+	-- wherever I am looking in freelook or in aiming, it should zoom to my aiming reticle… the mouse wheel is
+	-- for zooming in and out with reference to eagle"). Hold RMB to magnify the view toward what you're
+	-- aiming/looking at: it narrows the FOV toward aimFOV, swings the look toward the aim reticle (in aim mode;
+	-- free-look already points where you've panned), and FADES the eagle locally (aimFadeBird) so its opaque
+	-- body can't block the view. It does NOT dolly into the eagle — eagle-distance is the MOUSE WHEEL's job
+	-- (zoomStep/userZoom), which works in chase AND free-look. Camera-only; never touches flight or the cursor.
+	aimFOV          = 45,   -- narrower FOV while zoomed (from baseFOV 70) — the telescope magnification
+	aimLookDistance = 2000, -- studs out along the aim-reticle ray the look swings toward while zooming (aim mode)
+	aimFadeBird     = 0.85, -- how transparent the eagle goes at full zoom (0 = opaque, 1 = invisible) so it can't block
+	aimZoomLerp     = 0.22, -- per-frame ease of the zoom factor toward 0/1 (higher = snappier zoom)
 	-- Mouse-wheel zoom: scroll adjusts a user offset folded into the chase distance.
 	-- The final distance is clamped to [minDistance, maxDistance] so you can't clip
 	-- into the bird or fly the camera off to infinity.
