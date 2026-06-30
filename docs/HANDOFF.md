@@ -2,11 +2,16 @@
 
 Read this first. It tells the next agent exactly where the project stands, the one decision that's already been made for you, and the prioritized work queue. Pair it with `CLAUDE.md` (architecture + contracts), `docs/RESEARCH.md` (why the numbers are what they are), and project memory (`MEMORY.md` index).
 
-> ## ✅ Reticles + map LANDED (2026-06-30, build-green, UNPLAYTESTED) → `docs/HANDOFF-reticle-map.md`
-> Ask **#1 (strike reticles + beak-zone aim)** and ask **#2 (map build-out)** are code-complete on `master` (two
-> commits, not yet pushed). Ask **#3 (verify crows mob)** is confirmed in the correct gentle/non-lethal code
-> state but still needs a Studio Play. **NEXT: Chad playtests all three** (see the "LANDED next session" block in
-> the reticle-map doc for exactly what to verify + the tuning levers). Don't reopen the loved kernel/feel.
+> ## ✅ STRIKE MECHANISM REWORKED (2026-06-30, build-green, UNPLAYTESTED) → `docs/HANDOFF-reticle-map.md`
+> After a first pass at the reticles, Chad redesigned the strike model (commit on `master`): **(a)** beak reticle
+> re-COUPLED to the aim-error so **cursor-centred = straight & level** (the prior decoupled draw dove at centre);
+> **(b)** dropped the left/right talon dichotomy → now **ONE beak zone (forward) + ONE talon zone (a belly ARC
+> that swings with bank)**, and the **game auto-picks** beak-vs-talon by **which zone the nearest enemy is in**
+> (`GameServer.enemyZone`); **(c)** per-zone timers per Chad — **talon 4 s active / 2 s cd**, **beak 2 s / 4 s**.
+> HUD chips L/F/R → BEAK/TALON. **Map build-out (ask #2) is DEFERRED** per Chad until the strike feels right
+> (already committed; leave it). **#3 (crows mob)** still needs a Play. **NEXT: Chad playtests the strike + aim**
+> (verify cursor-centred=level, the talon arc swings & auto-selects, durations feel right; watch 1-v-4 — talon
+> 67% uptime). Don't reopen the loved flight kernel/feel. ⚠️ See the balance watch in `combat-directional-strike`.
 >
 > ## 🎯 (prior) strike reticles, beak-zone aim, build out the map ([`docs/HANDOFF-reticle-map.md`](HANDOFF-reticle-map.md))
 > P1–P6 are landed + pushed and Chad has been live-testing them. His 2026-06-30 notes opened **three new asks**

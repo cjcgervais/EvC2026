@@ -13,16 +13,25 @@ memories under *Guardrails*. **Pressing Play in Studio is the only real test —
 ---
 
 ## ✅✅ LANDED next session (2026-06-30, build-green, **UNPLAYTESTED — Chad to verify in Studio**)
-Two commits on `master` (not yet pushed — ask Chad):
-- **Ask #1 — strike reticles + beak-zone aim DONE.** `BirdController` + `GameConfig.Controls`. The amber nose
-  cross + two NEW side **talon reticles** are now drawn near the beak (`beakReticleDistance=70`, side offset
-  `strikeReticleSideOffset=26`) instead of 600 studs out. The reticle the **live bank** arms LIGHTS UP
-  (`paintStrikeReticles`) via the SAME inverted mapping as `classifyBank`, read client-side from
-  `cf.RightVector.Y`: **bank RIGHT → LEFT lights, bank LEFT → RIGHT lights, level → nose cross (forward) lights.**
-  DECOUPLED from `aimMarkerDistance` (still 600) so the steering feel is untouched. Green cursor ring unchanged.
-  → **Verify:** banking lights the correct side, all three sit near the beak, no flight-feel regression. Tune
-  `beakReticleDistance` / `strikeReticleSideOffset` to taste.
-- **Ask #2 — map build-out DONE.** `GameServer.BuildMap`. Three depth-staggered mountain rings (foothills R3600 /
+Commits on `master` (not yet pushed — ask Chad):
+- **⭐ Ask #1 — REWORKED by Chad into a new strike model (latest, supersedes the first reticle pass).** See the
+  `combat-directional-strike` memory for the full model. In short:
+  - **Aim fix:** the beak reticle is **COUPLED** to the aim-error (same projected point, `beakReticleDistance`),
+    so **cursor-centred-on-the-cross = straight & level** — the first pass DECOUPLED it (draw at 70 vs error at
+    600) and dove at centre. Distance only moves the neutral cursor, not the per-pixel feel (screen-angle error),
+    so the loved gains carry. `aimMarkerDistance` is now legacy/unused.
+  - **Reticles:** the LEFT/RIGHT talon dichotomy is GONE. Now **ONE beak cross** (forward/boresight) + **ONE
+    talon ARC** — a hemisphere of pips UNDER the bird (`talonReticleDistance`/`talonArcSpreadDeg`) that **swings
+    with bank** (eagle-only). The zone an enemy engages lights (`StrikeArmedDir` "beak"/"talon"/"none").
+  - **Strikes:** the GAME auto-picks beak-vs-talon by **which zone the nearest enemy is in** (`enemyZone`:
+    belly/-Up vs nose; `strikeSelectRange=200`), not by bank. Per-zone timers (Chad): **talon 4.0 s / 2.0 s cd**,
+    **beak 2.0 s / 4.0 s cd**. `classifyBank`/`strikeConeAxis` → `strikeAxis`(forward|belly) + `enemyZone`. HUD
+    chips L/F/R → **BEAK/TALON**.
+  - → **Verify:** cursor-centred = level (no dive); the talon arc swings as you bank & the right zone lights when
+    a crow is below vs ahead; clicking throws the lit zone's strike with its duration/cooldown; no flight-feel
+    regression. ⚠️ **Balance:** talon 4 s/2 s ≈ 67% uptime — watch the 1-v-4 (lever: cut talon duration / widen cd).
+- **Ask #2 — map build-out DONE but DEFERRED** per Chad ("defer the map until we fix the striking mechanism").
+  Already committed (leave it as-is for now; revisit after the strike feels right). `GameServer.BuildMap`. Three depth-staggered mountain rings (foothills R3600 /
   mid R5400 / far snow-capped peaks R7400), a distant SEA/coastline, a winding river, varied ground colour
   patches (forest/plateau/snowfield/marsh). Kept buttes + cardinal beacons. ~78 anchored parts, deterministic,
   ±1200 core stays open. → **Verify:** deep legible horizon from altitude, perf fine, no new crash-frustration.
