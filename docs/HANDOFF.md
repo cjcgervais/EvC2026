@@ -2,6 +2,21 @@
 
 Read this first. It tells the next agent exactly where the project stands, the one decision that's already been made for you, and the prioritized work queue. Pair it with `CLAUDE.md` (architecture + contracts), `docs/RESEARCH.md` (why the numbers are what they are), and project memory (`MEMORY.md` index).
 
+> ## 🎯 NEXT UP → strike reticles, beak-zone aim, build out the map ([`docs/HANDOFF-reticle-map.md`](HANDOFF-reticle-map.md))
+> P1–P6 are landed + pushed and Chad has been live-testing them. His 2026-06-30 notes opened **three new asks**
+> (full detail + pointers in **[`docs/HANDOFF-reticle-map.md`](HANDOFF-reticle-map.md)**): **(1)** a combat-aim
+> UI — a **beak-zone aim reticle** (the cross is 600 studs too far out) plus **LEFT/RIGHT strike reticles that
+> light by bank** (bank right → left reticle lights, bank left → right lights, matching the inverted strike
+> mapping; the forward reticle follows the mouse); **(2) build out the map** for far-vision "eagle vision"
+> perspective (render distance is already opened up — `StreamingEnabled=false` + thin atmosphere — but the world
+> needs more legible distant terrain to fly against); **(3) verify the AI crows now MOB** (a flee regression was
+> just fixed by reverting to gentle avoidance + a non-lethal AI terrain slide). **Don't reopen the loved kernel
+> or regress the confirmed feel.** Recent commits since P6: zoom model fix + `StreamingEnabled=false`
+> (`737336a`), inverted strike side + cursor 1/2 + stronger zoom (`2d5e8da`), AI no-suicide slide (`bbc87f0`),
+> crow-flee fix + atmosphere (`a7201fd`).
+>
+> ---
+>
 > ## 🎯 P1–P6 FLIGHT-FEEL + COMBAT PASS — CODE-COMPLETE, BUILD-GREEN, UNPLAYTESTED (2026-06-30, night shift)
 > A cleared-context agent worked the **entire** [`docs/HANDOFF-flight-feel-combat.md`](HANDOFF-flight-feel-combat.md)
 > queue. None touch the `v1.0-eagle-flight` aero kernel (input/camera/HUD/config + server-combat only). Two
