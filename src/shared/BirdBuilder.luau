@@ -97,16 +97,18 @@ function BirdBuilder.Build(teamName, profile)
 	local r = tonumber(profile.bodyRadius) or (isEagle and 4.5 or 2.2)
 
 	-- Palette: brown/gold eagle vs black/dark crow, each with its UI accent.
-	local bodyColor, wingColor, accent, headColor
+	local bodyColor, wingColor, accent, headColor, tailColor
 	if isEagle then
 		bodyColor = Color3.fromRGB(96, 64, 38)        -- brown
 		wingColor = Color3.fromRGB(74, 50, 30)        -- darker brown
 		headColor = Color3.fromRGB(232, 226, 214)     -- pale eagle head
+		tailColor = Color3.fromRGB(244, 244, 240)     -- bright white tail fan (bald-eagle signature)
 		accent = GameConfig.UI.eagleAccent            -- gold beak/talons
 	else
 		bodyColor = Color3.fromRGB(24, 24, 28)        -- near-black
 		wingColor = Color3.fromRGB(16, 16, 20)        -- darker
 		headColor = Color3.fromRGB(30, 30, 36)
+		tailColor = Color3.fromRGB(16, 16, 20)        -- crow tail: dark, same as wings
 		accent = GameConfig.UI.crowAccent             -- accent beak
 	end
 
@@ -141,9 +143,11 @@ function BirdBuilder.Build(teamName, profile)
 	beak.Parent = model
 	weldTo(body, beak)
 
-	-- TAIL: rear (+Z), flattened fan for pitch feel.
-	local tail = makePart("Tail", Vector3.new(r * 1.2, r * 0.18, r * 1.1), wingColor)
-	tail.CFrame = body.CFrame * CFrame.new(0, r * 0.1, bodyLen * 0.5 + r * 0.45)
+	-- TAIL: rear (+Z), a flattened, broad fan. Proportioned to a real raptor: ~⅔ a wing's chord wide and
+	-- about as long front-to-back, thin top-to-bottom. White on the eagle (the bald-eagle tail fan), dark on
+	-- the crow. Overlaps the body rear so there's no gap.
+	local tail = makePart("Tail", Vector3.new(r * 1.5, r * 0.16, r * 1.05), tailColor)
+	tail.CFrame = body.CFrame * CFrame.new(0, r * 0.08, bodyLen * 0.5 + r * 0.35)
 	tail.Parent = model
 	weldTo(body, tail)
 

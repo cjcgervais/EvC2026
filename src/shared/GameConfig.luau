@@ -483,6 +483,10 @@ GameConfig.Camera = {
 	-- fraction by which follow smoothing is reduced. Camera-only — never touches flight.
 	crestAngRate = 3.0,  -- facing rotation rate (rad/s) at which crest damping reaches full (lower = damps earlier)
 	crestDamp    = 0.85, -- max fraction the follow is softened at the crest (higher = smoother loop top)
+	-- LOOP TURN-OVER: over a fast loop crest, how far the camera leans its up toward the BIRD'S up (rolls
+	-- around with it) so it arcs over smoothly instead of the bird inverting in a world-level frame. 0 = old
+	-- behavior (horizon always world-level); ~0.8 = camera mostly goes around with the bird over the top.
+	loopFollowUp = 0.8,
 	-- NO-SNAP CHASE (deep-research RESEARCH §v4, anti motion-sickness). The chase direction is a single
 	-- CONTINUOUS full-3D vector (bird->camera), slewed toward "behind the bird's motion" at a CAPPED
 	-- angular rate — NOT rebuilt from the bird's horizontal heading (which reverses ~180° over a loop top
@@ -554,10 +558,20 @@ GameConfig.Controls = {
 	-- LOOP COMMIT: the nose-up pull is NOT faded early. It rides to the stall edge and the protection only
 	-- bites within aimStallBandDeg of stall — and is SUSPENDED entirely while powered (flap throttle up),
 	-- since the wings keep lift past stall then (FLAP_LIFT_FLOOR). This is what lets a started loop finish.
-	aimPitchDeadzone = 0.05,  -- PITCH deadzone: dead-ahead is steady; tiny so vertical authority stays
-	aimPitchExpo     = 1.8,   -- PITCH response curve past the deadzone (WT nonlinearity 1.0–2.5): fine near centre, full at edge
-	aimBankDeadzone  = 0.10,  -- BANK/YAW deadzone: slight horizontal cursor => NO bank (fly straight)
-	aimBankExpo      = 1.8,   -- BANK/YAW response curve (aligned with pitch, 2.2->1.8: consistent feel both axes)
+	-- DEADZONE = just the reticle/"cursor circumference" (player ask 2026-06-30): tiny circular neutral so
+	-- almost any cursor offset off the nose-cross already commands flight, then a PARABOLIC (expo 2.0) ramp
+	-- of force per deflection — fine/gentle right off centre, full authority at the edge. Equal on both axes
+	-- so the deadzone reads as a circle around the cursor. PLAYTEST-PROVISIONAL: if the nose jitters/won't
+	-- settle to straight flight at centre, nudge the deadzones up a hair (0.04 -> 0.05).
+	aimPitchDeadzone = 0.025, -- PITCH deadzone: tiny (cursor-sized, smaller than before) — authority almost at once
+	aimPitchExpo     = 1.5,   -- PITCH ramp: MORE LINEAR again (2.0->1.5) — rises steeper off centre, lightly eased
+	aimBankDeadzone  = 0.025, -- BANK/YAW deadzone: matched to pitch so the neutral circle is small + round
+	aimBankExpo      = 1.5,   -- BANK/YAW ramp: matched to pitch — more linear/steeper off centre for consistent feel
+	-- OUTER cursor bound: the aim reticle is CLAMPED to a circle CENTRED on the screen that covers this
+	-- fraction of the screen AREA (0.875 = 7/8 — big, nearly the whole screen). Past the rim the command just
+	-- stays saturated (full turn/loop). radius = sqrt(areaFrac · W · H / π); BirdController.computeMouseAim
+	-- does the clamp. A value this large reaches the top/bottom edges and most of the width. PLAYTEST-PROVISIONAL.
+	aimCursorAreaFrac = 0.875,
 	aimRollGain      = 2.0,   -- bank-to-turn strength
 	aimPitchGain     = 2.6,   -- elevator: pulls the nose toward the target (full deflection still saturates -> loop)
 	aimYawGain       = 0.6,   -- rudder, coordinated WITH the bank (both fire together toward the target)

@@ -2,15 +2,27 @@
 
 Read this first. It tells the next agent exactly where the project stands, the one decision that's already been made for you, and the prioritized work queue. Pair it with `CLAUDE.md` (architecture + contracts), `docs/RESEARCH.md` (why the numbers are what they are), and project memory (`MEMORY.md` index).
 
-> ## 🦅 TOP PRIORITY (2026-06-30): flight-feel & sandbox grind — START HERE → [`docs/HANDOFF-flight-sandbox.md`](HANDOFF-flight-sandbox.md)
-> Playtest-2: the player **loves the flight + the (now-fixed) free-look** — kernel and maneuvers confirmed
-> great. Four focused feel/QoL improvements remain, fully scoped with exact pointers and acceptance criteria
-> in the sandbox handoff: **P1** map renders too late at speed (almost certainly `Workspace.StreamingEnabled`
-> defaulting ON — disable it, ~26 anchored parts don't need streaming); **P2** make free-look pan feel like
-> War Thunder arcade (crisp 1:1 smoothing + higher sensitivity, all camera-only); **P3** a richer sandbox
-> (mid-field parallax/texture for a sense of speed + a no-combat **Sandbox mode** flag); **P4** more
-> power/acceleration per flap, **balance-aware** (Eagle change — reason about 1-v-4; stamina stays the
-> limiter). The three Playtest-1 free-look bugs below are **FIXED & player-confirmed** — don't regress them.
+> ## 🦅 EAGLE FLIGHT + CAMERA/CONTROL FEEL — PLAYER-CONFIRMED & TAGGED `v1.1-eagle-flight-feel` (2026-06-30, Playtest-3)
+> Playtest-3 ("dude it is so good!") locked in a full **mouse-aim + camera feel** pass on top of the verified
+> kernel. **All player-confirmed, committed & pushed to `origin/master`, tagged `v1.1-eagle-flight-feel`** (the
+> new safe revert point; `v1.0-eagle-flight` remains the pure-kernel point). **None touched the aero kernel
+> math** — these are input-shaping, camera, and cosmetic only, so the kernel stays `v1.0`-verified. What
+> landed (full detail in [`docs/HANDOFF-flight-feel-combat.md`](HANDOFF-flight-feel-combat.md) "Landed"):
+> mouse-aim deadzone shrunk to cursor-sized + ramp tuned to `expo 1.5` (more linear); aim reticle clamped to a
+> big centred circle (`aimCursorAreaFrac 0.875`); **free-look horizon lock** (stays world-level when you bank);
+> **chase loop turn-over** (`Camera.loopFollowUp 0.8` — camera arcs over *with* the bird, "perfect");
+> **free-look pitch inverted + wider pole range** (`FREE_LOOK_PITCH_LIMIT 1.70`); fainter centre crosshair; a
+> proper **white eagle tail**. **Don't regress any of these.**
+>
+> ### ▶ NEXT GRIND (still open) → same doc [`docs/HANDOFF-flight-feel-combat.md`](HANDOFF-flight-feel-combat.md)
+> Five of the six Playtest-3 asks remain: **P1** HUD must headline **SPACE = toggle free-look** (the hint is
+> also stale — says "hold"); **P4** **right-click = aim/zoom** anywhere (frees RMB from "beak"); **P5**
+> free-look pan **"gets stuck"** → crisp near-1:1 orbit; **P2** more power per flap + **P3** more stamina
+> (Eagle — reason 1-v-4); and the big one, **P6** — the **directional-strike combat rework** (LMB-only; the
+> eagle's bank picks left/right/forward talon, each with its own duration + downtime; server-authoritative;
+> balance-tuned). Plus carried-over sandbox items (`StreamingEnabled`, rich map / Sandbox mode). Full scope,
+> pointers, config shapes, and acceptance criteria are in that doc. **Checkpoint before P6** (combat/balance).
+> *(Superseded but kept for detail: [`docs/HANDOFF-flight-sandbox.md`](HANDOFF-flight-sandbox.md).)*
 >
 > ---
 >

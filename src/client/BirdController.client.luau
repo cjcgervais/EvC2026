@@ -149,7 +149,8 @@ local cameraState = {
 -- never inputState.*; flight controls are keyboard-only and `isDiving` reads the bird's nose,
 -- not the camera — keep it that way). yaw accumulates unbounded -> full 360° horizontal; pitch
 -- is clamped just short of the poles so you can look straight up/down/behind without gimbal flip.
-local FREE_LOOK_PITCH_LIMIT = 1.54 -- radians (~88°): look nearly straight up/down
+local FREE_LOOK_PITCH_LIMIT = 1.70 -- radians (~97°): look straight up/down AND a touch past, both ways (player
+                                   -- wanted more range toward the poles) — kept well under π so it never spins round
 local freeLook = {
 	active = false,
 	yaw    = 0, -- radians, horizontal orbit (unbounded -> 360°)
@@ -371,9 +372,9 @@ UserInputService.InputChanged:Connect(function(input, gameProcessed)
 	if freeLook.active then
 		local s = CAM.freeLookSensitivity * 0.01
 		freeLook.yaw   = freeLook.yaw   - input.Delta.X * s
-		-- Pitch sign FLIPPED (+Delta.Y) so mouse-up looks up / mouse-down looks down (was inverted). Yaw/pan
-		-- is correct as-is. The arrow-key pitch below is flipped to MATCH so both inputs agree.
-		freeLook.pitch = math.clamp(freeLook.pitch + input.Delta.Y * s, -FREE_LOOK_PITCH_LIMIT, FREE_LOOK_PITCH_LIMIT)
+		-- Pitch INVERTED per player ask (2026-06-30): mouse-up now looks DOWN, mouse-down looks UP. Yaw/pan
+		-- is unchanged. The arrow-key pitch below is kept in sync (Up = -s) so both inputs agree.
+		freeLook.pitch = math.clamp(freeLook.pitch - input.Delta.Y * s, -FREE_LOOK_PITCH_LIMIT, FREE_LOOK_PITCH_LIMIT)
 	end
 	-- (Mouse-aim reads the absolute cursor position in onFlightStep; nothing to accumulate here.)
 end)
@@ -384,9 +385,9 @@ RunService.RenderStepped:Connect(function(dt)
 	local s = CAM.freeLookSensitivity * 2.5 * dt
 	if UserInputService:IsKeyDown(Enum.KeyCode.Left)  then freeLook.yaw   = freeLook.yaw   + s end
 	if UserInputService:IsKeyDown(Enum.KeyCode.Right) then freeLook.yaw   = freeLook.yaw   - s end
-	-- Up/Down flipped to match the corrected mouse-pitch sign (more +pitch = look down): Up = look up = -s.
-	if UserInputService:IsKeyDown(Enum.KeyCode.Up)    then freeLook.pitch = math.clamp(freeLook.pitch - s, -FREE_LOOK_PITCH_LIMIT, FREE_LOOK_PITCH_LIMIT) end
-	if UserInputService:IsKeyDown(Enum.KeyCode.Down)  then freeLook.pitch = math.clamp(freeLook.pitch + s, -FREE_LOOK_PITCH_LIMIT, FREE_LOOK_PITCH_LIMIT) end
+	-- Up/Down match the INVERTED mouse pitch (player ask): Up key looks DOWN (+s), Down key looks UP (-s).
+	if UserInputService:IsKeyDown(Enum.KeyCode.Up)    then freeLook.pitch = math.clamp(freeLook.pitch + s, -FREE_LOOK_PITCH_LIMIT, FREE_LOOK_PITCH_LIMIT) end
+	if UserInputService:IsKeyDown(Enum.KeyCode.Down)  then freeLook.pitch = math.clamp(freeLook.pitch - s, -FREE_LOOK_PITCH_LIMIT, FREE_LOOK_PITCH_LIMIT) end
 end)
 
 --------------------------------------------------------------------------------
@@ -466,16 +467,42 @@ local function updateCamera(dt)
 	end
 	local chaseDir = cameraState.chaseDir
 
+	-- CREST RATE — how fast the bird's facing is rotating (rad/s). Computed HERE (before the up vector) so it
+	-- can BOTH soften the follow lerp below AND roll the camera around with the bird over a loop. ~0 in normal
+	-- flight; spikes toward 1·crestAngRate over a fast loop top.
+	local angRate = 0
+	if cameraState.prevLook then
+		local d = math.clamp(cameraState.prevLook:Dot(cf.LookVector), -1, 1)
+		angRate = math.acos(d) / math.max(dt, 1 / 240)
+	end
+	cameraState.prevLook = cf.LookVector
+	local crestBlend = math.clamp(angRate / (CAM.crestAngRate or 3.0), 0, 1)
+
 	-- Camera-up = world-up made perpendicular to the chase direction: keeps the horizon level in normal
 	-- flight and tilts CONTINUOUSLY as the chase goes vertical (so CFrame.lookAt never degenerates). Near
 	-- the pole (chase ~ straight up/down) we hold the last good up so it can't pop.
-	local camUp = Vector3.yAxis - chaseDir * chaseDir.Y
-	if camUp.Magnitude < 0.15 then
-		camUp = cameraState.camUpPrev or Vector3.yAxis
+	local worldUp = Vector3.yAxis - chaseDir * chaseDir.Y
+	if worldUp.Magnitude < 0.15 then
+		worldUp = cameraState.camUpPrev or Vector3.yAxis
 	else
-		camUp = camUp.Unit
+		worldUp = worldUp.Unit
 	end
-	cameraState.camUpPrev = camUp
+	cameraState.camUpPrev = worldUp
+
+	-- LOOP TURN-OVER (player ask 2026-06-30: "in mouse mode, doing a loop the camera should turn over
+	-- smoother/better"). Over a fast loop CREST, lean the camera up toward the BIRD'S own up so the camera
+	-- rolls AROUND with the bird and arcs over the top smoothly (bird stays oriented in frame), instead of the
+	-- horizon staying world-flat while the bird inverts in front of you. crestBlend gates it: ZERO in normal
+	-- flight (horizon stays perfectly level — no change there), ramping in only as the loop whips over the top.
+	-- Camera-only; chaseDir (the no-snap basis) is untouched, so no azimuth snap is reintroduced.
+	local camUp = worldUp
+	if not freeLook.active and (CAM.loopFollowUp or 0) > 0 then
+		local t = crestBlend * CAM.loopFollowUp
+		if t > EPS then
+			local blended = worldUp:Lerp(cf.UpVector, t)
+			camUp = (blended.Magnitude > 0.05) and blended.Unit or (cameraState.camUpPrev or worldUp)
+		end
+	end
 
 	-- Height ratio grows with zoom for a higher, more top-down view when wheeled out.
 	local hBase   = CAM.heightFactor or 0.25
@@ -493,7 +520,16 @@ local function updateCamera(dt)
 		local pitchAxis = yawCF:VectorToWorldSpace(Vector3.xAxis) -- world-horizontal right, yaw-rotated
 		local orbit = CFrame.fromAxisAngle(pitchAxis, freeLook.pitch) * yawCF
 		cameraOffset = orbit:VectorToWorldSpace(cameraOffset)
-		camUp        = orbit:VectorToWorldSpace(camUp)
+		-- HORIZON LOCK (player ask 2026-06-30: "when I bank, the free-look camera falls to the side — I'm
+		-- watching with my head tilted; if it could stay up that'd be great"). Rebuild the up vector FRESH
+		-- as world-up made perpendicular to the actual (orbited) view direction, instead of carrying the
+		-- chase up through the orbit. This makes the free-look horizon WORLD-LEVEL by construction — it can
+		-- never inherit the bird's roll, no matter how hard you bank while looking around. Near a straight
+		-- up/down look the projection degenerates, so we hold the last good up (no pop at the pole).
+		local viewDir = (cameraOffset.Magnitude > EPS) and cameraOffset.Unit or camUp
+		local level   = Vector3.yAxis - viewDir * viewDir.Y
+		camUp = (level.Magnitude > 0.15) and level.Unit or (cameraState.camUpPrev or camUp)
+		cameraState.camUpPrev = camUp
 	end
 
 	local camPos  = position + cameraOffset
@@ -512,16 +548,8 @@ local function updateCamera(dt)
 		targetCF = targetCF * CFrame.Angles(0, 0, bankAngle * CAM.bankTiltFactor * uprightFade)
 	end
 
-	-- Crest damping: measure how fast the bird's facing is rotating (rad/s); when it spikes — e.g.
-	-- flipping over the top of a loop — soften the follow so the camera glides through instead of
-	-- whipping around. Camera-only; flight is untouched.
-	local angRate = 0
-	if cameraState.prevLook then
-		local d = math.clamp(cameraState.prevLook:Dot(cf.LookVector), -1, 1)
-		angRate = math.acos(d) / math.max(dt, 1 / 240)
-	end
-	cameraState.prevLook = cf.LookVector
-	local crestBlend = math.clamp(angRate / (CAM.crestAngRate or 3.5), 0, 1)
+	-- Crest damping: when the facing spikes (loop top) soften the follow so the camera glides through instead
+	-- of whipping. crestBlend was computed above (it also drives the loop turn-over). Camera-only.
 	local smoothing  = CAM.followSmoothing * (1 - crestBlend * (CAM.crestDamp or 0.75))
 
 	-- Frame-rate independent smoothing toward the target.
@@ -694,6 +722,21 @@ local function computeMouseAim()
 
 	local inset = GuiService:GetGuiInset()
 	local mouse = UserInputService:GetMouseLocation()
+
+	-- CLAMP the aim cursor to a big CIRCLE CENTRED on the screen (player ask 2026-06-30: "it should cover ~7/8
+	-- of the screen by AREA and be centred"). Centre = the viewport centre in window coords (matches the
+	-- nose-cross's own screen-centre, since aimGui.IgnoreGuiInset = true). Radius is set from a target AREA
+	-- fraction: r = sqrt(areaFrac · W · H / π) — at 7/8 this reaches the top/bottom edges and most of the
+	-- width. Past the rim the reticle is pinned, so the command just stays saturated (sustained full turn/loop)
+	-- instead of sliding to a corner. Clamping `mouse` here feeds BOTH the aim ray and the drawn reticle.
+	local cx, cy = inset.X + vp.X * 0.5, inset.Y + vp.Y * 0.5
+	local maxR   = math.sqrt(((C.aimCursorAreaFrac or 0.875) * vp.X * vp.Y) / math.pi)
+	local dx, dy = mouse.X - cx, mouse.Y - cy
+	local r = math.sqrt(dx * dx + dy * dy)
+	if r > maxR and r > EPS then
+		local k = maxR / r
+		mouse = Vector2.new(cx + dx * k, cy + dy * k)
+	end
 
 	-- Resolve the cursor into a desired BODY-frame direction. Comparing the camera ray through the cursor
 	-- with the camera ray through the CROSS makes "cursor on the cross" == zero error (no neutral bias from
