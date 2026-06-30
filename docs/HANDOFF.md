@@ -2,7 +2,13 @@
 
 Read this first. It tells the next agent exactly where the project stands, the one decision that's already been made for you, and the prioritized work queue. Pair it with `CLAUDE.md` (architecture + contracts), `docs/RESEARCH.md` (why the numbers are what they are), and project memory (`MEMORY.md` index).
 
-> ## 🎯 NEXT UP → strike reticles, beak-zone aim, build out the map ([`docs/HANDOFF-reticle-map.md`](HANDOFF-reticle-map.md))
+> ## ✅ Reticles + map LANDED (2026-06-30, build-green, UNPLAYTESTED) → `docs/HANDOFF-reticle-map.md`
+> Ask **#1 (strike reticles + beak-zone aim)** and ask **#2 (map build-out)** are code-complete on `master` (two
+> commits, not yet pushed). Ask **#3 (verify crows mob)** is confirmed in the correct gentle/non-lethal code
+> state but still needs a Studio Play. **NEXT: Chad playtests all three** (see the "LANDED next session" block in
+> the reticle-map doc for exactly what to verify + the tuning levers). Don't reopen the loved kernel/feel.
+>
+> ## 🎯 (prior) strike reticles, beak-zone aim, build out the map ([`docs/HANDOFF-reticle-map.md`](HANDOFF-reticle-map.md))
 > P1–P6 are landed + pushed and Chad has been live-testing them. His 2026-06-30 notes opened **three new asks**
 > (full detail + pointers in **[`docs/HANDOFF-reticle-map.md`](HANDOFF-reticle-map.md)**): **(1)** a combat-aim
 > UI — a **beak-zone aim reticle** (the cross is 600 studs too far out) plus **LEFT/RIGHT strike reticles that

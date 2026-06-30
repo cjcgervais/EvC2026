@@ -12,7 +12,27 @@ memories under *Guardrails*. **Pressing Play in Studio is the only real test —
 
 ---
 
-## ✅ Just landed (committed + pushed this session, build-green, mostly UNPLAYTESTED)
+## ✅✅ LANDED next session (2026-06-30, build-green, **UNPLAYTESTED — Chad to verify in Studio**)
+Two commits on `master` (not yet pushed — ask Chad):
+- **Ask #1 — strike reticles + beak-zone aim DONE.** `BirdController` + `GameConfig.Controls`. The amber nose
+  cross + two NEW side **talon reticles** are now drawn near the beak (`beakReticleDistance=70`, side offset
+  `strikeReticleSideOffset=26`) instead of 600 studs out. The reticle the **live bank** arms LIGHTS UP
+  (`paintStrikeReticles`) via the SAME inverted mapping as `classifyBank`, read client-side from
+  `cf.RightVector.Y`: **bank RIGHT → LEFT lights, bank LEFT → RIGHT lights, level → nose cross (forward) lights.**
+  DECOUPLED from `aimMarkerDistance` (still 600) so the steering feel is untouched. Green cursor ring unchanged.
+  → **Verify:** banking lights the correct side, all three sit near the beak, no flight-feel regression. Tune
+  `beakReticleDistance` / `strikeReticleSideOffset` to taste.
+- **Ask #2 — map build-out DONE.** `GameServer.BuildMap`. Three depth-staggered mountain rings (foothills R3600 /
+  mid R5400 / far snow-capped peaks R7400), a distant SEA/coastline, a winding river, varied ground colour
+  patches (forest/plateau/snowfield/marsh). Kept buttes + cardinal beacons. ~78 anchored parts, deterministic,
+  ±1200 core stays open. → **Verify:** deep legible horizon from altitude, perf fine, no new crash-frustration.
+- **Ask #3 — code confirmed in the right state; needs a Play.** `avoidance.weight=3.0` (gentle, no urgency
+  floor), non-lethal AI terrain slide (`resolve(...,math.huge)`), `squadGoal` hunts via `findNearestEnemyLinear`
+  from any range. The mob behavior itself is a Studio-only check (see ask #3 below).
+
+---
+
+## ✅ Just landed (committed + pushed earlier this session, build-green, mostly UNPLAYTESTED)
 Recent commits on `master` after the P1–P6 pass:
 - **Zoom model fixed** (`737336a`): mouse WHEEL = zoom in/out w.r.t. the eagle (works in free-look now);
   RIGHT-CLICK = awareness-only outward telescope (FOV magnify + fades the eagle so it can't block) that does
