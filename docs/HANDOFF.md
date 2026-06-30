@@ -11,17 +11,25 @@ Read this first. It tells the next agent exactly where the project stands, the o
 > HUD chips L/F/R → BEAK/TALON. **Map build-out (ask #2) is DEFERRED** per Chad until the strike feels right
 > (already committed; leave it). **#3 (crows mob)** still needs a Play.
 >
-> **+ AIM RESOLVE FIX (latest commit):** Chad — "the reticle never meets the cursor, it just keeps turning hard."
-> The chase cam re-centres the heading, so an ABSOLUTE cursor is unreachable → perpetual turn. Mouse-aim is now a
-> **self-centering virtual cursor** (relative mouse / `GetMouseDelta`, `LockCenter`): the cursor decays back to
-> the nose cross at `Controls.aimRecenterRate` (3.0), so **deflect → coordinated-turn → straighten** (held
-> deflection resolves; continuous movement = sustained turn/loop). `aimRecenterRate=0` = old behaviour. See
-> [[mouse-aim-pursuit-model]].
+> **+ AIM CURSOR — relative virtual cursor, iterated TWICE (latest commits):** Mouse-aim is now a relative
+> virtual cursor (`LockCenter` + `GetMouseDelta`). `aimVirtual` = the cursor's **deflection FROM THE NOSE CROSS**
+> (zone centred on the nose → symmetric up/down; FIXED Chad's "cursor zone offset downward, can't reach the top").
+> The cursor **stays where you put it** and drives the nose; `Controls.aimRecenterRate` is a **gentle** relax of
+> the deflection back to the nose so a held deflection eventually straightens (default **3.0→1.0** so it doesn't
+> rubber-band/fight you; `0` = fully persistent). See [[mouse-aim-pursuit-model]].
 >
-> **NEXT: Chad playtests the strike + aim** (verify deflect-then-straighten resolves, cursor-centred=level, the
-> talon arc swings & auto-selects, durations feel right; watch 1-v-4 — talon 67% uptime). Tuning knobs:
-> `aimRecenterRate`/`aimMouseSensitivity`, `beakReticleDistance`, `talonReticleDistance`/`talonArcSpreadDeg`,
-> `Combat.strikes` durations + `strikeSelectRange`. Don't reopen the loved flight kernel. ⚠️ Balance watch in `combat-directional-strike`.
+> **⚠️ OPEN AIM-FEEL FORK (top priority — needs live tuning WITH Chad):** "cursor-authoritative/persistent
+> (low/zero `aimRecenterRate`; hold cursor off-centre = sustained turn, WT-style)" vs "self-resolving (higher
+> rate; straightens on its own)." Chad's last steer: the CURSOR moves the bird, NOT the bird moving the mouse
+> against him — so lean LOW/persistent and verify it can travel far & doesn't jitter. `aimRecenterRate` is the
+> knob (it spans both regimes). Also re-verify the downward-offset is gone (cursor reaches the TOP of the screen).
+>
+> **Then playtest the STRIKE:** cursor-centred=level (beak reticle), the talon belly-arc swings with bank & the
+> right zone auto-lights (crow below=TALON, ahead=BEAK), click throws the lit zone's strike w/ its duration/cd;
+> watch 1-v-4 (talon 4s/2s ≈ 67% uptime). **Map build-out is DEFERRED** until the strike+aim feel is locked.
+> **#3 crows-mob** still needs a Play. Knobs: `aimRecenterRate`/`aimMouseSensitivity`, `beakReticleDistance`,
+> `talonReticleDistance`/`talonArcSpreadDeg`, `Combat.strikes` durations + `strikeSelectRange`. Don't reopen the
+> loved flight kernel. ⚠️ Strike balance watch in `combat-directional-strike`.
 >
 > ## 🎯 (prior) strike reticles, beak-zone aim, build out the map ([`docs/HANDOFF-reticle-map.md`](HANDOFF-reticle-map.md))
 > P1–P6 are landed + pushed and Chad has been live-testing them. His 2026-06-30 notes opened **three new asks**
