@@ -2,6 +2,22 @@
 
 Read this first. It tells the next agent exactly where the project stands, the one decision that's already been made for you, and the prioritized work queue. Pair it with `CLAUDE.md` (architecture + contracts), `docs/RESEARCH.md` (why the numbers are what they are), and project memory (`MEMORY.md` index).
 
+> ## 🎯 P1–P6 FLIGHT-FEEL + COMBAT PASS — CODE-COMPLETE, BUILD-GREEN, UNPLAYTESTED (2026-06-30, night shift)
+> A cleared-context agent worked the **entire** [`docs/HANDOFF-flight-feel-combat.md`](HANDOFF-flight-feel-combat.md)
+> queue. None touch the `v1.0-eagle-flight` aero kernel (input/camera/HUD/config + server-combat only). Two
+> commits on `master`: **`317f56b` (P1–P5)** = HUD SPACE-hint, **RMB aim/zoom**, **free-look "unstick"** (crisp
+> near-1:1 orbit), Eagle **flap power + stamina** — this commit is the **checkpoint before P6**. **`0df2a37`
+> (P6)** = the **directional-strike combat rework**: LMB-only, the eagle's **bank** picks left/right/forward
+> strike, server-authoritative, each strike's offset cone **parries a ram AND deals offensive damage** (one
+> catch-or-hit/window). HUD = single STRIKE bar + L/F/R armed-direction chips. Remote `WeaponHold` → `Strike`.
+> Full detail in the new **[`docs/HANDOFF-flight-feel-combat.md`](HANDOFF-flight-feel-combat.md) "ALL SIX ASKS
+> LANDED"** block and the `combat-directional-strike` memory. **NEXT: Chad must Studio-playtest — especially the
+> P6 1-v-4 balance** (tune the three windows/downtimes/cones in `GameConfig.Combat.strikes`; the offensive pass
+> is the lever to watch hardest — dial down or make defense-only if it skews eagle-favored). Carried-over still
+> open: `StreamingEnabled=false`, richer sandbox / Sandbox mode.
+>
+> ---
+>
 > ## 🦅 EAGLE FLIGHT + CAMERA/CONTROL FEEL — PLAYER-CONFIRMED & TAGGED `v1.1-eagle-flight-feel` (2026-06-30, Playtest-3)
 > Playtest-3 ("dude it is so good!") locked in a full **mouse-aim + camera feel** pass on top of the verified
 > kernel. **All player-confirmed, committed & pushed to `origin/master`, tagged `v1.1-eagle-flight-feel`** (the

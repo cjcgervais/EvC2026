@@ -15,7 +15,44 @@ human verifier.**
 
 ---
 
-## ✅ Landed this session (2026-06-30, build-green — mouse-aim feel + cameras, PLAYER-CONFIRMED)
+## ✅ ALL SIX ASKS LANDED — night shift 2026-06-30 (build-green, UNPLAYTESTED — needs Chad's Studio pass)
+A fresh cleared-context agent worked the whole P1→P6 queue. `.\build.ps1` green throughout; none touch the
+`v1.0-eagle-flight` aero kernel (input/camera/HUD/config + server-combat only). Two commits on `master`:
+- **P1–P5 (commit `317f56b`)** — the low-risk feel/QoL pass, also the **checkpoint before P6** (revert here to
+  drop just the combat rework):
+  - **P1 HUD SPACE hint** — `GameUI` control hint is now a RichText line with **SPACE** gold-bold as the
+    headline ("toggle FREE-LOOK"), un-staled from the old "hold SPACE"; every binding listed matches the build.
+  - **P4 RMB aim/zoom** — right-click freed from "beak" → **hold RMB to zoom** (chase distance + FOV pulled in),
+    works in chase AND free-look. Camera-only; mouse-aim cursor read untouched. New `Camera.aimFOV` (45),
+    `aimDistance` (18), `aimZoomLerp` (0.22).
+  - **P5 free-look "unstick"** — the orbit no longer inherits the heavy chase lerp: while free-looking it tracks
+    near-1:1 via new `Camera.freeLookSmoothing` (1.0 — **the main fix**), `freeLookSensitivity` 0.35→0.7, and
+    the orbit pivot pulled in via `Camera.freeLookDistance` (45) so sweeps aren't huge distant arcs.
+  - **P2/P3 flap power + stamina (Eagle, reason 1-v-4)** — `flapThrust` 600→800, `flapClimbForce` 400→500;
+    `maxStamina` 240→320, `staminaFlapCost` 6→5, `staminaRegen` 14→16. Mass kept 16 (momentum = identity);
+    **Crow untouched** (its flap/stamina is a matchup lever). Shipped Option A (continuous force); **Option B —
+    a wingbeat-phase "felt surge" per downstroke — is the juicy follow-up to prototype live** (watch porpoising).
+- **P6 directional strike (commit `0df2a37`)** — see the P6 section below; full design in the
+  `combat-directional-strike` memory. LMB-only; the eagle's **bank** picks left/right/forward; server reads the
+  authoritative bank; each strike has its own startup→duration→cooldown + an offset cone that **parries a ram
+  AND deals offensive damage** (one catch-or-hit/window). HUD = single STRIKE bar + L/F/R armed-dir chips.
+
+**▶ WHAT CHAD MUST PLAYTEST / TUNE (the only real gate):**
+1. **P5** — does free-look now feel crisp/near-1:1 (no "stuck")? If still laggy, raise `Camera.freeLookSmoothing`.
+2. **P4** — RMB zoom reads cleanly in chase + free-look, releases back, doesn't fight the steering cursor?
+3. **P2/P3** — flap has more punch + a longer leash, but stamina still ends the climb (not "free" power)?
+4. **P6 — the big one (balance-critical, reason 1-v-4 on every number):** banking L/R/level + LMB throws the
+   right strike with a visibly distinct window/downtime; a strike covers/kills a crow on that side but **leaves
+   the other sides open** (2-angle test); the eagle **cannot spam-cover all sides**; the **offensive damage**
+   (the lever to watch hardest) doesn't make 1-v-4 too eagle-favored — if it does, drop damage/reach/duration in
+   `GameConfig.Combat.strikes`, or zero the offensive pass (defense-only) first. Tune the three
+   windows/downtimes/cones live. Then commit the tuned numbers + re-tag if it earns it.
+
+*(Carried-over still open, fold in opportunistically: `StreamingEnabled=false`, richer sandbox / Sandbox mode.)*
+
+---
+
+## ✅ Landed earlier 2026-06-30 (build-green — mouse-aim feel + cameras, PLAYER-CONFIRMED)
 A live tuning pass with the player. All `.\build.ps1`-verified; none touch the aero kernel (input-shaping +
 camera-only). **Where noted PLAYER-CONFIRMED, don't regress.**
 1. **Mouse-aim: tiny deadzone, FULLY LINEAR ramp, more authority.** Player walked this live: *"too big a
