@@ -487,15 +487,14 @@ GameConfig.Camera = {
 	-- free-look is active the final camera lerp uses THIS smoothing instead → near-1:1 tracking. It's the single
 	-- biggest "unstick" knob: higher = crisper (toward 1:1), lower = floatier. ~1.0 ≈ 63%/frame at 60fps.
 	freeLookSmoothing = 1.0,
-	-- RIGHT-CLICK = OUTWARD TELESCOPE (player ask 2026-06-30: "right click zoom shall be for looking outward
-	-- wherever I am looking in freelook or in aiming, it should zoom to my aiming reticle… the mouse wheel is
-	-- for zooming in and out with reference to eagle"). Hold RMB to magnify the view toward what you're
-	-- aiming/looking at: it narrows the FOV toward aimFOV, swings the look toward the aim reticle (in aim mode;
-	-- free-look already points where you've panned), and FADES the eagle locally (aimFadeBird) so its opaque
-	-- body can't block the view. It does NOT dolly into the eagle — eagle-distance is the MOUSE WHEEL's job
-	-- (zoomStep/userZoom), which works in chase AND free-look. Camera-only; never touches flight or the cursor.
-	aimFOV          = 45,   -- narrower FOV while zoomed (from baseFOV 70) — the telescope magnification
-	aimLookDistance = 2000, -- studs out along the aim-reticle ray the look swings toward while zooming (aim mode)
+	-- RIGHT-CLICK = AWARENESS ZOOM (player asks 2026-06-30: "zoom right click is for looking outward… it should
+	-- zoom to the centre of where I'm heading"; "the zoom right click cannot affect flying, it is for awareness
+	-- only"; "the mouse wheel is for zooming in and out with reference to eagle"). Hold RMB to MAGNIFY the view
+	-- centred on your heading: it narrows the FOV toward aimFOV and FADES the eagle locally (aimFadeBird) so its
+	-- opaque body can't block the view. It does NOT move the camera or swing the look (that offset the zoom and
+	-- fed back into flight) — the look stays heading-centred and steering is SUSPENDED while zooming, so it's
+	-- purely awareness. Eagle-distance is the MOUSE WHEEL's job (zoomStep/userZoom), in chase AND free-look.
+	aimFOV          = 38,   -- narrower FOV while zoomed (from baseFOV 70) — the magnification (lower = stronger)
 	aimFadeBird     = 0.85, -- how transparent the eagle goes at full zoom (0 = opaque, 1 = invisible) so it can't block
 	aimZoomLerp     = 0.22, -- per-frame ease of the zoom factor toward 0/1 (higher = snappier zoom)
 	-- Mouse-wheel zoom: scroll adjusts a user offset folded into the chase distance.

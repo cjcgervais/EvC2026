@@ -206,13 +206,17 @@ local function SetupLighting()
 	Lighting.GeographicLatitude = 25
 	Lighting.ShadowSoftness = 0.2
 
-	-- LOW density so the perimeter mountains + cardinal beacons read from across the arena; a little
-	-- haze for depth and a bright sky tint for contrast.
+	-- VERY LOW density so you can SEE THE WHOLE ENVIRONMENT FROM FAR AWAY (player ask 2026-06-30: "increase
+	-- render distance big time"). Atmosphere density is the real view-distance limiter here (FogEnd is already
+	-- off at 1e6, and with StreamingEnabled = false every part renders) — it hazes distant parts to the sky
+	-- colour, so a high value reads as a short render distance. Dropped 0.18 → 0.05 + Haze 0.6 → 0.12 so the
+	-- perimeter mountain ring (R≈6600) and the far map edges stay crisp from across the 16k arena. Keep a
+	-- whisper for aerial-perspective depth so distance still reads. Raise toward 0.1 if the far edge looks bare.
 	local atmo = Lighting:FindFirstChildOfClass("Atmosphere") or Instance.new("Atmosphere")
-	atmo.Density = 0.18
+	atmo.Density = 0.05
 	atmo.Offset = 0.1
-	atmo.Haze = 0.6
-	atmo.Glare = 0.2
+	atmo.Haze = 0.12
+	atmo.Glare = 0.15
 	atmo.Color = Color3.fromRGB(210, 222, 240)
 	atmo.Decay = Color3.fromRGB(120, 150, 190)
 	atmo.Parent = Lighting
@@ -252,6 +256,13 @@ local function BuildMap()
 	-- Keep the Roblox engine's own gravity coherent with the flight model's (birds are CFrame-driven
 	-- so they read GameConfig.Flight.GRAVITY directly, but this keeps debris/landings/ragdolls sane).
 	Workspace.Gravity = GameConfig.Flight.GRAVITY
+
+	-- STREAMING OFF (fixes "the eagle doesn't render when I zoom out" + lets the whole environment render
+	-- far away). With CharacterAutoLoads = false there's NO character, so StreamingEnabled uses the CAMERA as
+	-- the replication focus — a far zoomed-out camera then streams the (now distant) eagle + map OUT until you
+	-- zoom back in. The arena is only ~26 anchored parts + a handful of birds, so streaming buys nothing here.
+	-- Baked false in default.project.json too; this runtime set is the belt-and-suspenders for a live serve.
+	pcall(function() Workspace.StreamingEnabled = false end)
 
 	local map = Workspace:FindFirstChild("Map")
 	if map then map:Destroy() end

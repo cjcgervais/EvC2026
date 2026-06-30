@@ -189,11 +189,6 @@ local aimCursor = { x = 0, y = 0, cursorX = 0, cursorY = 0, noseX = 0, noseY = 0
 -- bird follows the reticle softly/flightily rather than snapping. Summed with keyboard in onFlightStep.
 local aimApplied = { pitch = 0, roll = 0, yaw = 0 }
 
--- The aim reticle's world-ray direction (the cursor → world direction), stashed by computeMouseAim each
--- frame while aiming. The right-click telescope (updateCamera) swings the look toward this so a zoom
--- looks OUTWARD at what you're aiming at, not at the eagle. nil until the first aim frame.
-local aimWorldDir = nil
-
 -- Tap->ramp smoothing for roll and yaw (mirrors pitchRamp) so keyboard banking eases in.
 local rollRamp = { sign = 0, mag = 0 }
 local yawRamp  = { sign = 0, mag = 0 }
@@ -585,15 +580,11 @@ local function updateCamera(dt)
 	-- forward-leaning, lead-the-target feel). camUp is the continuous up reference -> no inverted roll snap.
 	-- In free-look, look straight at the bird (no flight-path lead) so the orbit is fully world-referenced
 	-- and the look target doesn't wobble as the bird's heading swings through a loop; lead only in chase mode.
+	-- The look target stays CENTRED ON THE HEADING (chase) / the panned view (free-look) — the right-click
+	-- zoom does NOT swing it toward the cursor (that offset the zoom AND, because mouse-aim steers off the
+	-- live camera projection, fed back into flight). The zoom is purely FOV magnify + eagle-fade now, and the
+	-- steering is suspended while zooming (onFlightStep), so right-click is awareness-only — it never flies you.
 	local lookTarget = freeLook.active and position or (position + followDir * (dist * 0.12))
-	-- RIGHT-CLICK TELESCOPE: while zooming (and NOT free-looking), swing the look toward the aim reticle's
-	-- world direction so you zoom OUTWARD to whatever you're aiming at, not at the eagle. aimWorldDir is the
-	-- cursor's world ray (stashed by computeMouseAim). In free-look the camera already points where you've
-	-- panned, so there the right-click just magnifies (FOV) the outward view — no look swing needed.
-	if aimZoom.factor > 1e-3 and not freeLook.active and aimWorldDir then
-		local aimPoint = camPos + aimWorldDir * (CAM.aimLookDistance or 2000)
-		lookTarget = lookTarget:Lerp(aimPoint, aimZoom.factor)
-	end
 	local targetCF = CFrame.lookAt(camPos, lookTarget, camUp)
 
 	-- Bank tilt: roll the camera slightly with the bird in a turn, but FADE it out as the bird inverts
@@ -814,7 +805,6 @@ local function computeMouseAim()
 	local localTarget
 	if inFront then
 		local aimDir  = camera:ViewportPointToRay(mouse.X - inset.X, mouse.Y - inset.Y).Direction
-		aimWorldDir = aimDir -- stash for the right-click telescope (look toward what you're aiming at)
 		local noseDir = camera:ViewportPointToRay(noseVP.X, noseVP.Y).Direction
 		local d = math.clamp(noseDir:Dot(aimDir), -1, 1)
 		local targetLook = birdLook
@@ -929,11 +919,13 @@ local function onFlightStep(dt)
 	local kbYaw   = rampAxis(yawRamp,   kb.yaw,   tapB, rampB, dt)
 
 	-- 1d. Mouse-aim autopilot. While aiming: EASE the applied aim toward the live target and draw the
-	-- reticle. While FREE-LOOK is active: NEUTRALISE the aim (ease to 0) so the bird HOLDS its current
-	-- attitude — the plant has no auto-level (STABILITY_RATE=0), so zero rotational input keeps the nose/
-	-- bank exactly where it is (flies where it points via grip). The keyboard SUMS on top below, so QWEASD
-	-- still modify the held attitude and it REMAINS on release. Resumes mouse-aim cleanly on toggle-back.
-	if aimOn and camera then
+	-- reticle. While FREE-LOOK **or RIGHT-CLICK ZOOM** is active: NEUTRALISE the aim (ease to 0) so the bird
+	-- HOLDS its current attitude — the plant has no auto-level (STABILITY_RATE=0), so zero rotational input
+	-- keeps the nose/bank exactly where it is (flies where it points via grip). RIGHT-CLICK ZOOM is
+	-- AWARENESS-ONLY (player ask: "the zoom right click cannot affect flying"): suspending steering here means
+	-- the FOV change can't feed back through the camera-projection aim into pitch/bank. Keyboard SUMS on top
+	-- below, so QWEASD still adjust the held attitude. Resumes mouse-aim cleanly on release/toggle-back.
+	if aimOn and camera and not aimZoom.active then
 		local aPitch, aRoll, aYaw = computeMouseAim()
 		local resp = math.clamp(((C and C.aimResponse) or 7) * dt, 0, 1)
 		aimApplied.pitch = aimApplied.pitch + (aPitch - aimApplied.pitch) * resp
