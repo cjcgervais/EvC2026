@@ -1079,19 +1079,19 @@ local function onFlightStep(dt)
 			aimGui.Enabled = false
 		end
 	end
-	-- KEYBOARD AUTHORITY over mouse-aim (player ask 2026-06-30: "we lost keyboard authority over the
-	-- mouse — I want QWEASD to override mouse input during mouse-aim"). Per-axis: while a flight key is
-	-- HELD on an axis (raw kb.* = ±1), the keyboard OWNS that axis and the mouse-aim command is
-	-- suppressed on it (they no longer sum/fight); release the key and mouse-aim resumes on that axis.
-	-- So you can e.g. bank on the keyboard while the mouse still holds pitch, or grab full manual
-	-- control with W/S/A/D/Q/E. Based on the RAW key state so the override is immediate; the keyboard's
-	-- OWN contribution (kbPitch/…) still uses the smooth tap->ramp feel.
-	local aimGateP = 1 - math.abs(kb.pitch)
-	local aimGateR = 1 - math.abs(kb.roll)
-	local aimGateY = 1 - math.abs(kb.yaw)
-	inputState.pitch = math.clamp(kbPitch + aimApplied.pitch * aimGateP, -1, 1)
-	inputState.roll  = math.clamp(kbRoll  + aimApplied.roll  * aimGateR, -1, 1)
-	inputState.yaw   = math.clamp(kbYaw   + aimApplied.yaw   * aimGateY, -1, 1)
+	-- CS-1 (LOCKED — Chad 2026-06-30, "this can't change anymore"): KEYBOARD FULLY OVERRIDES MOUSE-AIM.
+	-- While ANY flight key (Q/W/E/A/S/D) is held, the mouse-aim cursor has ZERO pull on ALL THREE axes
+	-- (full manual keyboard flight) — so a held S makes a STRAIGHT loop instead of the aim autopilot
+	-- curving it back toward the cursor via roll/yaw. The instant every flight key is released, mouse-aim
+	-- resumes on all axes (you re-find the cursor by moving the mouse — intended, NOT a bug).
+	--   This is a GLOBAL gate, NOT per-axis. The previous per-axis version (1-|kb.axis|) suppressed only
+	--   the KEYED axis's aim and left roll/yaw aim-pull live during a pure-pitch loop, curving it off —
+	--   the exact bug Chad flagged. Do NOT re-add per-axis blending, and do NOT "solve" it by re-anchoring
+	--   the cursor. Raw kb.* (±1/0) so the override is immediate; kbPitch/… keep the tap->ramp feel.
+	local aimGate = (kb.pitch ~= 0 or kb.roll ~= 0 or kb.yaw ~= 0) and 0 or 1
+	inputState.pitch = math.clamp(kbPitch + aimApplied.pitch * aimGate, -1, 1)
+	inputState.roll  = math.clamp(kbRoll  + aimApplied.roll  * aimGate, -1, 1)
+	inputState.yaw   = math.clamp(kbYaw   + aimApplied.yaw   * aimGate, -1, 1)
 
 	-- 1e. FLAP THROTTLE (sticky): hold Shift to ramp UP-thrust, Ctrl to ramp DOWN-thrust; it HOLDS where
 	-- you set it (no decay), so you can set a climb power and fly the spiral hands-free on the mouse.
