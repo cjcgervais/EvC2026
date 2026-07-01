@@ -20,6 +20,13 @@ Read this first. It tells the next agent exactly where the project stands, the o
 >    QWEASD fought the aim autopilot. Now a per-axis gate (`1 - |kb.axis|`) **suppresses the mouse-aim command on any
 >    axis a flight key is held** → the keyboard cleanly OVERRIDES mouse-aim; release the key and aim resumes on that
 >    axis. Per-axis, so you can bank on the keyboard while the mouse still holds pitch. (`onFlightStep` input block.)
+>    - **⚠️ KNOWN FOLLOW-UP (Chad, right after, 2026-06-30):** he's now *"fighting the cursor position — in mouse mode
+>      if I press a key it disables cursor pull."* Root cause: while a keyboard axis has authority the mouse-aim command
+>      is suppressed, but the **world-anchored cursor doesn't move**, so on release the nose is yanked back toward the
+>      now-stale cursor → it feels like a fight. **FIX DIRECTION (don't revert keyboard authority — he wants BOTH):**
+>      while a key holds an axis, **re-anchor the aim virtual cursor to the current nose** on that axis (snap
+>      `aimVirtual`/`aimCursor` toward the boresight, or force a high `aimRecenterRate` on the overridden axis) so
+>      mouse-aim resumes from where you ARE, with no pull-back. See `computeMouseAim` + the per-axis gate in `onFlightStep`.
 > 3. **Flap energy retention (FIRST pass — the seed, not the answer).** New per-profile `flapDragRetention` (Eagle 0.6 /
 >    Crow 0.4): while actively flapping in **level/climb** flight (scoped OUT of dives so the loved stoop is untouched)
 >    it cancels part of the drag bleed so you hold/build speed through a soft climb. `flapThrust` bumped Eagle 800→900,
