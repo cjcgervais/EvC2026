@@ -248,6 +248,16 @@ function FlightPhysics:Update(dt, input)
 		-- DRAG polar: parasitic + induced(CL^2). Induced grows with lift^2 (~g-load^2), so
 		-- hard turns/climbs bleed energy. Drag is a force -> /mass (heavier eagle keeps energy).
 		local dragMag = (p.parasiticDrag + p.inducedDragK * cl * cl) * q
+		-- FLAP ENERGY RETENTION (player ask 2026-06-30, "BF-109 energy retention"): while actively
+		-- flapping (with stamina) in level/climb flight the beating wings cut the net energy bleed, so
+		-- you can HOLD or build speed through a soft climb instead of washing out — "greater inertia
+		-- while flapping / don't lose energy so readily." Scoped to NON-dive so the loved stoop is
+		-- untouched (a dive already carries its own flap fade). flapDragRetention is per-profile so
+		-- the eagle (energy fighter) retains more than the crow — a flight==balance lever. flapPow
+		-- scales it by wingbeat effort, and stamina still drains -> the climb ends from FATIGUE.
+		if wantFlap and look.Y > -0.2 and p.flapDragRetention then -- look.Y > -0.2 == not diving (matches self.isDiving below)
+			dragMag = dragMag * (1 - clamp(p.flapDragRetention * flapPow, 0, 0.95))
+		end
 		accel = accel - velDir * (dragMag / p.mass)
 	else
 		self.isStalling = true

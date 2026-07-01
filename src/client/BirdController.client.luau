@@ -158,14 +158,14 @@ local aimZoom = { active = false, factor = 0 }
 -- Free-look (Spacebar) — LAW: hold Space to look ALL AROUND while flying. The camera
 -- orbits the bird freely and MUST NEVER alter the flight input (it writes only freeLook.*,
 -- never inputState.*; flight controls are keyboard-only and `isDiving` reads the bird's nose,
--- not the camera — keep it that way). yaw accumulates unbounded -> full 360° horizontal; pitch
--- is clamped just short of the poles so you can look straight up/down/behind without gimbal flip.
-local FREE_LOOK_PITCH_LIMIT = 1.70 -- radians (~97°): look straight up/down AND a touch past, both ways (player
-                                   -- wanted more range toward the poles) — kept well under π so it never spins round
+-- not the camera — keep it that way). BOTH yaw and pitch accumulate UNBOUNDED (player ask 2026-06-30:
+-- "freelook all the way up and down, over and under") -> full 360° both ways. This is only safe because
+-- the camera up is carried through the orbit itself (see updateCamera), which has NO pole singularity —
+-- so there's nothing to clamp against and the view orbits smoothly through the whole vertical circle.
 local freeLook = {
 	active = false,
 	yaw    = 0, -- radians, horizontal orbit (unbounded -> 360°)
-	pitch  = 0, -- radians, vertical orbit (clamped to +/- FREE_LOOK_PITCH_LIMIT)
+	pitch  = 0, -- radians, vertical orbit (unbounded -> full over-the-top / under-the-belly)
 }
 
 -- Mouse-steer VIRTUAL STICK. The mouse is locked to center while flying; its deltas deflect
@@ -430,9 +430,10 @@ UserInputService.InputChanged:Connect(function(input, gameProcessed)
 	if freeLook.active then
 		local s = CAM.freeLookSensitivity * 0.01
 		freeLook.yaw   = freeLook.yaw   - input.Delta.X * s
-		-- Free-look pitch: mouse-up looks UP, mouse-down looks down (player re-inverted 2026-06-30). Yaw/pan
-		-- unchanged. The arrow-key pitch below is kept in sync (Up = look up) so both inputs agree.
-		freeLook.pitch = math.clamp(freeLook.pitch + input.Delta.Y * s, -FREE_LOOK_PITCH_LIMIT, FREE_LOOK_PITCH_LIMIT)
+		-- Free-look pitch INVERTED (player ask 2026-06-30 "invert the vertical component"): mouse-up looks
+		-- DOWN, mouse-down looks up. UNBOUNDED (no clamp) so you can orbit all the way up/down and over/under
+		-- (the orbit-derived up in updateCamera has no pole to flip on). Arrow-key pitch below stays in sync.
+		freeLook.pitch = freeLook.pitch - input.Delta.Y * s
 	end
 	-- (Mouse-aim reads the per-frame GetMouseDelta straight in computeMouseAim; nothing to accumulate here.)
 end)
@@ -443,9 +444,9 @@ RunService.RenderStepped:Connect(function(dt)
 	local s = CAM.freeLookSensitivity * 2.5 * dt
 	if UserInputService:IsKeyDown(Enum.KeyCode.Left)  then freeLook.yaw   = freeLook.yaw   + s end
 	if UserInputService:IsKeyDown(Enum.KeyCode.Right) then freeLook.yaw   = freeLook.yaw   - s end
-	-- Up/Down match the mouse pitch (player re-inverted): Up key looks UP (-s), Down key looks DOWN (+s).
-	if UserInputService:IsKeyDown(Enum.KeyCode.Up)    then freeLook.pitch = math.clamp(freeLook.pitch - s, -FREE_LOOK_PITCH_LIMIT, FREE_LOOK_PITCH_LIMIT) end
-	if UserInputService:IsKeyDown(Enum.KeyCode.Down)  then freeLook.pitch = math.clamp(freeLook.pitch + s, -FREE_LOOK_PITCH_LIMIT, FREE_LOOK_PITCH_LIMIT) end
+	-- Up/Down match the (now inverted) mouse pitch, also unbounded: Up key looks DOWN (+s), Down key looks UP (-s).
+	if UserInputService:IsKeyDown(Enum.KeyCode.Up)    then freeLook.pitch = freeLook.pitch + s end
+	if UserInputService:IsKeyDown(Enum.KeyCode.Down)  then freeLook.pitch = freeLook.pitch - s end
 end)
 
 --------------------------------------------------------------------------------
@@ -647,16 +648,17 @@ local function updateCamera(dt)
 		local pitchAxis = yawCF:VectorToWorldSpace(Vector3.xAxis) -- world-horizontal right, yaw-rotated
 		local orbit = CFrame.fromAxisAngle(pitchAxis, freeLook.pitch) * yawCF
 		cameraOffset = orbit:VectorToWorldSpace(cameraOffset)
-		-- HORIZON LOCK (player ask 2026-06-30: "when I bank, the free-look camera falls to the side — I'm
-		-- watching with my head tilted; if it could stay up that'd be great"). Rebuild the up vector FRESH
-		-- as world-up made perpendicular to the actual (orbited) view direction, instead of carrying the
-		-- chase up through the orbit. This makes the free-look horizon WORLD-LEVEL by construction — it can
-		-- never inherit the bird's roll, no matter how hard you bank while looking around. Near a straight
-		-- up/down look the projection degenerates, so we hold the last good up (no pop at the pole).
-		local viewDir = (cameraOffset.Magnitude > EPS) and cameraOffset.Unit or camUp
-		local level   = Vector3.yAxis - viewDir * viewDir.Y
-		camUp = (level.Magnitude > 0.15) and level.Unit or (cameraState.camUpPrev or camUp)
-		cameraState.camUpPrev = camUp
+		-- UP via the ORBIT itself (player ask 2026-06-30: "freelook all the way up and down, over and under").
+		-- Carry world-up through the SAME world-referenced orbit (yaw about world-Y, pitch about the world-
+		-- horizontal right) that placed the camera. Two properties fall out:
+		--   • the orbit is built ONLY from freeLook.yaw/pitch, never the bird's bank, so the horizon STILL
+		--     never inherits the bird's roll (the original HORIZON-LOCK intent is preserved); and
+		--   • unlike the old world-up PROJECTION, this has NO pole singularity — so the pitch is unbounded and
+		--     you orbit smoothly straight up, straight down, and fully OVER the top / UNDER the belly (the
+		--     world rolls past you as you go over, exactly like looking back over your shoulder past vertical).
+		-- lookAt can never degenerate here: the angle between this up and the (bird-facing) view direction is
+		-- invariant under the orbit, and the base offset is behind+above (never vertical), so up ⟂-ish to view.
+		camUp = orbit:VectorToWorldSpace(Vector3.yAxis)
 	end
 
 	local camPos  = position + cameraOffset
@@ -1077,9 +1079,19 @@ local function onFlightStep(dt)
 			aimGui.Enabled = false
 		end
 	end
-	inputState.pitch = math.clamp(kbPitch + aimApplied.pitch, -1, 1)
-	inputState.roll  = math.clamp(kbRoll  + aimApplied.roll,  -1, 1)
-	inputState.yaw   = math.clamp(kbYaw   + aimApplied.yaw,   -1, 1)
+	-- KEYBOARD AUTHORITY over mouse-aim (player ask 2026-06-30: "we lost keyboard authority over the
+	-- mouse — I want QWEASD to override mouse input during mouse-aim"). Per-axis: while a flight key is
+	-- HELD on an axis (raw kb.* = ±1), the keyboard OWNS that axis and the mouse-aim command is
+	-- suppressed on it (they no longer sum/fight); release the key and mouse-aim resumes on that axis.
+	-- So you can e.g. bank on the keyboard while the mouse still holds pitch, or grab full manual
+	-- control with W/S/A/D/Q/E. Based on the RAW key state so the override is immediate; the keyboard's
+	-- OWN contribution (kbPitch/…) still uses the smooth tap->ramp feel.
+	local aimGateP = 1 - math.abs(kb.pitch)
+	local aimGateR = 1 - math.abs(kb.roll)
+	local aimGateY = 1 - math.abs(kb.yaw)
+	inputState.pitch = math.clamp(kbPitch + aimApplied.pitch * aimGateP, -1, 1)
+	inputState.roll  = math.clamp(kbRoll  + aimApplied.roll  * aimGateR, -1, 1)
+	inputState.yaw   = math.clamp(kbYaw   + aimApplied.yaw   * aimGateY, -1, 1)
 
 	-- 1e. FLAP THROTTLE (sticky): hold Shift to ramp UP-thrust, Ctrl to ramp DOWN-thrust; it HOLDS where
 	-- you set it (no decay), so you can set a climb power and fly the spiral hands-free on the mouse.

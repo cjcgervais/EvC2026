@@ -2,7 +2,78 @@
 
 Read this first. It tells the next agent exactly where the project stands, the one decision that's already been made for you, and the prioritized work queue. Pair it with `CLAUDE.md` (architecture + contracts), `docs/RESEARCH.md` (why the numbers are what they are), and project memory (`MEMORY.md` index).
 
-> ## 🎯 AIM + CAMERA OVERHAUL — PLAYER-TUNED, COMMITTED & PUSHED (2026-06-30) — **THE authoritative cold-start state**
+> ## 🦅 SESSION 12 — FREE-LOOK / KEYBOARD-AUTHORITY / FLAP-ENERGY pass + NEW TOP ASK: WAR-THUNDER-ARCADE ENERGY RETENTION (2026-06-30) — **THE authoritative cold-start state**
+> Chad handed live testing notes across this session and I worked them. **Everything below is build-green (`build.ps1`)
+> but UNPLAYTESTED.** None of it reopened the aero-kernel *calibration* (the lift curve / gravity / stall math of the
+> loved, tagged `v1.0-eagle-flight`); it's camera, input-blend, and one bounded energy term. Committed on `master`.
+>
+> **What landed this session (all UNPLAYTESTED):**
+> 1. **Free-look = FULL vertical orbit (all the way up/down, over the top / under the belly).** The real limiter was
+>    NOT the pitch clamp — it was the HORIZON-LOCK, which built the camera up by projecting world-up ⟂ view direction
+>    and **degenerated at the poles** (froze on last-good up, so you could never pass straight up/down). Replaced with
+>    an **orbit-derived up** (`camUp = orbit:VectorToWorldSpace(Vector3.yAxis)` in `updateCamera`): no pole singularity,
+>    and because the orbit is built only from `freeLook.yaw/pitch` about WORLD axes it still never inherits the bird's
+>    bank (original horizon-lock intent preserved). Free-look pitch is now **unbounded** (removed the
+>    `FREE_LOOK_PITCH_LIMIT` constant + the `freeLookPitchLimit` config knob). Vertical was also **inverted** per Chad
+>    (mouse-up looks down). *Chad's earlier "raise the clamp" attempt failed precisely because the clamp was never the cap.*
+> 2. **Keyboard authority over mouse-aim (per-axis).** The input assembly was SUMMING `kbPitch + aimApplied.pitch`, so
+>    QWEASD fought the aim autopilot. Now a per-axis gate (`1 - |kb.axis|`) **suppresses the mouse-aim command on any
+>    axis a flight key is held** → the keyboard cleanly OVERRIDES mouse-aim; release the key and aim resumes on that
+>    axis. Per-axis, so you can bank on the keyboard while the mouse still holds pitch. (`onFlightStep` input block.)
+> 3. **Flap energy retention (FIRST pass — the seed, not the answer).** New per-profile `flapDragRetention` (Eagle 0.6 /
+>    Crow 0.4): while actively flapping in **level/climb** flight (scoped OUT of dives so the loved stoop is untouched)
+>    it cancels part of the drag bleed so you hold/build speed through a soft climb. `flapThrust` bumped Eagle 800→900,
+>    Crow 150→185. ⚠️ **Chad's next ask supersedes the SCOPE of this** — he wants retention EVEN WHEN NOT FLAPPING and
+>    aimed at the gravity bleed in climbs. Treat #3 as the starting point to GENERALIZE, not a finished feature.
+>
+> ### ▶ NEXT AGENT — TOP PRIORITY: WAR-THUNDER-ARCADE ENERGY RETENTION (Chad's exact ask, do this FIRST)
+> Chad, verbatim intent: *"way more energy retention **even when NOT flapping** — going straight I shouldn't bleed speed
+> so quick, especially climbing ~30° lose speed a LOT slower. Make it feel like **War Thunder arcade**: after a dive, as
+> long as you don't turn too much you can BOOM then ZOOM back up to a decent altitude without much loss. More energy in
+> the climb would let me fly **ascending defensive spirals** over an opponent I out-energy. Make the flight model better."*
+>
+> **Measurable target:** a boom-and-zoom that RECOVERS most of its altitude — dive to build speed, then zoom-climb back
+> near the start height IF you don't hard-turn; a 30° climb bleeds speed slowly; a sustained **ascending defensive
+> spiral** over a lower-energy target is achievable; and (flight==balance) the **crow can't do it as well** (the eagle
+> is the energy fighter — this asymmetry IS the 1-v-4 lever).
+>
+> **THE KEY PHYSICS INSIGHT (so you don't flail on drag knobs):** the dominant speed-bleed in a CLIMB is **gravity's
+> component along the flight path, not drag.** In `FlightPhysics:Update` gravity is a constant `(0,-GRAVITY,0)` (~L211);
+> at climb angle θ the along-path deceleration = `GRAVITY·sin θ`. With GRAVITY≈70 (GRAVITY_G=2.0) a **30° climb costs
+> ~35 studs/s² of pure gravity decel** — that's the fast bleed Chad feels. **Drag** (`(parasiticDrag + inducedDragK·CL²)
+> ·q / mass`, ~L250) is comparatively tiny in straight, low-CL flight, so **cutting drag alone will NOT deliver the
+> arcade feel.** Real energy conservation is exactly *why* a climb costs speed — WT **arcade** deliberately fudges it.
+> So the lever is an arcade **partial cancellation of the gravity-along-path bleed** in climbs (an "instructor / energy-
+> retention" term), not more drag-tuning.
+>
+> **Recommended approach — GENERALIZE #3 into ONE coherent energy model:**
+> - Add a **per-profile persistent `energyRetention` (0..1)**, NOT gated on flapping, that reduces the along-path
+>   gravity deceleration while climbing (nose/velocity above the horizon). Concretely: in the gravity/integrate step,
+>   take the gravity component projected onto `velocity.Unit` when climbing and add back `energyRetention ×` it (the
+>   arcade "your engine/inertia keeps your E"). **Eagle retention HIGH, Crow LOWER.**
+> - **Fold `flapDragRetention` into this** (or keep it as a small extra under-power bonus) — don't ship two overlapping
+>   half-mechanisms; make it one legible model with one or two knobs.
+> - Optionally trim `parasiticDrag` slightly for the "straight-line shouldn't bleed" note, but LEAD with the gravity lever.
+> - **Cap it (<1) and keep a cost** so it never reads as noclip — the stall/stamina limits and the service ceiling still apply.
+>
+> **Guardrails (do NOT skip — this touches the loved kernel):**
+> - **Checkpoint before editing** (`git commit`/tag). Revert points: this session's commit, and the tag `v1.0-eagle-flight`.
+> - **Do NOT reopen** the invariants: `cl0 > 0` stays (grip safety), auto-leveling stays OFF (`STABILITY_RATE=0`,
+>   `recoverNoseDownRate=0`), `GRAVITY_G=2.0`, keyboard-first. **stall < spawn < cruise must survive.**
+> - **Preserve the loved DIVE/stoop feel** (kept out of #3 on purpose) — energy retention must not make the dive floatier,
+>   break `diveSpeedCap`, or reopen the tuned `FLAP_DIVE_*` fade.
+> - **flight==balance on every number** — an eagle that keeps climb-energy is a stronger boom-and-zoomer, so re-verify 4
+>   crows can still corner/mob it. Per-profile `energyRetention` is the balance lever.
+> - Ground truth is **Chad's Studio Play** (build resolves but does NOT run Luau). ONE change, sweep live with Chad, THEN
+>   commit the chosen values. Develop via the **loop-orchestrator** skill (roblox-game profile).
+>
+> **Code pointers:** `FlightPhysics.luau:Update` — gravity term (~L211), drag polar (~L250), GRIP block (~L336);
+> `GameConfig.Profiles.Eagle/Crow` (add `energyRetention` as a structurally-symmetric key in BOTH profiles); the shared
+> `GameConfig.Flight` table for any global knob. Full design note in the **`flight-energy-retention-arcade`** memory.
+>
+> ---
+>
+> ## 🎯 AIM + CAMERA OVERHAUL — PLAYER-TUNED, COMMITTED & PUSHED (2026-06-30) — *(prior cold-start state; superseded by SESSION 12 above, still valid detail on the aim model)*
 > You are inheriting a project whose **flight and now its aim/camera feel are the crown jewels** — Chad has called the
 > flight "one of the coolest flight experiences I have experienced, no joke," and this session he live-tuned the
 > **mouse-aim + camera** to match, ending on "**it's good there**" / "works fantastic." All of it is committed on

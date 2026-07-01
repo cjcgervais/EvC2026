@@ -198,13 +198,20 @@ GameConfig.Profiles = {
 		-- live with the CROWS (numbers, possession, formation, collision trades) — Crow flap is NOT auto-scaled.
 		-- (Option B — a wingbeat-phase "felt surge" per downstroke — is the juicy follow-up to prototype live;
 		-- kept as continuous force here so it's safe to ship UNPLAYTESTED. Watch for porpoising if you add it.)
-		flapThrust = 800 * GRAV_SCALE,       -- forward force from a flap (600->800: more punch / faster re-accel — P2)
+		flapThrust = 900 * GRAV_SCALE,       -- forward force from a flap (800->900: "flapping should make you go a lot faster" — 2026-06-30)
 		flapClimbForce = 500 * GRAV_SCALE,   -- raised 400->500 (P2: "more power for flaps" -> stronger climb). Base was
 		                        -- ABOVE gravity (196); ×GRAV_SCALE keeps it above the new (lower) gravity by the same
 		                        -- ratio, so a flapping eagle keeps climbing even after a
 		                        -- steep climb has bled its airspeed (lift ~0) — a real eagle muscles up
 		                        -- on wingbeats, not airspeed. "Flap = climb" until stamina/ceiling. THE
 		                        -- climb-rate knob; mass-independent so the momentum tuning doesn't sap it.
+		-- FLAP ENERGY RETENTION (player ask 2026-06-30, "BF-109 energy retention"): fraction of the
+		-- drag bleed cancelled while actively flapping in level/climb flight (see FlightPhysics drag
+		-- block). 0.6 = the eagle keeps ~60% more of its energy under power, so it HOLDS/builds speed
+		-- through a soft (~14°) climb instead of washing out — the energy-fighter identity, dialled up.
+		-- Higher than the crow's on purpose (flight==balance). Stamina still drains, so climbs end from
+		-- fatigue, not become free. PLAYTEST-PROVISIONAL.
+		flapDragRetention = 0.6,
 		glideSpeed = 130,       -- comfortable cruise (high)
 		maxLevelSpeed = 170,
 		diveThrustBonus = 1.6,  -- thrust multiplier while diving (gravity also assists)
@@ -268,8 +275,12 @@ GameConfig.Profiles = {
 		recoverNoseDownRate = 0, -- past-stall auto-recovery DISABLED (no auto-level)
 
 		-- THRUST / SPEED -----------------------------------------------------
-		flapThrust = 150 * GRAV_SCALE,
+		flapThrust = 185 * GRAV_SCALE,       -- 150->185 (player ask 2026-06-30: crows should "maintain speed when climbing some" too — modest; level cap 140 < eagle 170 still protects the matchup)
 		flapClimbForce = 200 * GRAV_SCALE,   -- lower than the eagle: the crow is less of a climber (lower ceiling via climbCeilingBonus)
+		-- FLAP ENERGY RETENTION (see Eagle). LOWER (0.4 vs 0.6): the crow can hold speed through a gentle
+		-- climb "some" (player ask) but the eagle stays the superior energy fighter — the crow's game is
+		-- the tight turn + the ram, not out-running/out-climbing the eagle. flight==balance. PLAYTEST-PROVISIONAL.
+		flapDragRetention = 0.4,
 		glideSpeed = 95,
 		maxLevelSpeed = 140,    -- slightly slower top end than eagle in level flight
 		diveThrustBonus = 1.25,
@@ -495,6 +506,9 @@ GameConfig.Camera = {
 	-- Spacebar free-look: orbit the camera while the bird holds its flight path.
 	-- Raised 0.35 -> 0.7 (player ask 2026-06-30: free-look "gets stuck"/feels limiting — want a crisp,
 	-- near-1:1 War-Thunder-arcade pan). Drives both the mouse orbit (·0.01) and the arrow-key orbit (·2.5).
+	-- Free-look vertical range is UNBOUNDED (no knob): player ask 2026-06-30 "freelook all the way up and
+	-- down, over and under." Safe because the free-look camera up is carried through the orbit (BirdController
+	-- updateCamera) rather than projected from world-up, so there is no pole singularity to clamp against.
 	freeLookSensitivity = 0.7,
 	-- FREE-LOOK CRISPNESS (player ask 2026-06-30 "it feels like it gets stuck"). The orbit used to reuse the
 	-- heavy chase followSmoothing (0.18 ≈ 16%/frame) → the view crawled after the mouse ("molasses"). When
