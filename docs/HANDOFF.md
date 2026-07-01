@@ -20,13 +20,19 @@ Read this first. It tells the next agent exactly where the project stands, the o
 >    QWEASD fought the aim autopilot. Now a per-axis gate (`1 - |kb.axis|`) **suppresses the mouse-aim command on any
 >    axis a flight key is held** → the keyboard cleanly OVERRIDES mouse-aim; release the key and aim resumes on that
 >    axis. Per-axis, so you can bank on the keyboard while the mouse still holds pitch. (`onFlightStep` input block.)
->    - **⚠️ KNOWN FOLLOW-UP (Chad, right after, 2026-06-30):** he's now *"fighting the cursor position — in mouse mode
->      if I press a key it disables cursor pull."* Root cause: while a keyboard axis has authority the mouse-aim command
->      is suppressed, but the **world-anchored cursor doesn't move**, so on release the nose is yanked back toward the
->      now-stale cursor → it feels like a fight. **FIX DIRECTION (don't revert keyboard authority — he wants BOTH):**
->      while a key holds an axis, **re-anchor the aim virtual cursor to the current nose** on that axis (snap
->      `aimVirtual`/`aimCursor` toward the boresight, or force a high `aimRecenterRate` on the overridden axis) so
->      mouse-aim resumes from where you ARE, with no pull-back. See `computeMouseAim` + the per-axis gate in `onFlightStep`.
+>    - **🔒 LOCKED CONTROL SPEC — MUST FIX (Chad, 2026-06-30; my per-axis version is WRONG).** Chad, verbatim: *"even
+>      with the key depressed (say S to make a loop) I am not making a straight loop because the cursor is pulling me
+>      back to it where they meet. I want to disable the cursor altogether from having pull while pressing a key; when I
+>      let go I can find it easily because I'm moving it and I let go of the key that took its authority. This is a
+>      critical part of flight control I need this game to have. It can't change anymore."* **True root cause:** my gate
+>      is **PER-AXIS** — holding S suppresses PITCH aim but the aim autopilot STILL drives ROLL/YAW toward the cursor,
+>      so a pure-pitch loop gets curved off. **REQUIRED BEHAVIOR (locked):** while **ANY** flight key (Q/W/E/A/S/D) is
+>      held, the mouse-aim cursor has **ZERO pull on ALL axes** (full manual keyboard flight); the moment every flight
+>      key is released, mouse-aim resumes (he re-finds the cursor by moving the mouse — that's intended, NOT a bug).
+>      **FIX:** in `onFlightStep`, replace the per-axis gate with a **global** gate — if `kb.pitch~=0 or kb.roll~=0 or
+>      kb.yaw~=0` then zero the ENTIRE `aimApplied` contribution (all three axes) this frame. Do NOT re-add per-axis
+>      blending, and do NOT "solve" it by re-anchoring the cursor (that was my wrong guess — he wants the cursor to
+>      simply have no authority while a key is down). See the per-axis gate in `onFlightStep` (the `aimGateP/R/Y` block).
 > 3. **Flap energy retention (FIRST pass — the seed, not the answer).** New per-profile `flapDragRetention` (Eagle 0.6 /
 >    Crow 0.4): while actively flapping in **level/climb** flight (scoped OUT of dives so the loved stoop is untouched)
 >    it cancels part of the drag bleed so you hold/build speed through a soft climb. `flapThrust` bumped Eagle 800→900,
@@ -77,10 +83,37 @@ Read this first. It tells the next agent exactly where the project stands, the o
 > **Code pointers:** `FlightPhysics.luau:Update` — gravity term (~L211), drag polar (~L250), GRIP block (~L336);
 > `GameConfig.Profiles.Eagle/Crow` (add `energyRetention` as a structurally-symmetric key in BOTH profiles); the shared
 > `GameConfig.Flight` table for any global knob. Full design note in the **`flight-energy-retention-arcade`** memory.
->
-> ---
->
-> ## 🎯 AIM + CAMERA OVERHAUL — PLAYER-TUNED, COMMITTED & PUSHED (2026-06-30) — *(prior cold-start state; superseded by SESSION 12 above, still valid detail on the aim model)*
+
+---
+
+## 🔒 LOCKED FLIGHT-CONTROL SPECS + PROCESS DIRECTIVE (Chad, 2026-06-30 — READ BEFORE TOUCHING CONTROLS)
+
+**Chad's directive, in his words:** *"We need to start making features an SOP, lock in… significant aspects of the control need to be maintained and protected. If I ask for it to be a certain way we can't change it collaterally to do something else — we have to foresee and not compromise on the control of flight. My testing needs to be logged."* He is also considering **an agentic skill that manages these SOPs and keeps the game from going off the rails.**
+
+**What this means for you (hard rules):**
+1. **Flight-control behaviors Chad has specified are LOCKED.** Do not change, reinterpret, or "improve" them. Implement exactly what he asked.
+2. **No collateral changes.** Before ANY control/camera/input edit, check it against the LOCKED CONTROL SPECS registry below and reason about interactions — a change made "to do something else" must not alter a locked behavior as a side effect. (This exact failure just happened: adding keyboard-authority curved his loops via the still-active roll/yaw aim pull. See CS-1.)
+3. **Log every playtest note** here (append to the registry / a session block) with the outcome, so decisions are durable and not re-litigated.
+4. **When in doubt about a control's intended feel, ASK — don't guess.** A wrong guess that ships is worse than a question.
+5. *(Proposed, not yet built — do not build unless Chad asks)* a **control-spec guardian skill** that enforces this registry. Natural home: extend `loop_skill/` (the loop-orchestrator SOP set) with a control-spec check gate, or a new skill that lints control edits against this registry. Capture the idea; leave it for Chad to greenlight.
+
+### LOCKED CONTROL SPECS registry (protect these; grep before editing controls)
+Status key — **LOCKED**: player-confirmed, do not change · **SPECIFIED**: Chad-asked, implement exactly, pending his verify · **MUST-FIX**: specified but current code violates it.
+
+- **CS-1 — Keyboard fully overrides mouse-aim (cursor has ZERO pull while any flight key is held).** While ANY of Q/W/E/A/S/D is held, the mouse-aim cursor exerts **no pull on ANY axis** (full manual keyboard flight — e.g. a held S makes a *straight* loop); on full release, mouse-aim resumes (re-finding the cursor by moving the mouse is intended). **STATUS: MUST-FIX** — current code gates PER-AXIS so roll/yaw aim still curves keyed maneuvers. Fix = a GLOBAL gate in `onFlightStep` (see SESSION 12 item 2). **This one "can't change anymore" per Chad.**
+- **CS-2 — Free-look is a FULL vertical orbit (unbounded up/down, over the top / under the belly) and the horizon stays world-level when banking.** No pole flip, no clamp. STATUS: SPECIFIED (implemented S12 via orbit-derived up; unplaytested).
+- **CS-3 — Free-look vertical is INVERTED** (mouse-up = look down). STATUS: SPECIFIED (implemented S12; unplaytested).
+- **CS-4 — Free-look toggles on SPACE** (tap on/off; not hold), survives crow-swap. STATUS: LOCKED (session 9).
+- **CS-5 — NO auto-leveling.** The nose stays exactly where pointed; AoA changes ONLY on player input (`STABILITY_RATE=0`, both `recoverNoseDownRate=0`). STATUS: LOCKED (session 9, explicit Chad ask).
+- **CS-6 — Grip model "flies where you point"** (velocity follows the nose; requires `cl0>0` — never set `cl0=0`). This is what keeps it stall-free without auto-level. STATUS: LOCKED (`v1.0-eagle-flight`).
+- **CS-7 — Control mapping:** A=bank left / D=bank right; Q=yaw left / E=yaw right; W=pitch nose-down / S=nose-up; LeftShift=flap throttle up, LeftCtrl=down (sticky); LMB=strike; RMB=awareness zoom; wheel=eagle-distance zoom; F=formation; R=respawn; 1–4=possess crow. STATUS: LOCKED (see CLAUDE.md Controls).
+- **CS-8 — Mouse-aim = nose-chases-WORLD-cursor** (cursor is a world-anchored direction; the nose reticle chases and resolves on it; camera lags the heading). STATUS: LOCKED (player-tuned, `mouse-aim-pursuit-model` memory).
+
+> **Add new locked specs here as Chad confirms/specifies them. Never silently drop or reinterpret a row.**
+
+---
+
+## 🎯 AIM + CAMERA OVERHAUL — PLAYER-TUNED, COMMITTED & PUSHED (2026-06-30) — *(prior cold-start state; superseded by SESSION 12 above, still valid detail on the aim model)*
 > You are inheriting a project whose **flight and now its aim/camera feel are the crown jewels** — Chad has called the
 > flight "one of the coolest flight experiences I have experienced, no joke," and this session he live-tuned the
 > **mouse-aim + camera** to match, ending on "**it's good there**" / "works fantastic." All of it is committed on
