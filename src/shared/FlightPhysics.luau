@@ -396,9 +396,15 @@ function FlightPhysics:Update(dt, input)
 	----------------------------------------------------------------------------
 	-- 6. ENERGY / STAMINA + animation phase
 	----------------------------------------------------------------------------
-	if wantFlap or (wantDive and self.isDiving) then
-		local cost = (self.isDiving and p.staminaDiveCost or p.staminaFlapCost) * flapPow
-		self.stamina = math.max(0, self.stamina - cost * dt)
+	-- A DIVE IS A REST, NOT WORK (player ask 2026-06-30): a diving bird TUCKS and retracts its wings, so it
+	-- ISN'T actually flapping — it should spend NO stamina and RECOVER it while diving, gaining BOTH speed and
+	-- stamina. This holds even with the flap throttle held (Shift) or a powered tuck (Ctrl): in a dive the
+	-- flap intent doesn't translate to real wingbeats, so it must not bleed stamina ("it should preserve full
+	-- energy when in a dive"). Only ACTIVE flapping in NON-dive flight (level/climb) drains stamina — that's
+	-- the boom-and-zoom fatigue limiter. Everything else — glide AND dive — regenerates. staminaDiveCost is
+	-- now legacy/unused (a dive costs nothing); kept in config to avoid touching the profiles.
+	if wantFlap and not self.isDiving then
+		self.stamina = math.max(0, self.stamina - p.staminaFlapCost * flapPow * dt)
 	else
 		self.stamina = math.min(p.maxStamina, self.stamina + p.staminaRegen * dt)
 	end
