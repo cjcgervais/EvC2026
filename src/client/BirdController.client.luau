@@ -660,9 +660,18 @@ local function updateCamera(dt)
 		local behind = Vector3.new(chaseDir.X, 0, chaseDir.Z)
 		behind = (behind.Magnitude > EPS) and behind.Unit or Vector3.new(0, 0, 1)
 		local yawCF = CFrame.fromAxisAngle(Vector3.yAxis, freeLook.yaw)
-		local pitchAxis = yawCF:VectorToWorldSpace(Vector3.xAxis) -- world-horizontal right, yaw-rotated
-		local orbit = CFrame.fromAxisAngle(pitchAxis, freeLook.pitch) * yawCF
-		local dir = orbit:VectorToWorldSpace(behind)             -- unit bird->camera direction
+		-- Yaw-orbit the horizontal bird->camera direction about world-up.
+		local dirH = yawCF:VectorToWorldSpace(behind)            -- horizontal, yaw-rotated
+		-- Pitch (elevation) MUST rotate about THIS direction's own horizontal-right, not a fixed world-X.
+		-- BUGFIX (2026-07-01): the old pitchAxis = yawCF*xAxis was tied to world-X, so when the bird's heading
+		-- made `behind` line up with it, pitching rotated the view about its own axis and did nothing — up/down
+		-- pan worked or not depending on heading ("I can't pan up/down… has to be consistent"). Deriving the
+		-- axis from dirH makes elevation ALWAYS tilt up/down for any heading. Sign (yAxis × dirH) preserves the
+		-- prior CS-3 up/down mapping; camUp stays hard world-up (CS-2 upright); the 85° soft-stop clamp is applied
+		-- above. yaw orbit unchanged.
+		local pitchAxis = Vector3.yAxis:Cross(dirH)
+		pitchAxis = (pitchAxis.Magnitude > EPS) and pitchAxis.Unit or yawCF:VectorToWorldSpace(Vector3.xAxis)
+		local dir = CFrame.fromAxisAngle(pitchAxis, freeLook.pitch):VectorToWorldSpace(dirH) -- bird->camera dir
 		cameraOffset = dir * dist
 		camUp = Vector3.yAxis -- hard world-up: operator never rolls/inverts (lookAt levels the horizon)
 	end

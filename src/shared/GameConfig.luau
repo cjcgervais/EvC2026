@@ -383,6 +383,23 @@ GameConfig.Squad = {
 		separationWeight = 1.5,
 		alignmentWeight = 1.0,
 		cohesionWeight = 1.0,
+		-- GOAL (eagle-chase) weight — the MOBBING lever. Previously the goal term silently
+		-- reused cohesionWeight (1.0), so at close range separation (1.5×separationMul, up to
+		-- 2.1 in loose) OVERPOWERED the eagle-chase and the crows scattered instead of swarming
+		-- (playtest: "they get scared and fly away"). Set ABOVE separation so the 3 AI crows
+		-- close in and pressure the eagle from multiple angles; separation still spreads them
+		-- enough to surround rather than pile onto one point. Tune live: raise to mob tighter,
+		-- lower toward 1.0 if they clump/collide. flight==balance: this is a 1-v-4 pressure knob.
+		-- 2.0 with the orbit ON (Squad.mob.enabled). Must beat separation (up to 2.1 in loose) so the orbit
+		-- RING binds the crows to the eagle instead of them drifting off; SAFE to be strong because the goal
+		-- is the shell, not the eagle centre (strong = follow-the-ring, not ram). Raise toward 2.5 if they
+		-- still "flock off"; lower toward 1.5 if they clump on the ring.
+		-- (Prior note:) Now SAFE to raise (2.0) because the aggressive-squad goal is no longer the eagle's CENTRE — it's
+		-- an ORBIT-SHELL station point (see Squad.mob + GameServer mobOrbitTarget). So goal-seek being
+		-- strong makes crows FOLLOW THE SHELL / circle, not ram-and-crash. (Cranking it while the goal was
+		-- the eagle centre is what made 3 crash — 4 birds on one vector. Research: mobbing≠flocking, crows
+		-- are independent attackers that orbit+dive-bomb, cohesion DROPS. docs/RESEARCH-crow-mobbing.md.)
+		goalWeight = 2.0,
 		neighborRadius = 60,     -- studs; local perception
 		neighborFovDeg = 270,    -- field-of-view angle of the perception cone
 		maxSteerForce = 220,
@@ -417,6 +434,51 @@ GameConfig.Squad = {
 		maxDistance   = 350,  -- studs ceiling
 		spherePad     = 10,   -- extra studs of body radius for a wider berth
 		weight        = 3.0,  -- light nudge off imminent terrain — does NOT dominate the eagle-chase
+	},
+
+	-- AI FLIGHT GOVERNOR (all AI crows) — INCREMENT 0: make them FLY CONTROLLED before any mob geometry.
+	-- Playtest diagnosis (2026-07-01): crows fly "too fast — blow past, can't turn tight", then "fine, then
+	-- suddenly crash" into "terrain/spires AND the ground". Root cause: the boids input DIVES at the target
+	-- (dir.Y < -0.4 → dive → accelerates to the 220 dive-cap), so turn radius (v/ω) balloons and they overshoot
+	-- into terrain / sink into the ground on the pull-out. Fix = keep them near a controllable combat speed and
+	-- OUT of dives (diving is the eagle's game, not the crow's mob), + a soft altitude floor so a hard bank
+	-- doesn't sink them into the deck. Applied to every AI crow in updateAICrows AFTER steeringToInput.
+	aiFlight = {
+		enabled       = true,
+		combatSpeedMul = 1.2,  -- target speed = Crow.glideSpeed × this (95×1.2≈114). Above it, stop flapping to
+		                       -- bleed speed (parasitic drag) → tighter turns, no overshoot. Lower for tighter/slower.
+		suppressDive  = true,  -- crows never DIVE in the mob (that's what builds the runaway overshoot speed).
+		floorHeight   = 250,   -- studs; below this the crow is forced to climb (flap + nose up) so it can't sink
+		                       -- into flat ground while banking. (Spires are handled by horizontal avoidance.)
+		floorClimbPitch = 0.5, -- nose-up pitch applied under the floor (+ = climb, per steeringToInput sign).
+
+		-- AI AUTOPILOT — bank limit + turn coordination (fixes "crash when chased, losing control").
+		-- The flight engine has NO auto-level (the eagle's locked feel; crows inherit it), so when the
+		-- player chases, a crow rolls hard to reverse, reaches knife-edge, loses vertical lift and falls.
+		-- A human corrects this; the bot can't. This AI-ONLY assist caps the bank and adds up-elevator in
+		-- the turn so it stays controllable. Does NOT touch the player's no-auto-level (AI loop only).
+		autopilot     = true,
+		maxBankCos    = 0.5,   -- cos(bank limit). 0.5 ≈ 60° max bank; below this uprightness, leveling takes over.
+		levelAssist   = 3.0,   -- leveling roll gain (higher = snaps back to wings-level harder).
+		turnPitchUp   = 0.5,   -- up-elevator added ∝ bank so a banked turn holds altitude (coordinated turn).
+	},
+
+	-- MOBBING (aggressive bot crows only) — the biologically-grounded 1-v-4 model, INCREMENT 1.
+	-- Research (docs/RESEARCH-crow-mobbing.md): real corvids don't ram a raptor — they CIRCLE it
+	-- ("flying about the intruder") at a standoff distance and make staggered dive-bomb passes. So
+	-- instead of goal-seeking the eagle's CENTRE (4 birds → one vector → the pile-up/crash Chad saw),
+	-- each crow seeks a point on an ORBIT SHELL around the eagle and circles it (GameServer.mobOrbitTarget
+	-- feeds this as the boids goalPoint). Increment 2 will add the staggered dive-bomb + peel-off passes.
+	mob = {
+		enabled       = true,  -- Increment 1 orbit. ON now that AI flight control is fixed (governor +
+		                       -- autopilot → crows fly controlled, dogfight well). This binds each crow to a
+		                       -- standoff ring around the eagle so they MOB instead of "flocking off and going
+		                       -- far away" (playtest 2026-07-01). Needs goalWeight raised (below) to beat
+		                       -- separation. See docs/HANDOFF SESSION 14.
+		orbitRadius   = 220,  -- studs; standoff shell radius the crows circle at (tune: smaller = tighter/more pressure, larger = safer)
+		orbitHeightBias = 40, -- studs; sit slightly ABOVE the eagle (attack-from-above prep for the dive-bomb in increment 2)
+		orbitLead     = 170,  -- studs; tangential lead point along the ring → how fast they circle (0 = just hold station)
+		clumpSpread   = true, -- give each crow its own bearing/handedness so they surround from multiple angles, not stack
 	},
 }
 

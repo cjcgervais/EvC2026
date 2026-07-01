@@ -1315,7 +1315,38 @@ local function squadGoal(squad)
 	if enemy then
 		goal = enemy.body.Position
 	end
-	return goal, possessed
+	-- Also return the enemy entry: aggressive bot crows orbit it (mobOrbitTarget) rather than
+	-- ram its centre. nil when no enemy is in range (fall back to plain rally-goal steering).
+	return goal, possessed, enemy
+end
+
+-- MOBBING orbit target (increment 1) — real corvids CIRCLE a raptor at a standoff distance instead of
+-- charging its centre (docs/RESEARCH-crow-mobbing.md). Given the eagle position and this crow's
+-- position, return a boids goal POINT on an orbit shell that (a) pulls the crow IN to orbitRadius when
+-- outside it / holds it OUT when inside, (b) leads tangentially so the crow circles the ring, and (c)
+-- sits slightly above (attack-from-above prep). `handed` (±1) sets circling direction — a consistent
+-- sign per crow means crows on the ring chase the same way and never close head-on.
+local function mobOrbitTarget(eaglePos, crowPos, handed)
+	local cfg = GameConfig.Squad.mob
+	local orbitR = cfg.orbitRadius or 220
+	-- Radial (eagle -> crow), flattened to horizontal so the ring is a level circle around the eagle.
+	local radial = crowPos - eaglePos
+	radial = Vector3.new(radial.X, 0, radial.Z)
+	if radial.Magnitude < 1e-3 then
+		radial = Vector3.new(1, 0, 0) -- degenerate: crow directly above/below → pick an arbitrary bearing
+	end
+	radial = radial.Unit
+	-- Tangent = horizontal perpendicular to the radial; `handed` picks the circling direction.
+	local tangent = radial:Cross(Vector3.yAxis)
+	if tangent.Magnitude < 1e-3 then
+		tangent = Vector3.new(0, 0, 1)
+	end
+	tangent = tangent.Unit * (handed >= 0 and 1 or -1)
+	-- Station point on the shell at this crow's current bearing, + a tangential lead to keep it moving
+	-- around the circle, + a small upward bias to sit above the eagle.
+	local station = eaglePos + radial * orbitR
+	local lead = tangent * (cfg.orbitLead or 170)
+	return station + lead + Vector3.new(0, cfg.orbitHeightBias or 40, 0)
 end
 
 -- Build the neighbor list (other living squad members) for boids.
@@ -1372,8 +1403,13 @@ local function updateAICrows(dt)
 	local formations = GameConfig.Squad.formations
 
 	for _, squad in pairs(Squads) do
-		local goal = squadGoal(squad)
+		local goal, _possessed, enemy = squadGoal(squad)
 		local formationCfg = formations[squad.formationName] or formations.loose
+		-- MOBBING (increment 1): an aggressive bot squad with a live eagle orbits it instead of ramming.
+		-- Gated OFF (Squad.mob.enabled=false) — orbit geometry didn't fix scatter+crash; root cause is
+		-- AI flight control (crows can't hold a banked turn). Flag stays for when that's fixed.
+		local mobbing = GameConfig.Squad.mob.enabled and squad.aggressive and enemy ~= nil
+		local eaglePos = mobbing and enemy.body.Position or nil
 
 		for idx, model in ipairs(squad.members) do
 			local entry = Birds[model]
@@ -1389,7 +1425,16 @@ local function updateAICrows(dt)
 					velocity = body.AssemblyLinearVelocity,
 				}
 				local neighbors = squadNeighbors(squad, entry)
-				local steer = Boids.computeSteering(selfState, neighbors, goal, formationCfg)
+				-- Replace the raw eagle-centre goal with an orbit-shell station point so the crow
+				-- circles the eagle at standoff distance (mob, don't ram). CONSISTENT circling
+				-- direction for the whole squad → a rotating train spaced by separation, never a
+				-- head-on closure; coverage from multiple bearings comes from their distinct start
+				-- positions on the ring.
+				local memberGoal = goal
+				if mobbing then
+					memberGoal = mobOrbitTarget(eaglePos, body.Position, 1)
+				end
+				local steer = Boids.computeSteering(selfState, neighbors, memberGoal, formationCfg)
 				-- Obstacle avoidance (#8): bias steering away from imminent terrain so the crow
 				-- arcs around spires/ground instead of crashing while it hunts. AI-only by construction.
 				local avoidDir, urgency = avoidObstacle(entry)
@@ -1399,6 +1444,52 @@ local function updateAICrows(dt)
 					steer = steer + avoidDir * base * (GameConfig.Squad.avoidance.weight or 3.5) * urgency
 				end
 				local input = Boids.steeringToInput(body.CFrame, body.AssemblyLinearVelocity, steer, entry.profile)
+
+				-- AI FLIGHT GOVERNOR (increment 0): the boids mapping dives at its target and rockets to
+				-- the dive-cap, so crows overshoot into terrain / sink into the ground (playtest 2026-07-01:
+				-- "too fast, can't turn tight… fine then suddenly crash into terrain and the ground"). Keep
+				-- them near a controllable combat speed and out of dives so their turn radius stays tight and
+				-- they don't plow into the deck. AI-only (this loop never runs the player's crow).
+				local af = GameConfig.Squad.aiFlight
+				if af and af.enabled then
+					local sp = body.AssemblyLinearVelocity.Magnitude
+					local combatSpeed = (entry.profile.glideSpeed or 95) * (af.combatSpeedMul or 1.2)
+					if af.suppressDive then
+						input.dive = false
+					end
+					if sp > combatSpeed then
+						-- Too fast → bleed: stop flapping and don't hold a nose-down that would re-accelerate.
+						input.flap = false
+						if input.pitch < 0 then input.pitch = input.pitch * 0.3 end
+					end
+					-- Soft altitude floor: don't sink into the ground while banking hard.
+					if body.Position.Y < (af.floorHeight or 250) then
+						input.flap = true
+						input.dive = false
+						input.pitch = math.max(input.pitch, af.floorClimbPitch or 0.5)
+					end
+
+					-- AI AUTOPILOT: bank limit + turn coordination. The engine has no auto-level, so a
+					-- hard chase-reversal rolls the crow to knife-edge → it loses vertical lift and falls
+					-- ("crash when chased, losing control"). Cap the bank and coordinate the turn. AI-only.
+					if af.autopilot then
+						local cf = body.CFrame
+						local upY = cf.UpVector.Y                 -- 1 wings-level, 0 knife-edge, <0 inverted
+						-- Leveling roll command: +roll raises the right wing, so -RightVector.Y levels.
+						local levelRoll = math.clamp(-cf.RightVector.Y * (af.levelAssist or 3.0), -1, 1)
+						local maxBankCos = af.maxBankCos or 0.5
+						if upY < maxBankCos then
+							-- Past the bank limit → leveling dominates so it can't knife-edge/spin.
+							input.roll = levelRoll
+						elseif upY < 0.85 then
+							-- Moderately banked → blend leveling in so it doesn't creep to knife-edge.
+							input.roll = math.clamp(input.roll * 0.7 + levelRoll * 0.3, -1, 1)
+						end
+						-- Coordinated turn: add up-elevator ∝ bank so the turn holds altitude, not sinks.
+						local bank = 1 - math.abs(upY)
+						input.pitch = math.clamp(input.pitch + bank * (af.turnPitchUp or 0.5), -1, 1)
+					end
+				end
 
 				-- Run the SAME flight engine the player uses, then write the result back
 				-- to the server-owned part (server simulates these birds).

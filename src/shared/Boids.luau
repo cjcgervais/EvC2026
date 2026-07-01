@@ -139,9 +139,11 @@ function Boids.computeSteering(self, neighbors, goalPoint, formationCfg)
 	steer = steer + separation * (B.separationWeight * separationMul)
 	steer = steer + alignment  * B.alignmentWeight
 	steer = steer + cohesion   * (B.cohesionWeight * cohesionMul)
-	-- Goal reuses cohesion weight (it is a long-range cohesion toward the squad point)
-	-- but is intentionally not formation-scaled so crows still rally when spread out.
-	steer = steer + goal * B.cohesionWeight
+	-- Goal (eagle-chase) uses its OWN weight — the mobbing lever — so it can DOMINATE
+	-- separation and pull the swarm onto the eagle (was pinned to cohesionWeight=1.0, which
+	-- separation overpowered at close range → the crows scattered). Not formation-scaled so
+	-- crows still rally hard when spread out. Falls back to cohesionWeight if goalWeight unset.
+	steer = steer + goal * (B.goalWeight or B.cohesionWeight)
 
 	-- Clamp to the max steering force the flight model can meaningfully chase.
 	return clampMagnitude(steer, B.maxSteerForce)
