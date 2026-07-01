@@ -2,6 +2,49 @@
 
 Read this first. It tells the next agent exactly where the project stands, the one decision that's already been made for you, and the prioritized work queue. Pair it with `CLAUDE.md` (architecture + contracts), `docs/RESEARCH.md` (why the numbers are what they are), and project memory (`MEMORY.md` index).
 
+> ## 🎯 AIM + CAMERA OVERHAUL — PLAYER-TUNED, COMMITTED & PUSHED (2026-06-30) — **THE authoritative cold-start state**
+> You are inheriting a project whose **flight and now its aim/camera feel are the crown jewels** — Chad has called the
+> flight "one of the coolest flight experiences I have experienced, no joke," and this session he live-tuned the
+> **mouse-aim + camera** to match, ending on "**it's good there**" / "works fantastic." All of it is committed on
+> `master` and pushed to `origin` (commit **`Aim overhaul: nose-chases-world-cursor…`**). **None of it touched the
+> `v1.0-eagle-flight` aero kernel** — it's input-shaping, camera, and HUD only, so the loved flight model is intact.
+>
+> **The settled aim model (do not silently revert — it cost many iterations to land):** the **cursor is a
+> WORLD-anchored direction** you swing with the mouse out to a big cone (the reachable circle) and it **stays put**;
+> the bird's **NOSE (amber reticle, projected far out front) is the dependent thing that chases the cursor** and
+> lands on it when it catches up. It **resolves** (unlike a screen-anchored cursor, which turns forever because the
+> chase cam re-centres the nose). Catch-up is **snappy for small deflections, rate-limited by the eagle's turn/yaw
+> rate for big ones** (gains saturate the command). The **camera follows the heading with an exponential LAG** in
+> aim mode so the cursor hangs out on screen and the nose visibly lags/chases it (not a rubber-band back to centre);
+> its up vector is **parallel-transported** so loops don't pole-flip and rolls don't spin the camera. Mouse-aim uses
+> a **fixed chase distance** (zoom-independent). **Free-look:** cursor+reticle **fuse on the beak**. **RMB zoom:**
+> focuses **into the reticle** (live beak direction) and fades the eagle. Full rationale is in the commit body and
+> the **`mouse-aim-pursuit-model`** memory (updated).
+>
+> **▶ THE FEEL KNOBS** (all in `GameConfig`, one-line sweeps — Chad tunes these live, so know them):
+> `Controls.aimAnglePerPixel` (cursor speed) · `aimPitchGain`/`aimRollGain` + `aimPitchDamp`/`aimRollDamp`
+> (catch-up snappiness vs overshoot) · `aimLeadScreenFrac`/`aimMaxLeadDeg` (reachable-circle size) ·
+> `Camera.mouseAimDistance` (aim pull-back, now 135) · `Camera.aimHeadingLag` (how long the cursor hangs out /
+> nose lags) · `Camera.followSmoothing` (overall camera glide) · `Camera.loopVertStart`/`loopVertBand`/`horizonLevelRate`
+> (loop-camera). Reticle sizes are `noseMarker`/`aimDot` in `BirdController`.
+>
+> **▶ NEXT — the frontier is COMBAT and the 1-v-4, not the aim/flight (those are landing).** In priority order:
+> 1. **Playtest the STRIKE.** It's fully wired and **audited correct this session** (LMB → server auto-picks
+>    beak-vs-talon by which zone the nearest enemy is in; talon belly-arc swings with bank; per-zone timers) but is
+>    **UNPLAYTESTED**. Verify the right zone lights (crow below = TALON, ahead = BEAK) and clicks throw it. ⚠️ Watch
+>    the **1-v-4**: talon 4 s active / 2 s cd ≈ 67% uptime flirts with the >50% "always-on" guardrail — if it plays
+>    eagle-favoured, cut talon `duration` / widen `cooldown` / drop offensive damage FIRST (`GameConfig.Combat`).
+> 2. **Un-defer the MAP** (already built — 16k arena + spires + thermals; Chad deferred it "until the strike feels
+>    right," which is now close) and **verify the AI crows MOB** (code is the gentle/non-lethal version; needs a Play).
+> 3. **Tune the 1-v-4 matchup** — the Crow side + collision trades are the last big design frontier. Flight==balance:
+>    reason about the whole 1-eagle-vs-4-crow fight on every number (`feedback-flight-balance-inseparable`).
+>
+> **How to fly it yourself:** you can't — only Chad's Studio Play validates. `build.ps1` resolves wiring but does NOT
+> run Luau. So: reason hard, make ONE change at a time, keep `build.ps1` green, and tee up crisp playtest checklists.
+> The bar Chad holds is high and worth it — the flight/aim feel is genuinely special. Make the combat live up to it. 🦅
+>
+> ---
+>
 > ## ✅ STRIKE MECHANISM REWORKED (2026-06-30, build-green, UNPLAYTESTED) → `docs/HANDOFF-reticle-map.md`
 > After a first pass at the reticles, Chad redesigned the strike model (commit on `master`): **(a)** beak reticle
 > re-COUPLED to the aim-error so **cursor-centred = straight & level** (the prior decoupled draw dove at centre);
