@@ -192,13 +192,11 @@ local aimCursor = { x = 0, y = 0, cursorX = 0, cursorY = 0, noseX = 0, noseY = 0
 -- bird follows the reticle softly/flightily rather than snapping. Summed with keyboard in onFlightStep.
 local aimApplied = { pitch = 0, roll = 0, yaw = 0 }
 
--- SELF-CENTERING VIRTUAL AIM CURSOR (relative mouse). The mouse DELTA pushes this offset (from screen centre,
--- i.e. from the nose cross) out; it eases back toward centre every frame at Controls.aimRecenterRate. So a held
--- deflection RESOLVES — the bird coordinated-turns toward where you pushed, the cursor returns to the nose, and
--- the bird STRAIGHTENS (instead of turning forever; Chad 2026-06-30). Continuous mouse movement balances the
--- decay into a sustained turn/loop. resetInput() recentres it. (Restores the original virtual-stick intent —
--- see the InputChanged comment — that had been replaced by a never-resolving absolute-cursor read.)
-local aimVirtual = Vector2.new(0, 0)
+-- NOSE-CHASES-CURSOR aim (2026-06-30). aimTargetDir is the CURSOR as a WORLD direction: the mouse swings it away
+-- from the nose (out to a big cone = the reachable circle) and it STAYS where you put it. The bird's NOSE — the
+-- amber reticle, projected far out front — is the dependent thing: it chases the cursor and, when it catches up,
+-- the beak points right at the cursor. nil until seeded to the current nose; resetInput() recentres it.
+local aimTargetDir = nil
 
 -- Tap->ramp smoothing for roll and yaw (mirrors pitchRamp) so keyboard banking eases in.
 local rollRamp = { sign = 0, mag = 0 }
@@ -229,7 +227,7 @@ end
 local noseMarker = Instance.new("Frame")
 noseMarker.Name = "Nose"
 noseMarker.AnchorPoint = Vector2.new(0.5, 0.5)
-noseMarker.Size = UDim2.fromOffset(34, 34)
+noseMarker.Size = UDim2.fromOffset(18, 18) -- SMALL reticle: nests inside the larger cursor ring with a gap buffer
 noseMarker.BackgroundTransparency = 1
 noseMarker.Parent = aimGui
 local noseStroke -- hoisted: the FORWARD strike lights this hot (see paintStrikeReticles)
@@ -249,7 +247,7 @@ end
 local aimDot = Instance.new("Frame")
 aimDot.Name = "Cursor"
 aimDot.AnchorPoint = Vector2.new(0.5, 0.5)
-aimDot.Size = UDim2.fromOffset(22, 22)
+aimDot.Size = UDim2.fromOffset(48, 48) -- OUTER cursor ring: houses the small nose reticle inside it with a gap when aligned
 aimDot.BackgroundTransparency = 1
 aimDot.Parent = aimGui
 do
@@ -331,7 +329,7 @@ local function setFreeLook(active)
 	else
 		-- Returning to mouse-aim: recentre the virtual cursor so the bird doesn't lurch from a stale deflection,
 		-- and re-lock the mouse (onFlightStep will keep it LockCenter'd for the relative-delta aim read).
-		aimVirtual = Vector2.new(0, 0)
+		aimTargetDir = nil
 		UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
 	end
 end
@@ -523,6 +521,11 @@ local function updateCamera(dt)
 	local speedBase = CAM.baseDistance + speed * CAM.speedDistanceFactor
 	cameraState.userZoom = math.clamp(cameraState.userZoom, minDist - speedBase, maxDist - speedBase)
 	local targetDistance = math.clamp(speedBase + cameraState.userZoom, minDist, maxDist)
+	-- MOUSE-AIM = a STRICT FIXED chase distance (player ask): the wheel zoom must not change the view or the turn
+	-- authority in aim mode. Free-look keeps the variable/zoomed distance.
+	if GameConfig.Controls and GameConfig.Controls.mouseAim and not freeLook.active then
+		targetDistance = CAM.mouseAimDistance or CAM.baseDistance or 40
+	end
 	cameraState.currentDistance = cameraState.currentDistance
 		+ (targetDistance - cameraState.currentDistance) * 0.1
 
@@ -549,7 +552,25 @@ local function updateCamera(dt)
 		local blended = lookVec:Lerp(velocity.Unit, CAM.lookAheadFactor or 0.3)
 		if blended.Magnitude > EPS then followDir = blended.Unit end
 	end
-	local desiredChase = -followDir
+	-- MOUSE-AIM CAMERA LAG: in aim mode the camera follows a LAGGED heading, so a quick cursor-driven turn leaves
+	-- the world-anchored cursor OUT on screen (the nose visibly lags and chases it across the screen) instead of
+	-- the view snapping to the new heading and dragging the cursor back to centre (player: "the cursor gets pulled
+	-- back to the reticle — it should be a continuous lag/chase"). aimHeadingLag = how fast the camera catches up
+	-- to the bird's heading (LOWER = the cursor hangs out there longer, the nose lags more). Free-look/chase-only
+	-- flight are unaffected.
+	local headingRef = followDir
+	if GameConfig.Controls and GameConfig.Controls.mouseAim and not freeLook.active then
+		-- EXPONENTIAL ease (not a constant-rate slew): the view glides toward the heading and eases out at the
+		-- end instead of stopping abruptly, so the catch-up reads smooth (player: "the camera needs to be smoother").
+		local prevAim = cameraState.aimHeading or followDir
+		local aAim = math.clamp(1 - math.exp(-(CAM.aimHeadingLag or 1.4) * dt), 0, 1)
+		local blendedAim = prevAim:Lerp(followDir, aAim)
+		cameraState.aimHeading = (blendedAim.Magnitude > EPS) and blendedAim.Unit or followDir
+		headingRef = cameraState.aimHeading
+	else
+		cameraState.aimHeading = nil
+	end
+	local desiredChase = -headingRef
 	cameraState.chaseDir = cameraState.chaseDir or desiredChase
 	-- FREEZE the chase basis while free-looking so the view is WORLD-referenced (holds its aspect while the
 	-- bird loops); only track the bird's motion when NOT free-looking. Without this the base offset kept
@@ -571,31 +592,44 @@ local function updateCamera(dt)
 	cameraState.prevLook = cf.LookVector
 	local crestBlend = math.clamp(angRate / (CAM.crestAngRate or 3.0), 0, 1)
 
-	-- Camera-up = world-up made perpendicular to the chase direction: keeps the horizon level in normal
-	-- flight and tilts CONTINUOUSLY as the chase goes vertical (so CFrame.lookAt never degenerates). Near
-	-- the pole (chase ~ straight up/down) we hold the last good up so it can't pop.
-	local worldUp = Vector3.yAxis - chaseDir * chaseDir.Y
-	if worldUp.Magnitude < 0.15 then
-		worldUp = cameraState.camUpPrev or Vector3.yAxis
-	else
-		worldUp = worldUp.Unit
+	-- CAMERA UP via PARALLEL TRANSPORT along the chase direction (2026-06-30 rework). Replaces (a) the world-up
+	-- perpendicular construction that DEGENERATED at the pole and flipped the view over a loop, and (b) the
+	-- cf.UpVector lean that made the camera SPIN during a barrel/snap roll. Each frame we carry the previous up
+	-- along the ROTATION OF THE CHASE DIRECTION (the flight-path direction), then re-orthogonalize:
+	--   • a LOOP rotates the flight path through vertical -> the up transports over the top -> NO flip;
+	--   • a barrel/snap ROLL barely moves the flight-path direction -> the up holds steady -> you WATCH the bird
+	--     roll instead of the camera spinning (player ask 2026-06-30); and there is NO pole singularity.
+	-- A gentle relax toward world-level self-levels the horizon in ordinary flight, FADED OUT as the flight path
+	-- goes vertical (verticality) so it can never yank the up to the degenerate world reference mid-loop.
+	local prevChase = cameraState.chaseDirPrev or chaseDir
+	local up = cameraState.camUp
+	if not up then
+		up = Vector3.yAxis - chaseDir * chaseDir.Y
+		up = (up.Magnitude > 0.15) and up.Unit or Vector3.zAxis
 	end
-	cameraState.camUpPrev = worldUp
-
-	-- LOOP TURN-OVER (player ask 2026-06-30: "in mouse mode, doing a loop the camera should turn over
-	-- smoother/better"). Over a fast loop CREST, lean the camera up toward the BIRD'S own up so the camera
-	-- rolls AROUND with the bird and arcs over the top smoothly (bird stays oriented in frame), instead of the
-	-- horizon staying world-flat while the bird inverts in front of you. crestBlend gates it: ZERO in normal
-	-- flight (horizon stays perfectly level — no change there), ramping in only as the loop whips over the top.
-	-- Camera-only; chaseDir (the no-snap basis) is untouched, so no azimuth snap is reintroduced.
-	local camUp = worldUp
-	if not freeLook.active and (CAM.loopFollowUp or 0) > 0 then
-		local t = crestBlend * CAM.loopFollowUp
-		if t > EPS then
-			local blended = worldUp:Lerp(cf.UpVector, t)
-			camUp = (blended.Magnitude > 0.05) and blended.Unit or (cameraState.camUpPrev or worldUp)
+	local dotc = math.clamp(prevChase:Dot(chaseDir), -1, 1)
+	if dotc < 0.999999 then
+		local axis = prevChase:Cross(chaseDir)
+		if axis.Magnitude > 1e-6 then
+			up = CFrame.fromAxisAngle(axis.Unit, math.acos(dotc)):VectorToWorldSpace(up)
 		end
 	end
+	up = up - chaseDir * up:Dot(chaseDir)               -- re-orthogonalize against the chase direction
+	up = (up.Magnitude > 1e-4) and up.Unit or (cameraState.camUp or Vector3.yAxis)
+	-- Self-level toward world-up (perp to the chase), faded out as the path goes vertical (a loop) so it never
+	-- pulls the camera to the degenerate reference over the top. verticality = |followDir.Y| (0 level, 1 up/down).
+	local levelRef = Vector3.yAxis - chaseDir * chaseDir.Y
+	if not freeLook.active and levelRef.Magnitude > 0.15 then
+		levelRef = levelRef.Unit
+		local verticality = math.abs(followDir.Y)
+		local levelGate = 1 - math.clamp((verticality - (CAM.loopVertStart or 0.5)) / math.max(0.05, CAM.loopVertBand or 0.4), 0, 1)
+		local relax = math.clamp((CAM.horizonLevelRate or 2.0) * dt * levelGate, 0, 1)
+		local blended = up:Lerp(levelRef, relax)
+		up = (blended.Magnitude > 1e-4) and blended.Unit or up
+	end
+	cameraState.camUp = up
+	cameraState.chaseDirPrev = chaseDir
+	local camUp = up
 
 	-- Height ratio grows with zoom for a higher, more top-down view when wheeled out.
 	local hBase   = CAM.heightFactor or 0.25
@@ -630,11 +664,21 @@ local function updateCamera(dt)
 	-- forward-leaning, lead-the-target feel). camUp is the continuous up reference -> no inverted roll snap.
 	-- In free-look, look straight at the bird (no flight-path lead) so the orbit is fully world-referenced
 	-- and the look target doesn't wobble as the bird's heading swings through a loop; lead only in chase mode.
-	-- The look target stays CENTRED ON THE HEADING (chase) / the panned view (free-look) — the right-click
-	-- zoom does NOT swing it toward the cursor (that offset the zoom AND, because mouse-aim steers off the
-	-- live camera projection, fed back into flight). The zoom is purely FOV magnify + eagle-fade now, and the
-	-- steering is suspended while zooming (onFlightStep), so right-click is awareness-only — it never flies you.
-	local lookTarget = freeLook.active and position or (position + followDir * (dist * 0.12))
+	-- Look target: centred on the HEADING (chase) / the bird (free-look). RIGHT-CLICK ZOOM FOCUSES INTO THE AIM
+	-- RETICLE (player ask): as the zoom engages, the look swings to look FAR along the bird's BEAK direction
+	-- (cf.LookVector — the reticle), so the telescope magnifies the AIM POINT and the bird (which fades) is no
+	-- longer the focus. Using the LIVE beak direction (not the frozen aim cursor, which stops updating while zoom
+	-- suspends steering) makes the zoom centre FOLLOW THE RETICLE as you fly. Steering is suspended while zooming,
+	-- so this look swing can't feed back into flight.
+	local lookTarget
+	if freeLook.active then
+		lookTarget = position
+	else
+		lookTarget = position + headingRef * (dist * 0.12)
+		if aimZoom.factor > 1e-3 then
+			lookTarget = lookTarget:Lerp(position + cf.LookVector * 2000, aimZoom.factor)
+		end
+	end
 	local targetCF = CFrame.lookAt(camPos, lookTarget, camUp)
 
 	-- Bank tilt: roll the camera slightly with the bird in a turn, but FADE it out as the bird inverts
@@ -826,63 +870,37 @@ local function computeMouseAim(dt)
 	local vp = camera.ViewportSize
 	if not vp or vp.Y < 2 then return 0, 0, 0 end
 
-	-- Project the BEAK RETICLE (boresight): a point just out front of the beak. Drawing the cross AND computing
-	-- the aim error from the SAME point is what makes "cursor centred on the cross == straight & level flight"
-	-- (the controller is differential: cursor relative to the cross = the commanded rotation; cursor ON the cross
-	-- = zero rotation = hold attitude). This is COUPLED to beakReticleDistance now — moving it changes ONLY where
-	-- the neutral cursor sits, NOT the per-pixel feel (the error is a screen-space angle between two camera rays,
-	-- independent of the projection distance), so the loved gains carry over. (The old 600-stud DECOUPLED draw
-	-- dove at centre: the cross was drawn at the beak but the error referenced 600 studs out — Chad's bug.)
+	-- NOSE-CHASES-CURSOR aim (2026-06-30). The CURSOR is a WORLD direction (aimTargetDir): the mouse swings it away
+	-- from the nose, out to a big CONE (the reachable circle), and it STAYS where you put it. The bird's NOSE — the
+	-- amber reticle, projected far out front — is the dependent thing: it CHASES the cursor and, when it catches up
+	-- (at the bird's own turn/pitch/yaw rate — FlightPhysics rate-limits it), the beak points right at the cursor.
+	-- Because the cursor is fixed in the WORLD (not the screen), the nose can actually CATCH it and the command
+	-- falls to zero (a screen-anchored cursor can't — the chase cam re-centres the nose so it never catches).
+	-- Command is body-relative to the NOSE, so cursor-on-nose = straight and the reticle lands exactly on the cursor.
 	local cf = rootPart.CFrame
 	local birdLook = cf.LookVector
-	local nosePoint = cf.Position + birdLook * (C.beakReticleDistance or 90)
-	local noseVP = camera:WorldToViewportPoint(nosePoint)
-	local inFront = noseVP.Z > 0
-
 	local inset = GuiService:GetGuiInset()
-	local maxR   = math.sqrt(((C.aimCursorAreaFrac or 0.875) * vp.X * vp.Y) / math.pi)
 
-	-- VIRTUAL CURSOR (relative mouse). `aimVirtual` is the cursor's DEFLECTION FROM THE NOSE CROSS — so the
-	-- reachable zone is a circle CENTRED ON THE NOSE (symmetric up/down: fixes Chad's "the cursor zone was offset
-	-- downward, couldn't reach the top"; the old version clamped to a screen-centred circle while resting at the
-	-- below-centre nose, biasing it down). The mouse DELTA moves the cursor and it STAYS where you put it — the
-	-- CURSOR drives the bird's nose, not the other way around (Chad: "the cursor moves the bird aim, not the bird
-	-- aim moving the mouse against me"). A GENTLE relax (aimRecenterRate) eases the deflection back toward 0 (the
-	-- nose) so a held deflection eventually straightens out instead of turning forever — but it's soft enough that
-	-- the cursor doesn't rubber-band/fight you. aimRecenterRate = 0 → fully persistent cursor (no relax at all);
-	-- higher → straightens out sooner. Needs the mouse LockCenter'd (onFlightStep) so GetMouseDelta reports.
+	-- Swing the cursor by the mouse delta (about the camera's screen axes), then clamp it to a big cone around the
+	-- nose = the reachable circle. Holding the mouse out pins it at the cone edge (a sustained lead -> turn/loop).
+	local camCF = camera.CFrame
 	local delta = UserInputService:GetMouseDelta()
-	aimVirtual = aimVirtual + delta * (C.aimMouseSensitivity or 1.0)
-	local decay = math.clamp((C.aimRecenterRate or 1.0) * (dt or 0), 0, 1)
-	aimVirtual = aimVirtual:Lerp(Vector2.new(0, 0), decay) -- relax the DEFLECTION toward 0 (= cursor back on the nose)
-	local vr = aimVirtual.Magnitude
-	if vr > maxR and vr > EPS then aimVirtual = aimVirtual * (maxR / vr) end
-	local noseWinX = (inFront and noseVP.X or vp.X * 0.5) + inset.X
-	local noseWinY = (inFront and noseVP.Y or vp.Y * 0.5) + inset.Y
-	local mouse = Vector2.new(noseWinX + aimVirtual.X, noseWinY + aimVirtual.Y)
-
-	-- Resolve the cursor into a desired BODY-frame direction. Comparing the camera ray through the cursor
-	-- with the camera ray through the CROSS makes "cursor on the cross" == zero error (no neutral bias from
-	-- the chase camera's offset). Rotate the bird's actual nose by that same cross->cursor rotation.
-	local localTarget
-	if inFront then
-		local aimDir  = camera:ViewportPointToRay(mouse.X - inset.X, mouse.Y - inset.Y).Direction
-		local noseDir = camera:ViewportPointToRay(noseVP.X, noseVP.Y).Direction
-		local d = math.clamp(noseDir:Dot(aimDir), -1, 1)
-		local targetLook = birdLook
-		if d < 0.99999 then
-			local axis = noseDir:Cross(aimDir)
-			if axis.Magnitude > 1e-5 then
-				targetLook = CFrame.fromAxisAngle(axis.Unit, math.acos(d)):VectorToWorldSpace(birdLook)
-			end
+	local sens  = (C.aimMouseSensitivity or 1.0) * (C.aimAnglePerPixel or 0.006)
+	local dYaw   = -delta.X * sens
+	local dPitch = ((C.invertPitch and delta.Y) or -delta.Y) * sens
+	aimTargetDir = aimTargetDir or birdLook
+	local rotated = CFrame.fromAxisAngle(camCF.UpVector, dYaw) * CFrame.fromAxisAngle(camCF.RightVector, dPitch)
+	local tdir = rotated:VectorToWorldSpace(aimTargetDir)
+	aimTargetDir = (tdir.Magnitude > EPS) and tdir.Unit or birdLook
+	local halfFovTan = math.tan(math.rad((camera.FieldOfView or 70) * 0.5))
+	local maxLead = math.min(math.rad(C.aimMaxLeadDeg or 70), math.atan(halfFovTan * (C.aimLeadScreenFrac or 0.95)))
+	if clamp(birdLook:Dot(aimTargetDir), -1, 1) < math.cos(maxLead) then
+		local axis = birdLook:Cross(aimTargetDir)
+		if axis.Magnitude > 1e-5 then
+			aimTargetDir = CFrame.fromAxisAngle(axis.Unit, maxLead):VectorToWorldSpace(birdLook)
 		end
-		localTarget = cf:VectorToObjectSpace(targetLook)
-	else
-		-- Cross behind the camera (over the top of a loop): the projection flips, so synthesise a target
-		-- from the cursor's vertical offset so the bird KEEPS pulling through instead of snapping/reversing.
-		local upAmt = ((vp.Y * 0.5 + inset.Y) - mouse.Y) / (vp.Y * 0.5) -- + = cursor above centre
-		localTarget = Vector3.new(0, math.clamp(upAmt, -1, 1), -1).Unit
 	end
+	local localTarget = cf:VectorToObjectSpace(aimTargetDir)
 
 	-- Body-frame target (x = right, y = up; forward = -z). HORIZONTAL drives bank+yaw, VERTICAL drives pitch.
 	local rgt = localTarget.X
@@ -928,18 +946,19 @@ local function computeMouseAim(dt)
 	local yaw  = clamp(-hCmd * (C.aimYawGain or 0.6), -1, 1)
 	if C.invertPitch then pitch = -pitch end
 
-	-- Marker screen positions for the render block. The CURSOR (green ring) follows the mouse (the forward aim).
+	-- Marker screen positions for the render block.
 	local margin = 24
-	aimCursor.cursorX, aimCursor.cursorY = mouse.X, mouse.Y
 	local function projWin(world) -- world -> window-space (incl. GUI inset), screen-centre fallback if behind
 		local v = camera:WorldToViewportPoint(world)
 		if v.Z <= 0 then return vp.X * 0.5 + inset.X, vp.Y * 0.5 + inset.Y end
 		return math.clamp(v.X + inset.X, margin, vp.X + inset.X - margin),
 		       math.clamp(v.Y + inset.Y, margin, vp.Y + inset.Y - margin)
 	end
-
-	-- BEAK reticle = the same projected boresight point used for the aim error (noseVP), so "cursor on it = level".
-	aimCursor.noseX, aimCursor.noseY = projWin(nosePoint)
+	-- CURSOR (green ring) = the WORLD-direction cursor you pilot (projected far). NOSE CROSS (amber) = the boresight
+	-- (the bird's current heading, projected far). The nose chases the cursor; when it catches up they coincide and
+	-- the beak points right at the cursor.
+	aimCursor.cursorX, aimCursor.cursorY = projWin(cf.Position + aimTargetDir * 4000)
+	aimCursor.noseX,   aimCursor.noseY   = projWin(cf.Position + birdLook * 4000)
 
 	-- TALON ARC = a hemispherical arc of pips UNDER the bird, in its roll plane (the Up×Right plane). Each pip is
 	-- a body-space direction swept from the left of the belly to the right; BANKING rotates Up & Right together,
@@ -1011,7 +1030,9 @@ local function onFlightStep(dt)
 		aimApplied.roll  = aimApplied.roll  + (aRoll  - aimApplied.roll)  * resp
 		aimApplied.yaw   = aimApplied.yaw   + (aYaw   - aimApplied.yaw)   * resp
 		aimGui.Enabled = true
+		aimDot.Visible = true
 		aimDot.Position    = UDim2.fromOffset(aimCursor.cursorX, aimCursor.cursorY) -- ring: your cursor (desired direction)
+		noseMarker.Visible = true
 		noseMarker.Position = UDim2.fromOffset(aimCursor.noseX, aimCursor.noseY)    -- amber: the beak boresight (cursor on it = level)
 		local isEagle = (currentTeam == "Eagles") -- only the eagle strikes; crows keep just the boresight + cursor
 		for i, p in ipairs(talonPips) do                                            -- belly arc: the talon strike zone (swings with bank)
@@ -1020,14 +1041,41 @@ local function onFlightStep(dt)
 		end
 		paintStrikeReticles(aimCursor.armed) -- light the zone an enemy is engaging (server-chosen: beak/talon/none)
 	else
-		-- FREE-LOOK (or mouse-aim off): ease the aim command to 0 so the bird holds its attitude and is
-		-- modifiable ONLY by keyboard. It must NOT keep applying the last command — a frozen rate (no auto-
-		-- level to stop it) kept rotating the nose every frame -> the nose-over into a dive on release.
+		-- NOT actively steering (free-look, RMB zoom, or aim off): ease the aim command to 0 so the bird HOLDS
+		-- its attitude (keyboard still sums on top). It must NOT keep applying the last command — a frozen rate
+		-- (no auto-level to stop it) kept rotating the nose every frame -> a nose-over into a dive on release.
 		local resp = math.clamp(((C and C.aimResponse) or 7) * dt, 0, 1)
 		aimApplied.pitch = aimApplied.pitch + (0 - aimApplied.pitch) * resp
 		aimApplied.roll  = aimApplied.roll  + (0 - aimApplied.roll)  * resp
 		aimApplied.yaw   = aimApplied.yaw   + (0 - aimApplied.yaw)   * resp
-		aimGui.Enabled = false
+		-- FREE-LOOK reticles (player ask — "the crux"): keep BOTH markers on screen, but the CURSOR sits at the
+		-- CENTRE of the free-look view (where you're looking) and the amber RETICLE stays on the eagle's BEAK
+		-- direction (projected through the panned camera), so while you look around you see your heading vs your
+		-- look. Steering stays suspended. RMB-zoom / aim-off keep the reticle hidden.
+		if freeLook.active and camera and rootPart and rootPart.Parent then
+			-- FREE-LOOK reticles (player ask, corrected): the CURSOR and the RETICLE stay LOCKED TOGETHER on the
+			-- bird's pointing direction (the beak). As you look around, BOTH markers move together to show where the
+			-- nose points relative to your look. (The roaming cursor with the reticle chasing it is the MOUSE-AIM
+			-- mode — free-look keeps the two fused.)
+			local vp = camera.ViewportSize
+			local gi = GuiService:GetGuiInset()
+			local bcf = rootPart.CFrame
+			local bv = camera:WorldToViewportPoint(bcf.Position + bcf.LookVector * 4000)
+			local onScreen = bv.Z > 0
+			aimGui.Enabled = true
+			noseMarker.Visible = onScreen
+			aimDot.Visible = onScreen
+			if onScreen then
+				local bx = math.clamp(bv.X + gi.X, 24, vp.X + gi.X - 24)
+				local by = math.clamp(bv.Y + gi.Y, 24, vp.Y + gi.Y - 24)
+				noseMarker.Position = UDim2.fromOffset(bx, by)
+				aimDot.Position    = UDim2.fromOffset(bx, by) -- cursor FUSED with the reticle on the beak
+			end
+			for _, p in ipairs(talonPips) do p.Visible = false end
+			paintStrikeReticles("none")
+		else
+			aimGui.Enabled = false
+		end
 	end
 	inputState.pitch = math.clamp(kbPitch + aimApplied.pitch, -1, 1)
 	inputState.roll  = math.clamp(kbRoll  + aimApplied.roll,  -1, 1)
@@ -1108,7 +1156,7 @@ local function resetInput()
 	yawRamp.sign, yawRamp.mag = 0, 0
 	steer.x, steer.y = 0, 0
 	aimCursor.x, aimCursor.y = 0, 0
-	aimVirtual = Vector2.new(0, 0)
+	aimTargetDir = nil
 	aimApplied.pitch, aimApplied.roll, aimApplied.yaw = 0, 0, 0
 	inputState.pitch, inputState.roll, inputState.yaw = 0, 0, 0
 	inputState.flap, inputState.dive = false, false
@@ -1125,6 +1173,9 @@ local function teardownDrive()
 	-- after a respawn/swap instead of visibly slewing in from the dead bird's last direction.
 	cameraState.chaseDir = nil
 	cameraState.camUpPrev = nil
+	cameraState.camUp = nil          -- drop the parallel-transported up so it re-seeds level on the new bird
+	cameraState.chaseDirPrev = nil
+	cameraState.aimHeading = nil     -- drop the lagged aim heading so it re-seeds to the new bird's heading
 	cameraState.prevLook = nil
 	-- Release the mouse between lives; onFlightStep re-locks/hides it once we're driving again.
 	if not freeLook.active then

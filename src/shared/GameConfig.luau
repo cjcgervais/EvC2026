@@ -477,6 +477,13 @@ GameConfig.Round = {
 --------------------------------------------------------------------------------
 GameConfig.Camera = {
 	baseDistance = 40,
+	mouseAimDistance = 135, -- STRICT FIXED chase distance while in mouse-aim mode (wheel zoom ignored there; pulled well back behind the bird — player ask)
+	-- MOUSE-AIM CAMERA HEADING LAG (rad/s): how fast the aim camera's view catches up to the bird's heading. LOW
+	-- lag = when you fling the cursor and the bird turns, the view DOESN'T snap around, so the world-anchored
+	-- cursor hangs out on screen and the nose visibly LAGS behind and chases it (player ask). Higher = the view
+	-- tracks the heading tighter (cursor re-centres sooner). Too low and the bird drifts to the frame edge in a
+	-- long hard turn. Only used in mouse-aim mode; chase-only/free-look use chaseTurnRate.
+	aimHeadingLag = 1.4,
 	baseFOV = 70,
 	diveFOV = 95,
 	climbFOV = 62,
@@ -521,10 +528,15 @@ GameConfig.Camera = {
 	-- fraction by which follow smoothing is reduced. Camera-only — never touches flight.
 	crestAngRate = 3.0,  -- facing rotation rate (rad/s) at which crest damping reaches full (lower = damps earlier)
 	crestDamp    = 0.85, -- max fraction the follow is softened at the crest (higher = smoother loop top)
-	-- LOOP TURN-OVER: over a fast loop crest, how far the camera leans its up toward the BIRD'S up (rolls
-	-- around with it) so it arcs over smoothly instead of the bird inverting in a world-level frame. 0 = old
-	-- behavior (horizon always world-level); ~0.8 = camera mostly goes around with the bird over the top.
-	loopFollowUp = 0.8,
+	-- CAMERA UP = PARALLEL TRANSPORT along the flight-path direction (BirdController.updateCamera). It carries the
+	-- up vector WITH THE CHASE DIRECTION, so a LOOP arcs over the top with no pole-flip while a barrel/snap ROLL
+	-- (which barely moves the flight path) leaves the camera steady so you WATCH the bird roll (player ask
+	-- 2026-06-30). A gentle self-level pulls the horizon back to world-level in ordinary flight, FADED OUT as the
+	-- flight path goes vertical (a loop) so it can't yank the camera to the degenerate world reference over the top.
+	horizonLevelRate = 2.0, -- per-sec relax of the camera horizon back to world-level (0 = never self-levels; higher = snappier)
+	loopVertStart = 0.5,    -- flight-path verticality (|dir.Y|, ~30°) at which the horizon self-level BEGINS fading out
+	loopVertBand  = 0.4,    -- verticality span over which self-level fades fully off (start+band = 0.9 ≈ 64°, before the pole)
+	loopFollowUp = 0.0,     -- LEGACY / unused (superseded by parallel transport — the old cf.UpVector lean spun the camera in rolls)
 	-- NO-SNAP CHASE (deep-research RESEARCH §v4, anti motion-sickness). The chase direction is a single
 	-- CONTINUOUS full-3D vector (bird->camera), slewed toward "behind the bird's motion" at a CAPPED
 	-- angular rate — NOT rebuilt from the bird's horizontal heading (which reverses ~180° over a loop top
@@ -584,8 +596,19 @@ GameConfig.Controls = {
 	-- against me"). aimRecenterRate is a GENTLE relax of the deflection back toward the nose so a held deflection
 	-- eventually STRAIGHTENS instead of turning forever — soft enough not to rubber-band/fight you. 0 = fully
 	-- persistent cursor (no relax); HIGHER = straightens out sooner. aimMouseSensitivity scales the cursor travel.
-	aimMouseSensitivity = 1.0,  -- virtual-cursor travel per unit of mouse movement
-	aimRecenterRate     = 1.0,  -- per-sec GENTLE relax of the cursor's deflection back to the nose (resolve knob; 0 = off)
+	aimMouseSensitivity = 1.0,  -- overall gain on cursor swing per mouse unit (multiplies aimAnglePerPixel)
+	-- NOSE-CHASES-CURSOR aim (BirdController.computeMouseAim): the CURSOR is a world direction you swing with the
+	-- mouse out to a big cone (the reachable circle); it stays where you put it. The bird's NOSE (amber reticle,
+	-- out front) chases it and the beak lands on it when it catches up. aimAnglePerPixel = the cursor swing SPEED;
+	-- aimLeadScreenFrac/aimMaxLeadDeg = the reachable-circle SIZE (how far the cursor can lead the nose before it's
+	-- clamped — bigger = a bigger circle you can pilot before the nose catches up). Command is body-relative to the
+	-- nose (so cursor-on-nose = straight) and zoom-independent; the camera is also fixed in aim mode.
+	aimAnglePerPixel    = 0.0035, -- radians the cursor swings per mouse unit (× aimMouseSensitivity) — lowered 0.006->0.0035 (cursor was too sensitive)
+	aimLeadScreenFrac   = 0.95,  -- cursor-circle size: fraction of the way to the top/bottom edge the cursor can lead (0..1)
+	aimMaxLeadDeg       = 70,    -- hard cap on the lead half-angle (deg); the FOV-derived value governs below it
+	-- LEGACY / unused by the nose-chases-cursor model.
+	aimCursorRadiusFrac = 0.9,   -- legacy
+	aimRecenterRate     = 0.0,   -- legacy
 	aimMarkerDistance = 600,  -- LEGACY (unused since the beak reticle was coupled to beakReticleDistance, 2026-06-30)
 	-- BEAK + TALON RETICLES (melee-aim UI, reworked 2026-06-30 per Chad). The amber BEAK cross is the boresight
 	-- AND the head-on strike marker: it's drawn at beakReticleDistance out front, and the aim ERROR is computed
@@ -620,20 +643,30 @@ GameConfig.Controls = {
 	-- answers the mouse 1:1 right off centre. Equal on both axes (round neutral). PLAYTEST-PROVISIONAL: if the
 	-- nose jitters / won't settle to straight at centre, nudge the deadzones up a hair (→ 0.012).
 	aimPitchDeadzone = 0.006, -- PITCH deadzone: way smaller — almost no neutral zone
-	aimPitchExpo     = 1.0,   -- PITCH ramp: FULLY LINEAR (force ∝ deflection) — max responsiveness off centre
+	-- EXPO — response curve of command vs how far the target LEADS the nose. 2.0 (a hard parabola) made the final
+	-- approach CRAWL: as the nose neared the cursor the command fell off ∝ offset² and closed too slowly (Chad:
+	-- "the reticle is slow to get to the cursor when close"). Dropped to 1.2 (near-linear) so the command stays
+	-- strong through the close and the nose shuts the gap at the bird's FLIGHT-MODEL turn/pitch/yaw rate
+	-- (FlightPhysics rate-limits it — so closing speed = the bird's agility, as asked). A hair above 1.0 keeps a
+	-- little softness at dead-centre so straight flight isn't twitchy. Sweep 1.0 (crisp/linear)..1.6 (softer).
+	aimPitchExpo     = 1.0,   -- PITCH ramp: LINEAR (1.2->1.0) so small movements aren't suppressed — snappy short catch-up
 	aimBankDeadzone  = 0.006, -- BANK/YAW deadzone: matched to pitch (small round neutral)
-	aimBankExpo      = 1.0,   -- BANK/YAW ramp: fully linear, matched to pitch
+	aimBankExpo      = 1.0,   -- BANK/YAW ramp: LINEAR, matched to pitch
 	-- OUTER cursor bound: the aim reticle is CLAMPED to a circle CENTRED on the screen that covers this
 	-- fraction of the screen AREA (0.5 = HALF the screen — player ask 2026-06-30, tightened 7/8 → 3/4 → 1/2).
 	-- Past the rim the command just stays saturated (full turn/loop). radius = sqrt(areaFrac · W · H / π);
 	-- BirdController.computeMouseAim does the clamp. Smaller = a tighter cursor circle. PLAYTEST-PROVISIONAL.
 	aimCursorAreaFrac = 0.5,
-	aimRollGain      = 2.6,   -- bank-to-turn strength (2.0->2.6: more mouse authority per player ask)
-	aimPitchGain     = 3.3,   -- elevator: pulls the nose toward the target (2.6->3.3: more authority; full deflection still saturates -> loop)
-	aimYawGain       = 0.78,  -- rudder, coordinated WITH the bank (0.6->0.78: scaled with the bank bump)
+	-- Gains RAISED (player ask: "reticle catch-up snappy at short movements, rate-limited by the eagle's turn rate
+	-- at big deflections"). Higher gain SATURATES the command for anything but a tiny error, so the bird turns at
+	-- its MAX rate to close small/medium gaps fast (snappy), while big gaps still take the eagle's turn rate to
+	-- sweep (rate-limited). Tiny errors stay sub-saturation for fine aim. PD damps the overshoot the gain adds.
+	aimRollGain      = 4.5,   -- bank-to-turn strength (2.6->4.5: snappier catch-up)
+	aimPitchGain     = 5.0,   -- elevator: pulls the nose toward the target (3.3->5.0: snappier; full deflection still saturates -> loop)
+	aimYawGain       = 1.0,   -- rudder, coordinated WITH the bank (0.78->1.0: scaled with the gain bump)
 	aimLevelGain     = 0.9,   -- wings-levelling toward straight flight when there's no bank demand (anti stuck-in-bank)
-	aimPitchDamp     = 0.35,  -- PD: nose-pitch-rate feedback (rad/s normalised) — kills the climb/pull porpoise
-	aimRollDamp      = 0.30,  -- PD: roll-rate feedback — kills the bank oscillation in a sustained turn
+	aimPitchDamp     = 0.45,  -- PD: nose-pitch-rate feedback (0.35->0.45: control the higher-gain overshoot)
+	aimRollDamp      = 0.40,  -- PD: roll-rate feedback (0.30->0.40: control the higher-gain overshoot)
 	aimStallBandDeg  = 4,     -- degrees below stall where the nose-up PULL eases (4, narrow: ride the edge -> loop commits)
 	invertPitch      = false, -- false = cursor ABOVE the nose pitches UP (the cross rises to meet it)
 
