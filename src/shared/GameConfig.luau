@@ -212,6 +212,16 @@ GameConfig.Profiles = {
 		-- Higher than the crow's on purpose (flight==balance). Stamina still drains, so climbs end from
 		-- fatigue, not become free. PLAYTEST-PROVISIONAL.
 		flapDragRetention = 0.6,
+		-- ENERGY RETENTION (player ask 2026-06-30, "War Thunder ARCADE energy retention" — the TOP ask). The
+		-- dominant speed-bleed in a CLIMB is gravity's component ALONG the flight path (GRAVITY·sinθ), NOT drag.
+		-- This is the persistent, always-on (NOT flap-gated) arcade term that adds back this fraction of that
+		-- along-path gravity decel WHILE CLIMBING (see FlightPhysics energy block) — so after a dive you can BOOM
+		-- then ZOOM back near your start altitude if you don't hard-turn, a 30° climb bleeds speed slowly, and an
+		-- ascending defensive spiral over a lower-energy target becomes flyable. 0.7 = the eagle keeps ~70% of the
+		-- climb energy gravity would take. HIGHER than the crow (0.4) on purpose — the eagle IS the energy fighter;
+		-- this asymmetry is the 1-v-4 lever. Capped <1 with a residual cost (never noclip); dives are untouched
+		-- (only cancels while climbing). Stall/stamina/ceiling still bound it. PLAYTEST-PROVISIONAL.
+		energyRetention = 0.7,
 		glideSpeed = 130,       -- comfortable cruise (high)
 		maxLevelSpeed = 170,
 		diveThrustBonus = 1.6,  -- thrust multiplier while diving (gravity also assists)
@@ -281,6 +291,10 @@ GameConfig.Profiles = {
 		-- climb "some" (player ask) but the eagle stays the superior energy fighter — the crow's game is
 		-- the tight turn + the ram, not out-running/out-climbing the eagle. flight==balance. PLAYTEST-PROVISIONAL.
 		flapDragRetention = 0.4,
+		-- ENERGY RETENTION (see Eagle). LOWER (0.4 vs 0.7): the crow holds SOME climb energy so a squad can
+		-- reposition vertically, but the eagle stays the superior energy fighter — the crow can't out-zoom or
+		-- sustain the ascending spiral, so its game remains the tight turn + the ram. flight==balance. PROVISIONAL.
+		energyRetention = 0.4,
 		glideSpeed = 95,
 		maxLevelSpeed = 140,    -- slightly slower top end than eagle in level flight
 		diveThrustBonus = 1.25,
@@ -506,10 +520,14 @@ GameConfig.Camera = {
 	-- Spacebar free-look: orbit the camera while the bird holds its flight path.
 	-- Raised 0.35 -> 0.7 (player ask 2026-06-30: free-look "gets stuck"/feels limiting — want a crisp,
 	-- near-1:1 War-Thunder-arcade pan). Drives both the mouse orbit (·0.01) and the arrow-key orbit (·2.5).
-	-- Free-look vertical range is UNBOUNDED (no knob): player ask 2026-06-30 "freelook all the way up and
-	-- down, over and under." Safe because the free-look camera up is carried through the orbit (BirdController
-	-- updateCamera) rather than projected from world-up, so there is no pole singularity to clamp against.
 	freeLookSensitivity = 0.7,
+	-- FREE-LOOK VERTICAL LIMIT (CS-2 REVISED, Chad 2026-06-30): the free-look camera is an UPRIGHT spherical
+	-- orbit — horizon always level, operator never rolls or inverts ("stay upright, not sideways or upside
+	-- down"). Yaw is a full 360°; pitch tilts up/down to this many degrees short of straight-up/straight-down
+	-- (a SOFT STOP at vertical — it does NOT continue over the top to the far side). Keeping it just under 90°
+	-- holds the view off the exact pole so CFrame.lookAt (hard world-up) never degenerates. Raise toward 90 for
+	-- a steeper straight-down/up look, lower if the extreme ever jitters. (BirdController updateCamera.)
+	freeLookPitchLimitDeg = 85,
 	-- FREE-LOOK CRISPNESS (player ask 2026-06-30 "it feels like it gets stuck"). The orbit used to reuse the
 	-- heavy chase followSmoothing (0.18 ≈ 16%/frame) → the view crawled after the mouse ("molasses"). When
 	-- free-look is active the final camera lerp uses THIS smoothing instead → near-1:1 tracking. It's the single

@@ -259,6 +259,22 @@ function FlightPhysics:Update(dt, input)
 			dragMag = dragMag * (1 - clamp(p.flapDragRetention * flapPow, 0, 0.95))
 		end
 		accel = accel - velDir * (dragMag / p.mass)
+
+		-- ENERGY RETENTION (player ask 2026-06-30 — "War Thunder ARCADE energy retention", the TOP ask). The
+		-- dominant speed-bleed in a CLIMB is gravity's component ALONG the flight path, NOT drag: at climb
+		-- angle θ it is GRAVITY·sinθ = GRAVITY·velDir.Y (≈ half of GRAVITY at 30°), which dwarfs the tiny
+		-- straight-line drag. Real energy conservation is exactly why a climb costs speed; WT ARCADE fudges it
+		-- so a boom-and-zoom recovers most of its altitude. We ADD BACK energyRetention × that along-path
+		-- gravity decel — but ONLY while CLIMBING (velDir.Y > 0), so the loved DIVE/stoop (which SHOULD keep
+		-- accelerating under gravity) is completely untouched. Per-profile: EAGLE keeps more E than the CROW,
+		-- the flight==balance lever behind the ascending defensive spiral. Persistent (NOT flap-gated) — the
+		-- always-on climb-E term; flapDragRetention above stays as the small extra drag bonus under power.
+		-- Capped <1 so a residual gravity cost always remains (never noclip); stall/stamina/ceiling and the
+		-- diveSpeedCap are all untouched.
+		if p.energyRetention and velDir.Y > EPS then
+			local gAlongClimb = F.GRAVITY * velDir.Y -- magnitude of gravity's decel along the climb path
+			accel = accel + velDir * (clamp(p.energyRetention, 0, 0.95) * gAlongClimb)
+		end
 	else
 		self.isStalling = true
 		self.aoaDeg = 0

@@ -644,21 +644,27 @@ local function updateCamera(dt)
 	-- up, pitch about the world-horizontal right) so the view holds its ASPECT while the bird maneuvers — it
 	-- no longer revolves with the bird's roll. WITHOUT touching flight input. (Toggle: Space.)
 	if freeLook.active then
+		-- CS-2 (REVISED by Chad 2026-06-30) — UPRIGHT SPHERICAL ORBIT. The camera operator stays WORLD-UPRIGHT
+		-- at all times: the horizon is ALWAYS level and the view NEVER rolls or inverts ("I want to stay upright,
+		-- not sideways or upside down"). Yaw orbits a full 360° around the bird; pitch tilts from level up/down to
+		-- just shy of straight-up / straight-down — a SOFT STOP at vertical. It deliberately does NOT continue OVER
+		-- the top to the far side (that unbounded over/under orbit was the S12 version whose orbit-derived up flipped
+		-- the view upside down). camUp is hard WORLD-UP, so CFrame.lookAt keeps the horizon level for any non-
+		-- vertical view; the pitch clamp holds the view off the exact pole so lookAt never degenerates (no jitter).
+		local maxPitch = math.rad(CAM.freeLookPitchLimitDeg or 85)
+		freeLook.pitch = math.clamp(freeLook.pitch, -maxPitch, maxPitch) -- write-back: bounded, no wind-up past vertical
+		-- Bird->camera direction. Start from the frozen chase direction FLATTENED onto the horizontal plane, so
+		-- pitch measures true elevation from the horizon (symmetric up/down, no built-in tilt bias); then yaw about
+		-- world-up and elevate (pitch) about the yaw-rotated world-horizontal right axis. Same orbit construction /
+		-- pitch sign as before, so the mouse->look mapping (CS-3) is preserved.
+		local behind = Vector3.new(chaseDir.X, 0, chaseDir.Z)
+		behind = (behind.Magnitude > EPS) and behind.Unit or Vector3.new(0, 0, 1)
 		local yawCF = CFrame.fromAxisAngle(Vector3.yAxis, freeLook.yaw)
 		local pitchAxis = yawCF:VectorToWorldSpace(Vector3.xAxis) -- world-horizontal right, yaw-rotated
 		local orbit = CFrame.fromAxisAngle(pitchAxis, freeLook.pitch) * yawCF
-		cameraOffset = orbit:VectorToWorldSpace(cameraOffset)
-		-- UP via the ORBIT itself (player ask 2026-06-30: "freelook all the way up and down, over and under").
-		-- Carry world-up through the SAME world-referenced orbit (yaw about world-Y, pitch about the world-
-		-- horizontal right) that placed the camera. Two properties fall out:
-		--   • the orbit is built ONLY from freeLook.yaw/pitch, never the bird's bank, so the horizon STILL
-		--     never inherits the bird's roll (the original HORIZON-LOCK intent is preserved); and
-		--   • unlike the old world-up PROJECTION, this has NO pole singularity — so the pitch is unbounded and
-		--     you orbit smoothly straight up, straight down, and fully OVER the top / UNDER the belly (the
-		--     world rolls past you as you go over, exactly like looking back over your shoulder past vertical).
-		-- lookAt can never degenerate here: the angle between this up and the (bird-facing) view direction is
-		-- invariant under the orbit, and the base offset is behind+above (never vertical), so up ⟂-ish to view.
-		camUp = orbit:VectorToWorldSpace(Vector3.yAxis)
+		local dir = orbit:VectorToWorldSpace(behind)             -- unit bird->camera direction
+		cameraOffset = dir * dist
+		camUp = Vector3.yAxis -- hard world-up: operator never rolls/inverts (lookAt levels the horizon)
 	end
 
 	local camPos  = position + cameraOffset
