@@ -29,13 +29,15 @@ Read this first. It tells the next agent exactly where the project stands, the o
 > (loop-camera). Reticle sizes are `noseMarker`/`aimDot` in `BirdController`.
 >
 > **▶ NEXT — the frontier is COMBAT and the 1-v-4, not the aim/flight (those are landing).** In priority order:
-> 1. **Playtest the STRIKE.** It's fully wired and **audited correct this session** (LMB → server auto-picks
->    beak-vs-talon by which zone the nearest enemy is in; talon belly-arc swings with bank; per-zone timers) but is
->    **UNPLAYTESTED**. Verify the right zone lights (crow below = TALON, ahead = BEAK) and clicks throw it. ⚠️ Watch
->    the **1-v-4**: talon 4 s active / 2 s cd ≈ 67% uptime flirts with the >50% "always-on" guardrail — if it plays
->    eagle-favoured, cut talon `duration` / widen `cooldown` / drop offensive damage FIRST (`GameConfig.Combat`).
-> 2. **Un-defer the MAP** (already built — 16k arena + spires + thermals; Chad deferred it "until the strike feels
->    right," which is now close) and **verify the AI crows MOB** (code is the gentle/non-lethal version; needs a Play).
+> 1. **Strike — TALON PATH NOW PLAYTEST-CONFIRMED** ✅ (2026-06-30: Chad landed his first intentional talon kill on
+>    a crow — the LMB → server auto-pick → talon-in-belly-zone → kill loop works end-to-end). Still to verify: the
+>    **BEAK** path and the **1-v-4 balance**. ⚠️ Watch it: talon 4 s active / 2 s cd ≈ 67% uptime flirts with the
+>    >50% "always-on" guardrail — if it plays eagle-favoured, cut talon `duration` / widen `cooldown` / drop
+>    offensive damage FIRST (`GameConfig.Combat`).
+> 2. **Un-defer the MAP** (already built — 16k arena + spires + thermals; strike now feels close enough) and **make
+>    the AI crows MOB.** ⚠️ Playtest finding: the crows "are around, can be really fast and fly away, get scared and
+>    crash" — so they still SCATTER instead of swarming. Re-weight `updateAICrows` (`GameConfig.Squad.avoidance` +
+>    boids weights) so they close in and pressure the eagle. A 1-v-4 that can't mob isn't a real 4. See [[combat-directional-strike]].
 > 3. **Tune the 1-v-4 matchup** — the Crow side + collision trades are the last big design frontier. Flight==balance:
 >    reason about the whole 1-eagle-vs-4-crow fight on every number (`feedback-flight-balance-inseparable`).
 >
