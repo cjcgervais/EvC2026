@@ -4,18 +4,20 @@ Read this first. It tells the next agent exactly where the project stands, the o
 
 ---
 
-## ▶ COLD START — read this box first (post-Session 13, 2026-06-30)
+## ▶ COLD START — read this box first (post-Session 14, 2026-07-01)
 
-**Where it stands.** The **eagle flight / control / camera feel is SIGNED OFF** — Chad: *"the flight model of the eagle is largely finished. I'm having a great experience."* This is the crown jewel. **Do NOT reopen its calibration** (lift curve · gravity · stall · energy retention · camera · mouse-aim) without a fresh, explicit Chad ask. Full detail of what landed = the SESSION 13 block just below.
+**Where it stands.** The **eagle flight / control / camera feel is SIGNED OFF** — Chad: *"the flight model of the eagle is largely finished. I'm having a great experience."* This is the crown jewel. **Do NOT reopen its calibration** (lift curve · gravity · stall · energy retention · camera · mouse-aim) without a fresh, explicit Chad ask. **S14 added AI-crow combat + a free-look bugfix** — details in the SESSION 14 block just below.
 
-**The frontier is now COMBAT + the 1-v-4 + the CROW** (not eagle flight). Prioritized queue:
-1. **Make the AI crows MOB.** They still scatter / flee / crash instead of swarming (playtest finding). Re-weight `GameServer.updateAICrows` + `GameConfig.Squad.avoidance` + the boids weights so the 3 AI crows close in and pressure the eagle. *A 1-v-4 that can't mob isn't a real 4.*
-2. **Verify the BEAK strike path + 1-v-4 balance.** The **TALON** path is playtest-confirmed (first kill landed); **BEAK** is untested. Watch talon uptime (4s active / 2s cd ≈ 67%) — if it plays eagle-favoured, cut `duration` / widen `cooldown` / drop offensive damage FIRST (`GameConfig.Combat`).
-3. **Tune the Crow profile + collision trades** for the asymmetric fight (the last big design frontier). *flight==balance: reason about the whole 1-eagle-vs-4-crow fight on every number.*
-   - Newly relevant: the eagle now keeps more climb-energy (S13) AND refuels stamina in dives (CS-9). Re-check **4 crows can still corner/mob it** — the asymmetry is intended, but the mob must still pressure.
+**AI crows are now FLYABLE and mobbing (partial).** S14 went from "crash + scatter instantly" to Chad: *"I can actually play with the crows now… doing better."* Root cause of the old failure was **AI flight control** (the boids mapping dived at the target → too fast → knife-edged/overshot into terrain), NOT goal geometry — fixed with a flight governor + AI-only autopilot; then the mob **orbit** was enabled so they ring the eagle instead of scattering. All research-grounded (`docs/RESEARCH-crow-mobbing.md`; the reframe: mobbing≠flocking).
+
+**The frontier is COMBAT + the 1-v-4 + the CROW** (not eagle flight). Prioritized queue:
+1. **Stabilize the mob (residual from S14).** Chad: *"usually only one, others crashed eventually."* The crows fly/mob now but still **attrit down to ~1 over a long engagement.** Chase why (likely: orbit ring clipping terrain during sustained fights, or crows bleeding energy/sinking after many turns). Knobs live in `GameConfig.Squad.aiFlight` + `Squad.mob` (all tunable, playtest-driven). See SESSION 14 block.
+2. **Increment 2 — give the mob TEETH: staggered dive-bomb passes.** Orbit is circle-only (no attacks yet). Add take-turns dive-bomb-from-above + peel-off (never all 4 at once), wired into the existing strike/collision combat. Plan: `docs/RESEARCH-crow-mobbing.md` → "build order".
+3. **Verify the BEAK strike path + 1-v-4 balance.** The **TALON** path is playtest-confirmed (first kill landed); **BEAK** is untested. Watch talon uptime (4s active / 2s cd ≈ 67%) — if it plays eagle-favoured, cut `duration` / widen `cooldown` / drop offensive damage FIRST (`GameConfig.Combat`).
+4. **Tune the Crow profile + collision trades** for the asymmetric fight. *flight==balance: reason about the whole 1-eagle-vs-4-crow fight on every number.* The eagle now keeps more climb-energy (S13) AND refuels stamina in dives (CS-9) — re-check **4 crows can still corner/mob it**.
 
 **Repo / GitHub / sandboxes (set up S13).**
-- `origin` = `https://github.com/cjcgervais/EvC2026.git`; `master` @ `52a929c` is pushed.
+- `origin` = `https://github.com/cjcgervais/EvC2026.git`; `master` @ `75c39f3` is pushed (S14 crow-AI + free-look fix + bird-detail pass; local == remote).
 - **Snapshot branch `single-bird-kernel`** (on GitHub) = this exact state, frozen — a standalone flying-bird kernel to branch from.
 - Two adjacent **sandboxes**: `D:\EvC2026_s1`, `D:\EvC2026_s2` — independent full clones (origin→GitHub) for spin-off experiments. Work the main line in `D:\EvC2026`; leave the sandboxes alone unless asked.
 - Tags: `v1.0-eagle-flight` (pure kernel), `v1.1-eagle-flight-feel`.
@@ -32,7 +34,9 @@ Read this first. It tells the next agent exactly where the project stands, the o
 
 ---
 
-> ## 🐦‍⬛ SESSION 14 — CROW-MOBBING RESEARCH + "MOB, DON'T RAM" (increment 1) (2026-07-01) — **BUILD-GREEN, UNPLAYTESTED**
+> ## 🐦‍⬛ SESSION 14 — CROW AI MOBBING (research-grounded) + FREE-LOOK BUGFIX (2026-07-01) — **COMMITTED & PUSHED `75c39f3`; crows PLAYABLE, mob partially stable**
+> **NET RESULT (Chad): "I can actually play with the crows now… doing better," but "usually only one, others crashed eventually."** So: AI flight control FIXED, mob orbit ON, crows fly + ring the eagle — residual = the mob still attrits to ~1 over a long fight (COLD-START queue #1). Free-look up/down-pan bug also fixed (CS-2). Everything below committed on `master @ 75c39f3` (local == remote). The blow-by-blow of how we got here (it took several playtest passes) is preserved next:
+>
 > Chad tested a naive `goalWeight=3.0` AI-crow tweak → "made 3 of them crash, they get scared, can't fly very good." So we stopped guessing and ran a **deep-research pass on real corvid mobbing** to ground the 1-v-4. (The research workflow's *synthesis* step died on a session token limit; **all 18 verified + 7 refuted claims are preserved** in **`docs/RESEARCH-crow-mobbing.md`** with a hand-authored parameter plan — nothing lost. Memory: `research-crow-mobbing`.)
 >
 > **THE REFRAME (drives everything): mobbing ≠ flocking.** Real corvids SWITCH from topological (cohesion-max formation) to **metric** interactions when mobbing (~5 m ≈ 14 body-lengths) → they become **independent attackers that ORBIT + dive-bomb** the raptor; cohesion DROPS. So cranking `goalWeight` was *backwards* — 4 birds on one vector into the eagle's centre = the pile-up/terrain-overshoot Chad saw. Crows are also **BOLD** (97% aggressors vs ravens; higher risk → closer/harder mobbing, never flee — the antidote to "scared" bots). The Crow *profile* is already a fine angles-fighter; **the bug was AI STEERING, not the profile**.
