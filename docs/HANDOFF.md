@@ -2,10 +2,40 @@
 
 Read this first. It tells the next agent exactly where the project stands, the one decision that's already been made for you, and the prioritized work queue. Pair it with `CLAUDE.md` (architecture + contracts), `docs/RESEARCH.md` (why the numbers are what they are), and project memory (`MEMORY.md` index).
 
-> ## 🦅 SESSION 13 — CS-1 FIX + ARCADE ENERGY RETENTION + UPRIGHT FREE-LOOK CAMERA (2026-06-30) — **THE authoritative cold-start state**
-> Worked the SESSION 12 queue under the LOCKED-SPEC process directive. **All three items build-green (`build.ps1`) but UNPLAYTESTED.** No aero-kernel *calibration* was reopened (lift curve / gravity / stall math of `v1.0-eagle-flight` untouched); the one kernel edit is a single bounded, climb-only energy term. Commits on `master`: `d3c3396` (CS-1) and `f61c19a` (energy + camera). Checkpoint/revert points: `d3c3396`, the tag `v1.0-eagle-flight`.
+---
+
+## ▶ COLD START — read this box first (post-Session 13, 2026-06-30)
+
+**Where it stands.** The **eagle flight / control / camera feel is SIGNED OFF** — Chad: *"the flight model of the eagle is largely finished. I'm having a great experience."* This is the crown jewel. **Do NOT reopen its calibration** (lift curve · gravity · stall · energy retention · camera · mouse-aim) without a fresh, explicit Chad ask. Full detail of what landed = the SESSION 13 block just below.
+
+**The frontier is now COMBAT + the 1-v-4 + the CROW** (not eagle flight). Prioritized queue:
+1. **Make the AI crows MOB.** They still scatter / flee / crash instead of swarming (playtest finding). Re-weight `GameServer.updateAICrows` + `GameConfig.Squad.avoidance` + the boids weights so the 3 AI crows close in and pressure the eagle. *A 1-v-4 that can't mob isn't a real 4.*
+2. **Verify the BEAK strike path + 1-v-4 balance.** The **TALON** path is playtest-confirmed (first kill landed); **BEAK** is untested. Watch talon uptime (4s active / 2s cd ≈ 67%) — if it plays eagle-favoured, cut `duration` / widen `cooldown` / drop offensive damage FIRST (`GameConfig.Combat`).
+3. **Tune the Crow profile + collision trades** for the asymmetric fight (the last big design frontier). *flight==balance: reason about the whole 1-eagle-vs-4-crow fight on every number.*
+   - Newly relevant: the eagle now keeps more climb-energy (S13) AND refuels stamina in dives (CS-9). Re-check **4 crows can still corner/mob it** — the asymmetry is intended, but the mob must still pressure.
+
+**Repo / GitHub / sandboxes (set up S13).**
+- `origin` = `https://github.com/cjcgervais/EvC2026.git`; `master` @ `52a929c` is pushed.
+- **Snapshot branch `single-bird-kernel`** (on GitHub) = this exact state, frozen — a standalone flying-bird kernel to branch from.
+- Two adjacent **sandboxes**: `D:\EvC2026_s1`, `D:\EvC2026_s2` — independent full clones (origin→GitHub) for spin-off experiments. Work the main line in `D:\EvC2026`; leave the sandboxes alone unless asked.
+- Tags: `v1.0-eagle-flight` (pure kernel), `v1.1-eagle-flight-feel`.
+
+**Hard process rules (Chad's LOCKED-SPEC directive — non-negotiable).**
+- **Protect the LOCKED CONTROL SPECS registry (CS-1 … CS-9, below).** Grep/read it before ANY control / camera / input / flight-feel edit. Never change a locked behavior *collaterally* while building something else — foresee interactions (this failed before: keyboard-authority silently curved his loops).
+- **ASK, don't guess** on control feel. A wrong guess that ships is worse than a question.
+- **LOG every playtest note + outcome** here (registry row / session block) so decisions are durable and never re-litigated.
+- **Ground truth is Chad's Studio Play.** `build.ps1` resolves wiring but does NOT run or syntax-check Luau. **ONE change at a time**, keep the build green, tee up a crisp playtest checklist, and **checkpoint (commit/tag) before any kernel edit**.
+- **Refine incrementally; do NOT regenerate.** Drive each module via the **loop-orchestrator** skill (roblox-game profile); compose **deep-research** for the research half.
+- **Kernel invariants that MUST survive:** `cl0>0` (grip), auto-level OFF (`STABILITY_RATE=0`, both `recoverNoseDownRate=0`), `GRAVITY_G=2.0`, keyboard-first, **stall < spawn < cruise**.
+
+*Read order: this box → the SESSION 13 block → the LOCKED CONTROL SPECS registry → `CLAUDE.md` → `MEMORY.md`.*
+
+---
+
+> ## 🦅 SESSION 13 — CS-1 + ARCADE ENERGY RETENTION + UPRIGHT CAMERA + DIVE-REST STAMINA (2026-06-30) — **PLAYTESTED; eagle flight SIGNED OFF (record of what landed)**
+> Worked the SESSION 12 queue under the LOCKED-SPEC process directive, then a dive-stamina follow-up. **PLAYTESTED — Chad: the eagle flight model is "largely finished… a great experience"; CS-9 explicitly confirmed.** No aero-kernel *calibration* was reopened (lift curve / gravity / stall math of `v1.0-eagle-flight` untouched); the kernel edits are one bounded climb-only energy term + the dive-rest stamina rule. Commits on `master`: `d3c3396` (CS-1), `f61c19a` (energy + camera), `abb1670` (dive-rest stamina). Checkpoint/revert points: `d3c3396`, tag `v1.0-eagle-flight`, GitHub branch `single-bird-kernel`.
 >
-> **What landed (UNPLAYTESTED):**
+> **What landed (playtested — Chad signed off the eagle flight/feel; see the ✅ confirmation at the end of this block):**
 > 1. **CS-1 — keyboard fully overrides mouse-aim (GLOBAL gate).** `onFlightStep`: while ANY of Q/W/E/A/S/D is held, `aimGate = 0` zeroes the ENTIRE `aimApplied` contribution on ALL three axes → a held S now makes a **straight** loop (was curved by the old per-axis roll/yaw aim-pull). Release every key → mouse-aim resumes. Registry CS-1 → **FIXED, pending playtest**.
 > 2. **Energy retention (the TOP ask) — one coherent climb-E model.** New per-profile **`energyRetention`** (Eagle **0.7** / Crow **0.4**) in `GameConfig.Profiles`; consumed in `FlightPhysics:Update` right after the drag term. It adds back `energyRetention × GRAVITY·velDir.Y` **only while CLIMBING** (`velDir.Y > 0`) — cancelling that fraction of the *gravity-along-path* bleed (the dominant climb decel, NOT drag). **Dive/stoop untouched** (gated to climbs), capped `<0.95` (never noclip), and `flapDragRetention` is kept as the small extra under-power drag bonus. Eagle>Crow is the 1-v-4 energy lever.
 > 3. **CS-2 revised — UPRIGHT free-look camera (Chad chose "stop at vertical").** Free-look is now an upright spherical orbit: `camUp = Vector3.yAxis` (operator never rolls/inverts), full 360° yaw, `freeLook.pitch` clamped to **`Camera.freeLookPitchLimitDeg = 85`** so it soft-stops just shy of straight up/down instead of flipping over the top; base dir flattened to horizontal for symmetric up/down. Fixes "I end up looking at my eagle sideways/upside down."
