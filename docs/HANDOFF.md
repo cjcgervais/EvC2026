@@ -26,7 +26,7 @@ Read this first. It tells the next agent exactly where the project stands, the o
 - **LOG every playtest note + outcome** here (registry row / session block) so decisions are durable and never re-litigated.
 - **Ground truth is Chad's Studio Play.** `build.ps1` resolves wiring but does NOT run or syntax-check Luau. **ONE change at a time**, keep the build green, tee up a crisp playtest checklist, and **checkpoint (commit/tag) before any kernel edit**.
 - **Refine incrementally; do NOT regenerate.** Drive each module via the **loop-orchestrator** skill (roblox-game profile); compose **deep-research** for the research half.
-- **Kernel invariants that MUST survive:** `cl0>0` (grip), auto-level OFF (`STABILITY_RATE=0`, both `recoverNoseDownRate=0`), `GRAVITY_G=2.0`, keyboard-first, **stall < spawn < cruise**.
+- **Kernel invariants that MUST survive:** `cl0>0` (grip), auto-level OFF (`STABILITY_RATE=0`, both `recoverNoseDownRate=0`), keyboard-first, **stall < spawn < cruise**. `GRAVITY_G` is the master **loft knob** (a tunable, NOT a fixed invariant) — currently **1.3** (swept 2.0→1.5→1.3); the real invariant is that `AIR_DENSITY` scales with it in lockstep (`GRAV_SCALE`) so the stall/cruise/dive ordering holds at any value. *(Older notes below that say "GRAVITY_G=2.0" predate the sweep.)*
 
 *Read order: this box → the SESSION 13 block → the LOCKED CONTROL SPECS registry → `CLAUDE.md` → `MEMORY.md`.*
 
