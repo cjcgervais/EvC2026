@@ -78,7 +78,12 @@ GameConfig.Flight = {
 	-- Lowered 110->60 so it can NEVER fight a slow loop top: loop COMMIT is owned by the controller's
 	-- ride-the-edge AoA protection (Controls.aimStallBandDeg) + powered-lift floor, not by this number.
 	AEROBATIC_MIN_SPEED = 60,
-	TERMINAL_VELOCITY = 400,
+	TERMINAL_VELOCITY = 420,  -- RAISED 400→420 (Chad 2026-07-02): this is the FLAP-achievable top speed. In
+	                          -- FlightPhysics the non-diving hardCap = TERMINAL, and the glide-bleed-to-maxLevelSpeed
+	                          -- is SKIPPED while flapping — so flapping out of a dive holds/boosts speed up to TERMINAL
+	                          -- ("once the attitude is reached, the flap boosts"). 420 = the true top speed via flapping;
+	                          -- a pure dive tops lower at Eagle.diveSpeedCap=390. (Anti-cheat ceiling scales with this,
+	                          -- so the legit 420 stays inside the envelope. Crow can't approach it — flapThrust far lower.)
 	-- STATIC AERODYNAMIC STABILITY (rad/s base): how fast the airframe weathervanes its
 	-- ORIENTATION toward the airflow. This self-limits angle-of-attack (anti-stall) WITHOUT
 	-- destroying lift — it rotates the nose toward the path, not the path toward the nose, so
@@ -217,15 +222,26 @@ GameConfig.Profiles = {
 		-- This is the persistent, always-on (NOT flap-gated) arcade term that adds back this fraction of that
 		-- along-path gravity decel WHILE CLIMBING (see FlightPhysics energy block) — so after a dive you can BOOM
 		-- then ZOOM back near your start altitude if you don't hard-turn, a 30° climb bleeds speed slowly, and an
-		-- ascending defensive spiral over a lower-energy target becomes flyable. 0.7 = the eagle keeps ~70% of the
-		-- climb energy gravity would take. HIGHER than the crow (0.4) on purpose — the eagle IS the energy fighter;
-		-- this asymmetry is the 1-v-4 lever. Capped <1 with a residual cost (never noclip); dives are untouched
-		-- (only cancels while climbing). Stall/stamina/ceiling still bound it. PLAYTEST-PROVISIONAL.
-		energyRetention = 0.7,
+		-- ascending defensive spiral over a lower-energy target becomes flyable. 0.82 = the eagle keeps ~82% of the
+		-- climb energy gravity would take (RAISED 0.7→0.82, Chad 2026-07-02: "I lose energy so fast if I zoom up —
+		-- need more retention"). HIGHER than the crow (0.4) on purpose — the eagle IS the energy fighter; this
+		-- asymmetry is the 1-v-4 lever. Capped <0.95 with a residual cost (never noclip); dives are untouched (only
+		-- cancels while climbing). Stall/stamina/ceiling still bound it. PLAYTEST-PROVISIONAL.
+		energyRetention = 0.82,
+		-- GLIDE COAST (Chad 2026-07-02: "going to glide mode, keep my speed a LOT longer if I'm not turning or
+		-- climbing, just staying aerodynamic"). Per-sec exponential decay of speed ABOVE cruise (maxLevelSpeed)
+		-- while gliding hands-off — see FlightPhysics speed-cap block. This (NOT drag) was the dominant bleed:
+		-- at the old hard-coded 0.5, a 420 eagle shed ~125 studs/s² and dropped to 250 in ~2 s. 0.15 = the excess
+		-- decays ~3.3× slower, so an aerodynamic eagle COASTS (420→250 now ~7-8 s) — the boom-and-zoom holds its
+		-- energy. LOWER = holds speed even longer (0 = never bleeds below terminal). Higher than crow's on purpose
+		-- (energy-fighter identity, flight==balance). Stall/turn/climb still cost energy normally. PLAYTEST-PROVISIONAL.
+		glideBleed = 0.15,
 		glideSpeed = 130,       -- comfortable cruise (high)
 		maxLevelSpeed = 170,
 		diveThrustBonus = 1.6,  -- thrust multiplier while diving (gravity also assists)
-		diveSpeedCap = 320,     -- crows cannot match this top-end dive speed
+		diveSpeedCap = 390,     -- RAISED 320→390 (Chad 2026-07-02): a pure dive now tops ~390 (was 320). Flapping OUT
+		                        -- of the dive can push past it to TERMINAL_VELOCITY=420 (the true top). Crows (diveSpeedCap
+		                        -- 220) still can't match it — the eagle's energy/dive dominance IS the 1-v-4 identity.
 
 		-- TURN / CONTROL (TWO turn params — see RESEARCH caveat) -------------
 		rollRate = 3.2,         -- rad/s instantaneous roll authority (banking)
@@ -250,8 +266,13 @@ GameConfig.Profiles = {
 		health = 99,            -- 3 clean "hits": the discrete combat model (GameConfig.Combat.eagleHits)
 		                        -- makes one UNPARRIED crow ram cost health/eagleHits = 33, so exactly
 		                        -- 3 rams down the eagle. HP bar retained (reads as 3 chunks).
-		beakDamage = 22,        -- close peck
-		talonDamage = 34,       -- grab/strike, the bread-and-butter eagle kill
+		beakDamage = 26,        -- close peck. RAISED 22→26 (S17): crow health is 25, so the old 22 could NOT
+		                        -- kill a crow in one clean beak jab (left it at 3 HP) — that was the core of Chad's
+		                        -- "I'm hitting them with the beak but they don't die." A committed head-on beak
+		                        -- (narrow 35° cone, short 2s window, long 4s cd) now one-shots a crow like the talon
+		                        -- does; the 1-v-4 balance stays in the saturation (one zone at a time), not in the
+		                        -- beak being sub-lethal. flight==balance: still < talon; dial back toward 25 if too strong.
+		talonDamage = 34,       -- grab/strike, the bread-and-butter eagle kill (one-shots a 25 HP crow)
 		diveAttackMultiplier = 3.46, -- RESEARCH: stoop ~3.46x level-flight lethality
 		-- Collision: eagle is the heavy body; it survives trades better than a crow.
 		collisionDamageDealt = 60,   -- damage IT inflicts on whatever bird it rams (full-speed)
@@ -295,6 +316,10 @@ GameConfig.Profiles = {
 		-- reposition vertically, but the eagle stays the superior energy fighter — the crow can't out-zoom or
 		-- sustain the ascending spiral, so its game remains the tight turn + the ram. flight==balance. PROVISIONAL.
 		energyRetention = 0.4,
+		-- GLIDE COAST (see Eagle). Kept at the OLD default 0.5 (vs the eagle's 0.15): the crow's cruise stays
+		-- tight — it does NOT coast far above its 140 level cap, so it can't hold a boom-and-zoom speed like the
+		-- eagle. Structural symmetry + the eagle's coast advantage is a flight==balance lever. PLAYTEST-PROVISIONAL.
+		glideBleed = 0.5,
 		glideSpeed = 95,
 		maxLevelSpeed = 140,    -- slightly slower top end than eagle in level flight
 		diveThrustBonus = 1.25,
@@ -365,11 +390,23 @@ GameConfig.Combat = {
 	-- sends only a fire EDGE, never a direction. ALL PLAYTEST-PROVISIONAL (durations/cooldowns are Chad's asks).
 	bankStrikeThresholdDeg = 18,  -- LEGACY (no longer used; the strike zone is picked by enemy proximity, not bank)
 	strikeSelectRange = 200,      -- studs; an enemy within this range drives the zone pick + reticle lighting
+	-- ⚠️ STRIKE REACH (S17): the offensive hunt reach was `(rEagle+rMax+ATTACK_BUFFER)*reachFraction` ≈
+	-- (4.5+4.5+3)*0.85 ≈ 10.2 studs — barely past the 6.7-stud TOUCHING distance, i.e. you had to nearly
+	-- collide to land a strike. Meanwhile the ARMED reticle lights at strikeSelectRange (200 studs), so a
+	-- crow read as "on target" from 20× outside actual hit range → Chad: "pretty sure I'm hitting them but
+	-- they don't die." Each strike now carries an explicit `reachStuds` (a believable swoop-and-strike range);
+	-- if set it OVERRIDES the point-blank formula (GameServer.updateEagleStrikes). Cones/timers UNCHANGED, so
+	-- the 1-v-4 saturation balance holds (one zone at a time, one hit per window). flight==balance: this is the
+	-- eagle's EARNED hunt reach; if it turns eagle-favored, drop reachStuds / beakDamage / talon uptime FIRST.
 	strikes = {
 		-- TALON: wide belly cone (swings with bank), long active window + short reset — the workhorse grab.
-		talon = { startup = 0.10, duration = 4.0, cooldown = 2.0, axis = "belly",   coverHalfAngleDeg = 70, damage = "talon", reachFraction = 0.85 },
-		-- BEAK: narrow forward cone, short active window + long reset — the committed head-on jab.
-		beak  = { startup = 0.10, duration = 2.0, cooldown = 4.0, axis = "forward", coverHalfAngleDeg = 35, damage = "beak",  reachFraction = 0.85 },
+		-- reachStuds kept CONSERVATIVE (24): the talon already one-shots + has a 70° cone at ~67% uptime, so a
+		-- big reach here would be a death-ray (red-team #2). 24 is still a huge lift from the old ~10.2 point-blank.
+		talon = { startup = 0.10, duration = 4.0, cooldown = 2.0, axis = "belly",   coverHalfAngleDeg = 70, damage = "talon", reachFraction = 0.85, reachStuds = 24 },
+		-- BEAK: narrow forward cone, short active window + long reset — the committed head-on jab. Slightly LONGER
+		-- reach (28) than the talon: the narrow 35° cone + short 2s window make it hard to land, so a committed
+		-- head-on jab needs the range to actually connect — this is the strike Chad struggled with most.
+		beak  = { startup = 0.10, duration = 2.0, cooldown = 4.0, axis = "forward", coverHalfAngleDeg = 35, damage = "beak",  reachFraction = 0.85, reachStuds = 28 },
 	},
 }
 
@@ -445,8 +482,16 @@ GameConfig.Squad = {
 	-- doesn't sink them into the deck. Applied to every AI crow in updateAICrows AFTER steeringToInput.
 	aiFlight = {
 		enabled       = true,
-		combatSpeedMul = 1.2,  -- target speed = Crow.glideSpeed × this (95×1.2≈114). Above it, stop flapping to
-		                       -- bleed speed (parasitic drag) → tighter turns, no overshoot. Lower for tighter/slower.
+		combatSpeedMul = 1.35, -- orbit/cruise speed cap = Crow.glideSpeed × this (95×1.35≈128). Above it, stop
+		                       -- flapping to bleed (parasitic drag) → tighter turns, no overshoot.
+		                       -- RAISED 1.05→1.35 (S19): the S18 cut to ~100 was the WRONG direction — the eagle cruises
+		                       -- 130 (max 170), so crows at 100 could never stay with it → "mice and cat, I chase them."
+		                       -- ~128 (just under the eagle's cruise + the crow's own 140 maxLevelSpeed cap) lets them
+		                       -- press and stay on the eagle. Holdable on the 150 ring now that the bank cap is 72°:
+		                       -- required bank atan(128²/(150·45.6))≈67° < 72° cap (≈5° margin). The crow's real edge is
+		                       -- the TURN (2.1 rad/s) + dive, not level speed (it can't out-run the eagle) — so this keeps
+		                       -- it close enough to convert to a turning/dive fight. ⚠️ if they still can't keep up when
+		                       -- you run, the lever is a faster dive-bomb pass (raise Crow.maxLevelSpeed), not more cruise.
 		suppressDive  = true,  -- crows never DIVE in the mob (that's what builds the runaway overshoot speed).
 		floorHeight   = 250,   -- studs; below this the crow is forced to climb (flap + nose up) so it can't sink
 		                       -- into flat ground while banking. (Spires are handled by horizontal avoidance.)
@@ -458,7 +503,15 @@ GameConfig.Squad = {
 		-- A human corrects this; the bot can't. This AI-ONLY assist caps the bank and adds up-elevator in
 		-- the turn so it stays controllable. Does NOT touch the player's no-auto-level (AI loop only).
 		autopilot     = true,
-		maxBankCos    = 0.5,   -- cos(bank limit). 0.5 ≈ 60° max bank; below this uprightness, leveling takes over.
+		maxBankCos    = 0.40,  -- cos(bank limit). 0.40 ≈ 66° max bank; below this uprightness, leveling takes over.
+		                       -- RAISED 0.5→0.40 (60°→66°) S19: the 60° cap was THROTTLING the crow's designed turn
+		                       -- advantage (Crow.sustainedTurnRate 2.1 rad/s vs Eagle 1.0) → on perturbation they hit the
+		                       -- cap and understeered OUTWARD ("flock off / won't mob"). 66° lets them carve the turn WITH
+		                       -- the eagle. Paired with orbitRadius 180 so the ring's required bank (~63° at v≈128) sits
+		                       -- UNDER 66° with the S14 knife-edge safety margin mostly intact (66°→90° = 24° vs 72° = 18°).
+		                       -- ⚠️ this is the exact cap that guards the S14 falling-crash (roll-past-vertical when chased);
+		                       -- if that recurs, DON'T just lower the cap (66° < the 63° the ring needs → they spiral out) —
+		                       -- WIDEN orbitRadius instead so a lower bank holds. Chad OK'd "a couple crashed" if they mob.
 		levelAssist   = 3.0,   -- leveling roll gain (higher = snaps back to wings-level harder).
 		turnPitchUp   = 0.5,   -- up-elevator added ∝ bank so a banked turn holds altitude (coordinated turn).
 	},
@@ -475,10 +528,68 @@ GameConfig.Squad = {
 		                       -- standoff ring around the eagle so they MOB instead of "flocking off and going
 		                       -- far away" (playtest 2026-07-01). Needs goalWeight raised (below) to beat
 		                       -- separation. See docs/HANDOFF SESSION 14.
-		orbitRadius   = 220,  -- studs; standoff shell radius the crows circle at (tune: smaller = tighter/more pressure, larger = safer)
+		orbitRadius   = 180,  -- studs; standoff shell radius the crows circle at (BETWEEN dive-bomb passes). 220 (orig)
+		                      -- stood off too far ("flying away"); 150 (S18) was un-holdable — the required bank exceeded
+		                      -- the cap and they spiraled out. 180 is the red-team sweet spot: at the keep-up speed v≈128
+		                      -- the required bank is atan(128²/(180·45.6))≈63° < the 66° cap (maxBankCos 0.40) WITH the S14
+		                      -- knife-edge margin mostly restored. ⚠️ COUPLED: orbitRadius, combatSpeedMul (128) and
+		                      -- maxBankCos (66°) move together — holdable iff v ≤ √(tan(bankCap)·g·R). To bring the ring
+		                      -- CLOSER, first widen the bank cap or slow them, or they understeer OUT again. NOTE: the
+		                      -- "in your face" pressure is meant to come from the frequent dive-bomb PASSES, not a tight ring.
 		orbitHeightBias = 40, -- studs; sit slightly ABOVE the eagle (attack-from-above prep for the dive-bomb in increment 2)
-		orbitLead     = 170,  -- studs; tangential lead point along the ring → how fast they circle (0 = just hold station)
+		orbitLead     = 60,   -- studs; tangential lead point along the ring → how fast they circle (0 = just hold station).
+		                      -- LOWERED to 60 (S19): with the ring close (150) and the eagle moving, a big lead demanded
+		                      -- excess bank on top of just following him; 60 = they hold close station + gently circle
+		                      -- (surround/harass) rather than race around the ring and sling outward.
 		clumpSpread   = true, -- give each crow its own bearing/handedness so they surround from multiple angles, not stack
+
+		-- INCREMENT 2 — STAGGERED DIVE-BOMB + PEEL-OFF (the mob's first TEETH).
+		-- Research (docs/RESEARCH-crow-mobbing.md): real corvids don't sit on the ring — they take
+		-- TURNS committing a fast pass THROUGH the raptor, throw the pass, then PEEL OFF to recover,
+		-- never all-at-once (all-4-on-one-vector = the pile-up). Structurally: ONE crow attacks at a
+		-- time (squad-level round-robin in GameServer.updateAICrows), the rest hold the standoff ring.
+		-- On a committed pass the attacker aims at the eagle CENTRE and gets a raised speed cap
+		-- (attackSpeedMul) so it actually reaches ram range; contact = the crow's sacrifice ram (eagle
+		-- takes health/eagleHits), a miss = the eagle read/dodged it. Then it PEELS out+up to recover.
+		-- AI-only; the player-possessed crow is never scheduled or overridden.
+		-- NOTE (do NOT overclaim): this is the mob's TEETH + a CONTROLLED close-then-break replacing the
+		-- constant passive drift-into-contact. It is NOT by itself an "attrition fix" — AI-crow waves
+		-- respawn only when ALL are dead, and a landed pass is a deliberate sacrifice, so crows still
+		-- trade themselves. Whether "attrites to ~1" is a bug or the intended sacrifice dynamic is a
+		-- Chad design call (open question in the s16 playtest). flight==balance: this is timed pressure
+		-- the eagle can read and beat, not a swarm pile-up. Flip `enabled=false` to fall back to pure orbit.
+		-- ⚠️ CADENCE (REVISED S19 — the "mice/cat" strategy pivot): the old rule was "one attacker at a
+		--    time" (attackDuration+peelDuration ≤ attackPeriod), which made a lone pass every 3.4s while 3
+		--    crows circled — so the DOMINANT behavior was orbit-circling, which reads as EVASION ("they flock
+		--    off, I chase them like mice"), not mobbing. Now attackPeriod is SHORT so a new attacker launches
+		--    before the last finishes → ~1-2 crows are ALWAYS diving at the eagle, from DIFFERENT ring bearings
+		--    (round-robin + clumpSpread) → constant harassment = the mob FEEL. This is NOT the old pile-up
+		--    (that was all-4 on ONE vector at uncontrolled speed); it's ≤2 controlled attackers from spread
+		--    angles, separation keeping them apart. Concurrent-attacker count ≈ attackDuration/attackPeriod.
+		--    ⚠️ don't push attackPeriod so low that 3-4 pile on at once — keep it ≥ ~1.0. flight==balance: more
+		--    passes = more ram pressure on the eagle (each landed ram = health/eagleHits); raise attackPeriod
+		--    if the 1-v-4 turns crow-favored, lower it toward mob harder.
+		diveBomb = {
+			enabled       = true,
+			attackPeriod  = 1.4,  -- s between attack LAUNCHES. SHORT (was 3.4) so ~1 crow is always mid-dive + often a
+			                      -- 2nd = the eagle is under near-continuous harassment from spread angles. See cadence note.
+			attackDuration = 1.6, -- s the attacker commits toward the eagle (closes the standoff for the pass)
+			peelDuration  = 1.4,  -- s the attacker breaks away+climbs to recover before rejoining the ring
+			attackSpeedMul = 1.8, -- LIFTS the AI governor's cruise cap during the pass so the attacker flies as fast
+			                      -- as the KERNEL allows and reaches ram range (vs the ~100 orbit cruise). ⚠️ It does NOT
+			                      -- reach 95×1.8≈171: the attacker keeps suppressDive ON, so FlightPhysics clamps a
+			                      -- non-diving crow at Crow.maxLevelSpeed=140. So the real pass tops ~140 studs/s — still
+			                      -- easily crosses the tightened 150 orbit to contact. Anything above 1.47 (140/95) is a
+			                      -- no-op here; to make the pass genuinely faster you'd raise Crow.maxLevelSpeed (a balance
+			                      -- change — don't do it silently).
+			peelRadiusMul = 1.15, -- peel-off aims back OUT to orbitRadius × this (beyond the ring) so it clears the eagle.
+			                      -- LOWERED 1.6→1.15 (S18): 1.6 (×220 ≈ 352 studs) flung the attacker FAR out+up after
+			                      -- every pass → read as "fleeing." 1.15 (×150 ≈ 172) just clears the ring so it re-engages.
+			peelHeightBias = 50,  -- studs; climb this much above the eagle on the peel (regain attack-from-above E). LOWERED
+			                      -- 120→50 (S18) so the peel is a tight re-engage, not a long flight up-and-away.
+			-- suppressDive stays ON even during the pass for the first playtest (a controlled fast closure, not a
+			-- stoop) so we don't reintroduce the dive-into-terrain overshoot; revisit once cadence feels right.
+		},
 	},
 }
 
@@ -538,8 +649,8 @@ GameConfig.Security = {
 	-- TERMINAL, so an honest bird FREE-FALLING (not diving — diveSpeedCap doesn't apply) can
 	-- legitimately approach TERMINAL. Basing the ceiling on diveSpeedCap would false-positive a
 	-- plummeting crow. A real speed hack still blows past TERMINAL×1.25.
-	speedAllowMult = 1.25,    -- => ~500 studs/s sustained ceiling at TERMINAL 400
-	teleportMult = 1.5,       -- per-frame teleport gate = TERMINAL × this (~600); single-frame jump
+	speedAllowMult = 1.25,    -- => ~525 studs/s sustained ceiling at TERMINAL 420 (legit flap-top 420 stays inside)
+	teleportMult = 1.5,       -- per-frame teleport gate = TERMINAL × this (~630); single-frame jump
 	pingPadStuds = 30,        -- extra teleport-gate slack for replication jitter/lag
 	bucketCapacity = 120,     -- accumulated overshoot (studs) before a strike is issued
 	bucketLeak = 200,         -- bucket drains this many studs/sec (transient spikes forgiven)
@@ -755,12 +866,17 @@ GameConfig.Controls = {
 	-- at big deflections"). Higher gain SATURATES the command for anything but a tiny error, so the bird turns at
 	-- its MAX rate to close small/medium gaps fast (snappy), while big gaps still take the eagle's turn rate to
 	-- sweep (rate-limited). Tiny errors stay sub-saturation for fine aim. PD damps the overshoot the gain adds.
-	aimRollGain      = 4.5,   -- bank-to-turn strength (2.6->4.5: snappier catch-up)
-	aimPitchGain     = 5.0,   -- elevator: pulls the nose toward the target (3.3->5.0: snappier; full deflection still saturates -> loop)
-	aimYawGain       = 1.0,   -- rudder, coordinated WITH the bank (0.78->1.0: scaled with the gain bump)
+	-- SNAPPIER (Chad 2026-07-02): "at close range it lags; small deflections should SNAP to the cursor in a
+	-- fraction of a second — only a LARGE deflection has noticeable reticle catch-up." Raised the P-gains so the
+	-- command saturates at a SMALLER error → the nose closes small/medium gaps at the eagle's max turn rate (a
+	-- small angle at max rate = a fraction of a second = "snap"), while a big deflection still needs the full
+	-- turn-rate sweep to catch up (the intended lag). Damping raised in step so the faster response doesn't ring.
+	aimRollGain      = 6.5,   -- bank-to-turn strength (4.5->6.5: snap small deflections)
+	aimPitchGain     = 7.2,   -- elevator: pulls the nose toward the target (5.0->7.2: snap; full deflection still saturates -> loop)
+	aimYawGain       = 1.4,   -- rudder, coordinated WITH the bank (1.0->1.4: scaled with the gain bump)
 	aimLevelGain     = 0.9,   -- wings-levelling toward straight flight when there's no bank demand (anti stuck-in-bank)
-	aimPitchDamp     = 0.45,  -- PD: nose-pitch-rate feedback (0.35->0.45: control the higher-gain overshoot)
-	aimRollDamp      = 0.40,  -- PD: roll-rate feedback (0.30->0.40: control the higher-gain overshoot)
+	aimPitchDamp     = 0.58,  -- PD: nose-pitch-rate feedback (0.45->0.58: control the higher-gain overshoot)
+	aimRollDamp      = 0.52,  -- PD: roll-rate feedback (0.40->0.52: control the higher-gain overshoot)
 	aimStallBandDeg  = 4,     -- degrees below stall where the nose-up PULL eases (4, narrow: ride the edge -> loop commits)
 	invertPitch      = false, -- false = cursor ABOVE the nose pitches UP (the cross rises to meet it)
 

@@ -1002,7 +1002,9 @@ local function updateEagleStrikes(dt)
 				local cfg = strikes[s.stype]
 				if cfg then
 					local p = entry.profile
-					local reach = (p.bodyRadius + MAX_BODY_RADIUS + ATTACK_BUFFER) * (cfg.reachFraction or 0.7)
+					-- Explicit reachStuds (S17) is a believable swoop-and-strike range; fall back to the
+					-- old point-blank formula only if a strike omits it.
+					local reach = cfg.reachStuds or (p.bodyRadius + MAX_BODY_RADIUS + ATTACK_BUFFER) * (cfg.reachFraction or 0.7)
 					local target, dist = findNearestEnemy(entry, reach + 6)
 					if target and dist and dist <= reach then
 						local dir = target.body.Position - entry.body.Position
@@ -1349,6 +1351,23 @@ local function mobOrbitTarget(eaglePos, crowPos, handed)
 	return station + lead + Vector3.new(0, cfg.orbitHeightBias or 40, 0)
 end
 
+-- PEEL-OFF target (increment 2) — after a dive-bomb pass, the attacker breaks AWAY from the eagle and
+-- CLIMBS to recover, instead of lingering in contact (which is a passive suicide-ram). Aim a point back
+-- outward along the crow's current bearing, beyond the ring, and well above the eagle (regain the
+-- attack-from-above energy for its next pass). handed unused here — the break is purely radial+up.
+local function mobPeelTarget(eaglePos, crowPos)
+	local cfg = GameConfig.Squad.mob
+	local db = cfg.diveBomb or {}
+	local orbitR = cfg.orbitRadius or 220
+	local radial = crowPos - eaglePos
+	radial = Vector3.new(radial.X, 0, radial.Z)
+	if radial.Magnitude < 1e-3 then
+		radial = Vector3.new(1, 0, 0)
+	end
+	radial = radial.Unit
+	return eaglePos + radial * (orbitR * (db.peelRadiusMul or 1.6)) + Vector3.new(0, db.peelHeightBias or 120, 0)
+end
+
 -- Build the neighbor list (other living squad members) for boids.
 local function squadNeighbors(squad, selfEntry)
 	local neighbors = {}
@@ -1402,14 +1421,42 @@ local function updateAICrows(dt)
 	local fdt = math.min(dt, AI_HEARTBEAT_DT_CAP)
 	local formations = GameConfig.Squad.formations
 
+	local now = os.clock()
 	for _, squad in pairs(Squads) do
 		local goal, _possessed, enemy = squadGoal(squad)
 		local formationCfg = formations[squad.formationName] or formations.loose
-		-- MOBBING (increment 1): an aggressive bot squad with a live eagle orbits it instead of ramming.
-		-- Gated OFF (Squad.mob.enabled=false) — orbit geometry didn't fix scatter+crash; root cause is
-		-- AI flight control (crows can't hold a banked turn). Flag stays for when that's fixed.
+		-- MOBBING (increment 1 orbit): an aggressive bot squad with a live eagle CIRCLES it at a
+		-- standoff ring instead of ramming its centre (research: mobbing≠flocking — crows are
+		-- independent attackers that orbit + dive-bomb, cohesion DROPS). Gated on Squad.mob.enabled.
 		local mobbing = GameConfig.Squad.mob.enabled and squad.aggressive and enemy ~= nil
 		local eaglePos = mobbing and enemy.body.Position or nil
+
+		-- STAGGERED DIVE-BOMB SCHEDULER (increment 2): while mobbing, launch ONE attacker at a time on
+		-- a round-robin so the crows TAKE TURNS committing a pass through the eagle and PEELING off,
+		-- never all-4-at-once. Stamps _attackUntil/_peelUntil on the chosen crow; the member loop below
+		-- reads those to pick its goal (dive at the eagle → peel out+up → back to the ring). AI-only.
+		local db = GameConfig.Squad.mob.diveBomb
+		if mobbing and db and db.enabled then
+			local sched = squad._mobAttack
+			if not sched then sched = { nextAt = 0, cursor = 0 }; squad._mobAttack = sched end
+			if now >= sched.nextAt then
+				-- Pick the next LIVING AI member (never the player's crow) as the sole attacker.
+				local n = #squad.members
+				local chosen = nil
+				for step = 1, n do
+					local i = (sched.cursor + step - 1) % n + 1
+					local e = Birds[squad.members[i]]
+					if e and e.isAI and isBirdAlive(e) then
+						chosen = e; sched.cursor = i; break
+					end
+				end
+				if chosen then
+					chosen._attackUntil = now + (db.attackDuration or 1.6)
+					chosen._peelUntil = chosen._attackUntil + (db.peelDuration or 1.4)
+				end
+				sched.nextAt = now + (db.attackPeriod or 3.0)
+			end
+		end
 
 		for idx, model in ipairs(squad.members) do
 			local entry = Birds[model]
@@ -1431,8 +1478,20 @@ local function updateAICrows(dt)
 				-- head-on closure; coverage from multiple bearings comes from their distinct start
 				-- positions on the ring.
 				local memberGoal = goal
+				local isAttacking = false     -- true only for the crow committing a dive-bomb pass this frame
 				if mobbing then
-					memberGoal = mobOrbitTarget(eaglePos, body.Position, 1)
+					-- Increment 2 mode select: this crow is either committing a dive-bomb pass (goal =
+					-- eagle centre — the ONE time it closes the standoff), peeling off (goal = out past
+					-- the ring + climb to recover), or holding the orbit ring (default). Timers set by the
+					-- squad scheduler above; expire naturally back to ORBIT.
+					if entry._attackUntil and now < entry._attackUntil then
+						memberGoal = eaglePos                              -- DIVE-BOMB: commit through the eagle
+						isAttacking = true
+					elseif entry._peelUntil and now < entry._peelUntil then
+						memberGoal = mobPeelTarget(eaglePos, body.Position) -- PEEL-OFF: break away + climb
+					else
+						memberGoal = mobOrbitTarget(eaglePos, body.Position, 1) -- ORBIT the standoff ring
+					end
 				end
 				local steer = Boids.computeSteering(selfState, neighbors, memberGoal, formationCfg)
 				-- Obstacle avoidance (#8): bias steering away from imminent terrain so the crow
@@ -1453,7 +1512,16 @@ local function updateAICrows(dt)
 				local af = GameConfig.Squad.aiFlight
 				if af and af.enabled then
 					local sp = body.AssemblyLinearVelocity.Magnitude
-					local combatSpeed = (entry.profile.glideSpeed or 95) * (af.combatSpeedMul or 1.2)
+					-- A crow COMMITTING a dive-bomb pass gets a higher speed ceiling so it actually CLOSES
+					-- the ~orbitRadius standoff and reaches ram range within its attack window (at the cruise
+					-- cap it falls short and the pass whiffs). Still capped + suppressDive on, so it's a fast
+					-- controlled closure, not a runaway stoop into terrain. Orbiting/peeling crows keep the
+					-- normal cruise cap for tight, controllable turns.
+					local speedMul = af.combatSpeedMul or 1.2
+					if isAttacking then
+						speedMul = (GameConfig.Squad.mob.diveBomb and GameConfig.Squad.mob.diveBomb.attackSpeedMul) or 1.8
+					end
+					local combatSpeed = (entry.profile.glideSpeed or 95) * speedMul
 					if af.suppressDive then
 						input.dive = false
 					end

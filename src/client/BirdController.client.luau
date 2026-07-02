@@ -331,6 +331,11 @@ local function setFreeLook(active)
 		-- and re-lock the mouse (onFlightStep will keep it LockCenter'd for the relative-delta aim read).
 		aimTargetDir = nil
 		UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+		-- CS-2 EXIT SNAP (Chad 2026-07-02): on leaving free-look the camera used to LERP from the orbit pose
+		-- back to the chase pose at the slow followSmoothing rate (~0.165/frame) — a ~3/4 s sweep through a
+		-- side/perpendicular view that "costs reaction time due to disorientation." Flag a fast crisp return so
+		-- updateCamera re-centres on the heading in ~50-80 ms (see the fast-return in updateCamera).
+		cameraState.snapToChase = true
 	end
 end
 
@@ -693,7 +698,10 @@ local function updateCamera(dt)
 	else
 		lookTarget = position + headingRef * (dist * 0.12)
 		if aimZoom.factor > 1e-3 then
-			lookTarget = lookTarget:Lerp(position + cf.LookVector * 2000, aimZoom.factor)
+			-- Look FAR along the beak so the telescope magnifies the aim point (distance matched to the reticle's
+			-- 4000 projection). The zoom centres this exact world point; the aim reticle (shown during zoom in the
+			-- input/render block) is drawn from the SAME point through the SAME camera, so they coincide on screen.
+			lookTarget = lookTarget:Lerp(position + cf.LookVector * 4000, aimZoom.factor)
 		end
 	end
 	local targetCF = CFrame.lookAt(camPos, lookTarget, camUp)
@@ -714,11 +722,23 @@ local function updateCamera(dt)
 	-- with the much higher freeLookSmoothing instead. The single biggest "unstick". Chase smoothing unchanged.
 	if freeLook.active then
 		smoothing = CAM.freeLookSmoothing or smoothing
+	elseif cameraState.snapToChase then
+		-- CS-2 EXIT SNAP (Chad 2026-07-02): on leaving free-look, re-centre on the heading with the CRISP
+		-- free-look tracking rate for a few frames (~50-80 ms) instead of the slow followSmoothing sweep (a
+		-- ~3/4 s disorienting swing through a side view). NOT a hard 1-frame teleport: during free-look the
+		-- chase-up stops self-levelling, so after a fast loop the stored up can be tilted — a teleport would
+		-- flash that tilted horizon for a frame. The fast ease lets the up re-level in step (no jarring cut).
+		smoothing = CAM.freeLookSmoothing or smoothing
 	end
 
 	-- Frame-rate independent smoothing toward the target.
 	local alpha = math.clamp(1 - math.exp(-smoothing * 60 * dt), 0, 1)
 	camera.CFrame = camera.CFrame:Lerp(targetCF, alpha)
+	-- Consume the exit-snap fast-return once the view has essentially reached the chase heading (or if
+	-- free-look was re-armed). One-shot per exit; setFreeLook re-sets it on the next release.
+	if cameraState.snapToChase and (freeLook.active or camera.CFrame.LookVector:Dot(targetCF.LookVector) > 0.9995) then
+		cameraState.snapToChase = nil
+	end
 
 	-- High-speed shake.
 	if speed > CAM.shakeAtSpeed then
@@ -1051,6 +1071,7 @@ local function onFlightStep(dt)
 		aimDot.Position    = UDim2.fromOffset(aimCursor.cursorX, aimCursor.cursorY) -- ring: your cursor (desired direction)
 		noseMarker.Visible = true
 		noseMarker.Position = UDim2.fromOffset(aimCursor.noseX, aimCursor.noseY)    -- amber: the beak boresight (cursor on it = level)
+		aimZone.Visible = true -- restore the fixed centre tick (the RMB-zoom branch hides it; it never re-set true otherwise)
 		local isEagle = (currentTeam == "Eagles") -- only the eagle strikes; crows keep just the boresight + cursor
 		for i, p in ipairs(talonPips) do                                            -- belly arc: the talon strike zone (swings with bank)
 			p.Visible = isEagle
@@ -1087,6 +1108,27 @@ local function onFlightStep(dt)
 				local by = math.clamp(bv.Y + gi.Y, 24, vp.Y + gi.Y - 24)
 				noseMarker.Position = UDim2.fromOffset(bx, by)
 				aimDot.Position    = UDim2.fromOffset(bx, by) -- cursor FUSED with the reticle on the beak
+			end
+			for _, p in ipairs(talonPips) do p.Visible = false end
+			paintStrikeReticles("none")
+		elseif aimZoom.active and camera and rootPart and rootPart.Parent then
+			-- RMB ZOOM: SHOW the boresight reticle on the zoom's focal point (the beak, cf.LookVector*4000 — the
+			-- exact world point updateCamera centres the telescope on) so "where you're aiming" is visible AT the
+			-- zoom centre. Previously the reticle was HIDDEN during zoom, leaving only the faint HUD crosshair — so
+			-- the magnified view had no aim reference and read as "zooming a bit above the reticle" (Chad 2026-07-02).
+			-- The marker projects the SAME world point through the SAME camera, so it lands on the zoom centre by
+			-- construction. Cursor ring + zone + strike pips hidden (steering is suspended) — just the clean boresight.
+			local vp = camera.ViewportSize
+			local gi = GuiService:GetGuiInset()
+			local bcf = rootPart.CFrame
+			local bv = camera:WorldToViewportPoint(bcf.Position + bcf.LookVector * 4000)
+			aimGui.Enabled = true
+			local onScreen = bv.Z > 0
+			noseMarker.Visible = onScreen
+			aimDot.Visible = false
+			aimZone.Visible = false
+			if onScreen then
+				noseMarker.Position = UDim2.fromOffset(bv.X + gi.X, bv.Y + gi.Y)
 			end
 			for _, p in ipairs(talonPips) do p.Visible = false end
 			paintStrikeReticles("none")

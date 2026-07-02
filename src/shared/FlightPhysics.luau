@@ -383,8 +383,13 @@ function FlightPhysics:Update(dt, input)
 	if sp > hardCap then
 		self.velocity = self.velocity.Unit * hardCap
 	elseif (not self.isDiving) and (not wantFlap) and sp > cap then
-		-- gentle bleed toward level cap while gliding
-		self.velocity = self.velocity.Unit * (cap + (sp - cap) * math.max(0, 1 - dt * 0.5))
+		-- Bleed the EXCESS over cruise (maxLevelSpeed) toward cruise while gliding hands-off. This is an
+		-- ARTIFICIAL exponential pull (rate = glideBleed per sec on the excess), NOT aerodynamic drag — it's
+		-- the dominant speed-killer above cruise (at 420 with rate 0.5 it decel'd ~125 studs/s²: 420→250 in
+		-- ~2 s, the "I lose energy so fast" Chad felt). Per-profile so the eagle (energy fighter) COASTS —
+		-- holds a boom/zoom speed far longer when aerodynamic — while the crow keeps the tighter cruise.
+		-- Lower glideBleed = holds speed longer. Falls back to 0.5 (the old value) if a profile omits it.
+		self.velocity = self.velocity.Unit * (cap + (sp - cap) * math.max(0, 1 - dt * (p.glideBleed or 0.5)))
 	end
 
 	----------------------------------------------------------------------------
