@@ -541,7 +541,28 @@ GameConfig.Squad = {
 		                      -- LOWERED to 60 (S19): with the ring close (150) and the eagle moving, a big lead demanded
 		                      -- excess bank on top of just following him; 60 = they hold close station + gently circle
 		                      -- (surround/harass) rather than race around the ring and sling outward.
-		clumpSpread   = true, -- give each crow its own bearing/handedness so they surround from multiple angles, not stack
+		-- MOB STEERING PROFILE (S24 — the scatter fix, hypothesis pending playtest confirmation).
+		-- Research (docs/RESEARCH-crow-mobbing.md): mobbing ≠ flocking — real corvids switch to
+		-- METRIC/independent-attacker mode; cohesion DROPS. That reframe was wired into the goal GEOMETRY
+		-- (orbit shell) but NOT the steering blend: mobbing crows still ran full alignment(1.0)+cohesion(0.8).
+		-- The bot wave spawns 12 studs apart and each stations at its OWN bearing, so the squad rings one
+		-- narrow sector (separation spreads them only to ~the 60-stud perception edge ≈ 19° of a 180 ring) —
+		-- "surround from multiple angles" never happened. And whenever the dive-bomb scheduler sends a crow
+		-- OUT (peel target beyond the ring) or the eagle runs, alignment/cohesion (up to ~1.8 combined) drag
+		-- the others along vs goalWeight 2.0 — the leading suspect for the 5-playtest "they scatter and fly
+		-- away" (code-verified mechanism; that it's THE cause is confirmed only by Chad's next Play). This
+		-- table is passed as the boids formationCfg while mobbing (updateAICrows): alignment/cohesion OFF
+		-- (independent attackers), separation kept high (research-verified). Bearings should diffuse as passes
+		-- and peels re-ring crows at new bearings with nothing re-syncing them — but the TIMESCALE is unproven;
+		-- if playtest still shows one-sector attacks, the pre-registered fallback is explicit per-crow bearing
+		-- offsets in mobOrbitTarget (the surgical version of what the old flag promised). AI-only; player
+		-- squads keep their tight/loose formation blend. (Replaces `clumpSpread`, which NO code ever read.)
+		-- ⚠️ S25 SUPERSEDES this as the PRIMARY scatter cause: steeringToInput's horizontal channels were
+		-- SIGN-INVERTED (Boids.luau S25 note) — crows stably flew AWAY from every goal, so they never sat on
+		-- the ring long enough for this flock-drift mechanism to be the driver. Keep this profile anyway: it
+		-- is the research-correct mob blend (independent attackers), just demoted from "root cause" to
+		-- "secondary/contributing." Set `steering = nil` to A/B the old flocking blend in isolation.
+		steering = { spacing = 30, cohesionMul = 0, alignmentMul = 0, separationMul = 1.4 },
 
 		-- INCREMENT 2 — STAGGERED DIVE-BOMB + PEEL-OFF (the mob's first TEETH).
 		-- Research (docs/RESEARCH-crow-mobbing.md): real corvids don't sit on the ring — they take
@@ -563,7 +584,8 @@ GameConfig.Squad = {
 		--    crows circled — so the DOMINANT behavior was orbit-circling, which reads as EVASION ("they flock
 		--    off, I chase them like mice"), not mobbing. Now attackPeriod is SHORT so a new attacker launches
 		--    before the last finishes → ~1-2 crows are ALWAYS diving at the eagle, from DIFFERENT ring bearings
-		--    (round-robin + clumpSpread) → constant harassment = the mob FEEL. This is NOT the old pile-up
+		--    (round-robin + the mob steering profile's pass-through bearing diffusion) → constant harassment =
+		--    the mob FEEL. This is NOT the old pile-up
 		--    (that was all-4 on ONE vector at uncontrolled speed); it's ≤2 controlled attackers from spread
 		--    angles, separation keeping them apart. Concurrent-attacker count ≈ attackDuration/attackPeriod.
 		--    ⚠️ don't push attackPeriod so low that 3-4 pile on at once — keep it ≥ ~1.0. flight==balance: more

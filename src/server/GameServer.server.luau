@@ -1430,6 +1430,15 @@ local function updateAICrows(dt)
 		-- independent attackers that orbit + dive-bomb, cohesion DROPS). Gated on Squad.mob.enabled.
 		local mobbing = GameConfig.Squad.mob.enabled and squad.aggressive and enemy ~= nil
 		local eaglePos = mobbing and enemy.body.Position or nil
+		-- MOB STEERING (S24 scatter fix): while mobbing, swap the flocking blend for the
+		-- independent-attacker profile (alignment/cohesion 0, separation high) — see the
+		-- Squad.mob.steering comment in GameConfig for the full mechanism. Without this the
+		-- clumped orbiters align/cohere with every departing attacker/peeler and the whole
+		-- group drifts away ("they scatter and fly away"). AI-only: player squads are never
+		-- `aggressive`, so their tight/loose formation blend is untouched.
+		if mobbing and GameConfig.Squad.mob.steering then
+			formationCfg = GameConfig.Squad.mob.steering
+		end
 
 		-- STAGGERED DIVE-BOMB SCHEDULER (increment 2): while mobbing, launch ONE attacker at a time on
 		-- a round-robin so the crows TAKE TURNS committing a pass through the eagle and PEELING off,
