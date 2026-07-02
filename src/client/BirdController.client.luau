@@ -937,6 +937,47 @@ local function computeMouseAim(dt)
 			aimTargetDir = CFrame.fromAxisAngle(axis.Unit, maxLead):VectorToWorldSpace(birdLook)
 		end
 	end
+	-- SCREEN-CENTRED cursor circle (RESTORED S26 — this clamp was silently LOST in the 2026-06-30
+	-- nose-chases-cursor rewrite, leaving aimCursorAreaFrac unread; Chad: "the cursor now goes all the
+	-- way to the edges and corners; my cursor circle should be centered and take up only about 5/8 of
+	-- the screen"). The nose-cone clamp above bounds the cursor's LEAD relative to the NOSE — but the
+	-- aim camera LAGS the heading, so mid-turn the nose (and its whole cone) sits off-centre and the
+	-- cursor could still reach the screen edges/corners. This second clamp bounds the cursor relative
+	-- to the CAMERA: its projected position may never leave a circle CENTRED on the screen covering
+	-- aimCursorAreaFrac of the screen area. World-anchored model preserved (CS-8): the cursor is still
+	-- a world direction and the nose still catches it — this only limits how far off-centre it can be
+	-- PUSHED. In steady flight the (tighter) nose cone binds, so the settled feel is unchanged. ⚠️ In a
+	-- SUSTAINED FAST turn the camera lags the heading (lag ≈ ω/aimHeadingLag), so this bound eats into
+	-- the usable lead and can soft-cap the turn once the allowed lead nears the saturation error (~9° at
+	-- the current gains — eagle max-rate turns brush it; a possessed CROW's higher turn rate hits it
+	-- harder). The centred-circle bound and the cursor-hangs-out camera lag are in direct TENSION —
+	-- knobs: aimCursorAreaFrac up (bigger circle) or aimHeadingLag up (tighter camera, less hang-out).
+	local areaFrac = C.aimCursorAreaFrac
+	if areaFrac and areaFrac > 0 then
+		local camLocal = camCF:VectorToObjectSpace(aimTargetDir)
+		if camLocal.Z < -EPS then -- only meaningful in front of the camera (Roblox camera looks down -Z)
+			local tx, ty = camLocal.X / -camLocal.Z, camLocal.Y / -camLocal.Z
+			local pxScale = (vp.Y * 0.5) / halfFovTan            -- projection px per tan-unit (both axes)
+			-- Radius from the AREA fraction, HARD-CAPPED to fit fully inside the screen (S26c, Chad: the
+			-- circle "still hits the upper flat limit of my screen — when it does it's hard to control the
+			-- direction of the turn"). An area-fraction circle can be taller than the screen (5/8 area on
+			-- 16:9 ⇒ radius ≈ 1.19× half-height), so the rim went FLAT at the top/bottom edge = ambiguous
+			-- turn direction at the rim. The cap keeps the rim round on every screen; margin covers the
+			-- 48px cursor ring + the small bird-vs-camera projection parallax at the rim.
+			local edgeMargin = 48
+			local rPx = math.min(
+				math.sqrt(areaFrac * vp.X * vp.Y / math.pi),
+				vp.Y * 0.5 - edgeMargin,
+				vp.X * 0.5 - edgeMargin)
+			if rPx < 50 then rPx = 50 end -- degenerate tiny-viewport floor
+			local px = math.sqrt(tx * tx + ty * ty) * pxScale
+			if px > rPx then
+				local s = rPx / px
+				local nd = camCF:VectorToWorldSpace(Vector3.new(tx * s, ty * s, -1))
+				aimTargetDir = (nd.Magnitude > EPS) and nd.Unit or aimTargetDir
+			end
+		end
+	end
 	local localTarget = cf:VectorToObjectSpace(aimTargetDir)
 
 	-- Body-frame target (x = right, y = up; forward = -z). HORIZONTAL drives bank+yaw, VERTICAL drives pitch.
@@ -962,9 +1003,20 @@ local function computeMouseAim(dt)
 	-- ELEVATOR (PD): P pulls the nose toward the target; D (aimPitchDamp · current pitch-rate) damps the
 	-- climb/pull porpoise. The damp normalises the body rate by the profile pitchRate so it's ~[-1,1].
 	-- Full deflection still saturates to 1 (loop authority intact); the damp only bites near equilibrium.
+	-- LOW-SPEED TURN STABILITY (S26e, Chad: "at slower speeds the instructor causes oscillations up and
+	-- down in the turn"). The instructor was SPEED-BLIND: it commanded the same nose-up pull at 80
+	-- studs/s as at 300, but slow wings answer weakly and AoA rides the stall band, so the pitch loop
+	-- overshot up, sagged, pulled again — the porpoise. Scale the pitch P-GAIN with airspeed: full gain
+	-- at/above the profile glide speed (the loved snap at speed is UNCHANGED), easing to a floor as the
+	-- bird slows. The D term is NOT scaled, so relative damping RISES at low speed = a sustainable slow
+	-- turn instead of pumping. NOT a lift/kernel change (lift is signed-off; the plant was fine — the
+	-- controller was over-driving it). Knobs: aimLowSpeedGainFloor (0.5), aimSpeedGainRef (×glideSpeed).
 	local pitchRate = (currentProfile and currentProfile.pitchRate) or 2.0
 	local pitchRate01 = clamp((flightEngine.pitchVel or 0) / math.max(0.1, pitchRate), -1, 1)
-	local pitch = vCmd * (C.aimPitchGain or 2.6) - (C.aimPitchDamp or 0.35) * pitchRate01
+	local spdNow = flightEngine.speed or 0
+	local spdRef = ((currentProfile and currentProfile.glideSpeed) or 95) * (C.aimSpeedGainRef or 1.0)
+	local speedScale = clamp(spdNow / math.max(1, spdRef), C.aimLowSpeedGainFloor or 0.5, 1)
+	local pitch = vCmd * (C.aimPitchGain or 2.6) * speedScale - (C.aimPitchDamp or 0.35) * pitchRate01
 	if pitch > 0 then pitch = pitch * aoaHead end  -- ride-the-edge protection on the nose-UP pull only
 	pitch = clamp(pitch, -1, 1)
 

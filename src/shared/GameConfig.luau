@@ -697,13 +697,23 @@ GameConfig.Round = {
 --------------------------------------------------------------------------------
 GameConfig.Camera = {
 	baseDistance = 40,
-	mouseAimDistance = 135, -- STRICT FIXED chase distance while in mouse-aim mode (wheel zoom ignored there; pulled well back behind the bird — player ask)
+	mouseAimDistance = 230, -- STRICT FIXED chase distance while in mouse-aim mode (wheel zoom ignored there; pulled well
+	                        -- back behind the bird — player ask). 135→200→230 (S26, Chad live-tuned: "zoom back ~50%…
+	                        -- back up to 230, a little more — I need to see more around me in the turn"; 200 was
+	                        -- "a lot better"). Revert toward 135 if the eagle reads too small to fly.
 	-- MOUSE-AIM CAMERA HEADING LAG (rad/s): how fast the aim camera's view catches up to the bird's heading. LOW
 	-- lag = when you fling the cursor and the bird turns, the view DOESN'T snap around, so the world-anchored
-	-- cursor hangs out on screen and the nose visibly LAGS behind and chases it (player ask). Higher = the view
+	-- cursor hangs out on screen and the nose visibly LAGS behind and chases it. Higher = the view
 	-- tracks the heading tighter (cursor re-centres sooner). Too low and the bird drifts to the frame edge in a
 	-- long hard turn. Only used in mouse-aim mode; chase-only/free-look use chaseTurnRate.
-	aimHeadingLag = 1.4,
+	-- ⚠️ PREFERENCE REVISED (Chad, for the record, 2026-07-02 S26c): "I don't like the aim heading lag —
+	-- that is NOT my preference, I wanted it tighter… the reticle should snap tighter to the cursor."
+	-- 1.4→2.6→4.0 (lag time-constant ~0.71s→0.38s→0.25s). S26d: 2.6 was good but mouse-aim COMBINED with
+	-- full-deflection keystrokes still wanted more turn authority (the laggy view read as sluggish
+	-- response during combo flying) → 4.0 per Chad. The old "cursor hangs out" framing is no longer a
+	-- loved feature to protect — tighter tracking also reduces how far the cursor circle drifts in hard
+	-- turns (it and the restored screen clamp are in tension — see Controls.aimCursorAreaFrac).
+	aimHeadingLag = 4.0,
 	baseFOV = 70,
 	diveFOV = 95,
 	climbFOV = 62,
@@ -831,7 +841,16 @@ GameConfig.Controls = {
 	-- clamped — bigger = a bigger circle you can pilot before the nose catches up). Command is body-relative to the
 	-- nose (so cursor-on-nose = straight) and zoom-independent; the camera is also fixed in aim mode.
 	aimAnglePerPixel    = 0.0035, -- radians the cursor swings per mouse unit (× aimMouseSensitivity) — lowered 0.006->0.0035 (cursor was too sensitive)
-	aimLeadScreenFrac   = 0.95,  -- cursor-circle size: fraction of the way to the top/bottom edge the cursor can lead (0..1)
+	aimLeadScreenFrac   = 0.95,  -- cursor-circle size: fraction of the way to the top/bottom edge the cursor can lead (0..1).
+	                             -- ⚠️ S26 REVERTED 0.625→0.95 after Chad's play: shrinking this cone does NOT shrink the
+	                             -- on-screen circle he sees (the cone follows the NOSE, which the lagging aim camera puts
+	                             -- off-centre mid-turn) and it made the rubber-band WORSE (the nose catches the cursor ~40%
+	                             -- faster → the sustained-turn deflection decays in pulses: "intermittent pulling, I have
+	                             -- to keep moving the mouse"). The real fix for his centred-5/8-circle + sustained-edge-
+	                             -- deflection ask is a MODEL question (screen-anchored stick vs world-anchored chase) —
+	                             -- CS-8 territory, Chad's call (2026-07-02: he chose KEEP the model). Do NOT re-shrink
+	                             -- this value to chase the circle size — the circle is bounded by aimCursorAreaFrac
+	                             -- (camera-relative, restored S26), which ALSO caps sustained-turn lead — see its note.
 	aimMaxLeadDeg       = 70,    -- hard cap on the lead half-angle (deg); the FOV-derived value governs below it
 	-- LEGACY / unused by the nose-chases-cursor model.
 	aimCursorRadiusFrac = 0.9,   -- legacy
@@ -879,10 +898,17 @@ GameConfig.Controls = {
 	aimPitchExpo     = 1.0,   -- PITCH ramp: LINEAR (1.2->1.0) so small movements aren't suppressed — snappy short catch-up
 	aimBankDeadzone  = 0.006, -- BANK/YAW deadzone: matched to pitch (small round neutral)
 	aimBankExpo      = 1.0,   -- BANK/YAW ramp: LINEAR, matched to pitch
-	-- OUTER cursor bound: the aim reticle is CLAMPED to a circle CENTRED on the screen that covers this
-	-- fraction of the screen AREA (0.5 = HALF the screen — player ask 2026-06-30, tightened 7/8 → 3/4 → 1/2).
-	-- Past the rim the command just stays saturated (full turn/loop). radius = sqrt(areaFrac · W · H / π);
-	-- BirdController.computeMouseAim does the clamp. Smaller = a tighter cursor circle. PLAYTEST-PROVISIONAL.
+	-- OUTER cursor bound: the cursor is CLAMPED so its projection never leaves a circle CENTRED on the
+	-- screen covering this fraction of the screen AREA. radius = sqrt(areaFrac · W · H / π); the clamp is
+	-- CAMERA-relative in computeMouseAim, so it holds even mid-turn when the lagging aim camera puts the
+	-- nose (and its lead cone) off-centre. Past the rim the command just stays saturated (full turn/loop).
+	-- ⚠️ S26 (2026-07-02): this knob had been silently UNREAD since the 2026-06-30 nose-chases-cursor
+	-- rewrite (the old screen clamp was dropped — why the cursor roamed to the edges/corners again).
+	-- RESTORED as the camera-relative clamp. S26c: back to 0.5 ("a little smaller" — 0.625 still hit the
+	-- flat top of the screen) AND the code now hard-caps the radius to fit INSIDE the screen (round rim
+	-- everywhere — the flat-edge rim made turn direction uncontrollable). On 16:9 the fit-inside cap
+	-- binds (≈ half-height − 48px), so to shrink the circle further drop this below ~0.38; raising it
+	-- past ~0.44 has no effect. PLAYTEST-PROVISIONAL.
 	aimCursorAreaFrac = 0.5,
 	-- Gains RAISED (player ask: "reticle catch-up snappy at short movements, rate-limited by the eagle's turn rate
 	-- at big deflections"). Higher gain SATURATES the command for anything but a tiny error, so the bird turns at
@@ -893,13 +919,27 @@ GameConfig.Controls = {
 	-- command saturates at a SMALLER error → the nose closes small/medium gaps at the eagle's max turn rate (a
 	-- small angle at max rate = a fraction of a second = "snap"), while a big deflection still needs the full
 	-- turn-rate sweep to catch up (the intended lag). Damping raised in step so the faster response doesn't ring.
-	aimRollGain      = 6.5,   -- bank-to-turn strength (4.5->6.5: snap small deflections)
-	aimPitchGain     = 7.2,   -- elevator: pulls the nose toward the target (5.0->7.2: snap; full deflection still saturates -> loop)
-	aimYawGain       = 1.4,   -- rudder, coordinated WITH the bank (1.0->1.4: scaled with the gain bump)
+	aimRollGain      = 7.5,   -- bank-to-turn strength (4.5->6.5->7.5: S26c "faster reticle catch-up, snap tighter")
+	aimPitchGain     = 8.2,   -- elevator: pulls the nose toward the target (5.0->7.2->8.2: S26c snap; full deflection still saturates -> loop)
+	aimYawGain       = 1.55,  -- rudder, coordinated WITH the bank (scaled with the gain bumps)
 	aimLevelGain     = 0.9,   -- wings-levelling toward straight flight when there's no bank demand (anti stuck-in-bank)
-	aimPitchDamp     = 0.58,  -- PD: nose-pitch-rate feedback (0.45->0.58: control the higher-gain overshoot)
-	aimRollDamp      = 0.52,  -- PD: roll-rate feedback (0.40->0.52: control the higher-gain overshoot)
-	aimStallBandDeg  = 4,     -- degrees below stall where the nose-up PULL eases (4, narrow: ride the edge -> loop commits)
+	aimPitchDamp     = 0.64,  -- PD: nose-pitch-rate feedback (0.58->0.64: raised in ratio with the S26c gain bump)
+	aimRollDamp      = 0.58,  -- PD: roll-rate feedback (0.52->0.58: raised in ratio with the S26c gain bump)
+	aimStallBandDeg  = 7,     -- degrees below stall where the nose-up PULL eases. 4→7 (S26f, Chad: slow-turn porpoise
+	                          -- "still oscillates a little"): the narrow 4° band gated the pull on/off almost bang-bang
+	                          -- as AoA crossed it in a slow turn — 7° makes the ease gradual, killing the limit-cycle.
+	                          -- Loop commit is protected by the POWERED bypass (flap throttle up ⇒ full pull past stall),
+	                          -- so a powered loop still always commits; only unpowered near-stall pulls get gentler.
+	-- LOW-SPEED INSTRUCTOR STABILITY (S26e — Chad: up/down oscillation in slow sustained turns). The aim
+	-- pitch P-gain is scaled by airspeed/(glideSpeed·aimSpeedGainRef), clamped to [aimLowSpeedGainFloor, 1].
+	-- At/above glide speed the feel is EXACTLY the tuned snap (scale = 1); below it the pull softens while
+	-- the D-damping stays constant → relatively better damped → the slow turn sustains instead of pumping.
+	-- Oscillates still: lower the floor toward 0.35 or widen aimStallBandDeg toward 7 (the stall-guard
+	-- gating the pull on/off across its narrow 4° band is the other half of the porpoise mechanism).
+	-- Slow turns feel too weak/mushy: raise the floor toward 0.7.
+	aimLowSpeedGainFloor = 0.35, -- minimum pitch-gain multiplier at very low airspeed (0.5→0.35 S26f: residual slow-turn
+	                             -- oscillation — softer floor + the wider stall band above. Slow turns too mushy: back to 0.5)
+	aimSpeedGainRef      = 1.0,  -- speed at which full gain returns, as a multiple of profile glideSpeed
 	invertPitch      = false, -- false = cursor ABOVE the nose pitches UP (the cross rises to meet it)
 
 	-- FLAP THROTTLE (sticky, NOT momentary): hold SHIFT to ramp UP-thrust (climb), CTRL to ramp DOWN-thrust
