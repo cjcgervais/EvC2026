@@ -3,8 +3,13 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Orientation (read these first)
+- **Run `/evc-loop`** — the governing session harness for this project. It runs a
+  SOP-tuned loop (orient → one-change → verify → red-team → memory → handoff →
+  approved commit), protects the LOCKED control specs, and guarantees a clean
+  context-clear handoff. Lives at `.claude/skills/evc-loop/`; a SessionStart hook
+  reminds you at every start. **This is the primary way to work the codebase.**
 - `docs/HANDOFF.md` — current status, the one architecture decision already locked in, and the prioritized work queue. **Start here.**
-- **How to continue:** drive each module through the **`loop-orchestrator` skill** in `loop_skill/` (it has a `roblox-game` profile for this game) and compose the **`deep-research`** skill for the research half. See HANDOFF → "How to continue this work" and the `reference-loop-orchestrator-skill` memory.
+- **How to continue:** invoke **`/evc-loop`** (above). It specializes the generic **`loop-orchestrator` skill** in `loop_skill/` (`roblox-game` profile) with this game's real SOPs, and composes the **`deep-research`** skill for the research half. See the `reference-evc-loop-skill` and `reference-loop-orchestrator-skill` memories.
 - `docs/RESEARCH.md` — why every flight/balance number is what it is (verified deep-research pass).
 - Project memory index: `C:\Users\Chad\.claude\projects\D--EvC2026\memory\MEMORY.md`.
 - `EaglesVsCrows.txt` — the original recovered transcript (older versions of the client/UI/server). Historical reference; the live code is under `src/`.
@@ -21,9 +26,10 @@ It's Luau deployed to Roblox — there's no compiler/linter/test runner, and Rob
 - **`.\serve.ps1`** — live-sync into Studio (then connect the Rojo plugin; install it once with `.\rojo.ps1 plugin install`).
 - **`.\build.ps1`** — one-shot place build → `EaglesVsCrows.rbxlx` (gitignored). `-Watch` to rebuild on change.
 - **`.\rojo.ps1 <args>`** — raw passthrough to the bootstrapped binary (e.g. `.\rojo.ps1 sourcemap`).
+- **`.\verify.ps1`** — *optional* headless verify ladder: self-bootstraps `luau-lsp analyze` + `selene` (best-effort) and runs the Rojo build. This DOES catch what the plain build can't — broken `require`s, renamed-contract mismatches, nil/field errors, lint smells — with zero human. Each analysis tier degrades to `UNAVAILABLE` if its binary can't be fetched; the build floor always runs. See `.claude/skills/evc-loop/references/verify-ladder.md`.
 - VS Code: **Run Task… → "Rojo: Serve / Build / Build + watch / Install Studio plugin"** (`.vscode/tasks.json`).
 
-`build.ps1` succeeding confirms the project wiring resolves and scripts map to the right classes (Script/LocalScript/ModuleScript), but it does **not** syntax-check Luau or run anything — first task after any change is still a Studio smoke test.
+`build.ps1` succeeding confirms the project wiring resolves and scripts map to the right classes (Script/LocalScript/ModuleScript), but it does **not** syntax-check Luau or run anything — `verify.ps1`'s analysis tier covers some of that gap, but **behavior and feel are still validated only by a Studio smoke test / Chad's Play.**
 
 ## Architecture — module map (Rojo `src/` → Roblox services)
 

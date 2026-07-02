@@ -31,7 +31,14 @@ local BirdBuilder = {}
 local FLAP_AMPLITUDE = math.rad(45)   -- peak up/down sweep while flapping
 local IDLE_AMPLITUDE = math.rad(8)    -- gentle glide bob
 local IDLE_FREQUENCY = 1.5            -- radians/sec for idle bob (uses dt accumulator)
-local DIVE_SWEEP = math.rad(60)       -- wings swept back/folded while diving
+-- DIVE POSE. A bald eagle stooping is a broad-winged glide-dive (NOT a peregrine teardrop tuck):
+-- the "hand"/primaries sweep AFT into a swept-back arrowhead while the tips drop into a shallow
+-- anhedral, so from above each wing reads as a swept V and from the front the pair makes a shallow
+-- ∧ (tips-down tent; a dihedral ∨ would be tips-up). Verified deep-research ranges: ~30–45° aft
+-- sweep, ~10–20° anhedral. These are cosmetic only
+-- (Motor6D.Transform, which never feeds FlightPhysics), so they are free to be art-directed.
+local DIVE_SWEEPBACK = math.rad(42)   -- wings pull aft into the swept-V/arrowhead while diving
+local DIVE_ANHEDRAL  = math.rad(20)   -- and the tips dip below the shoulder (cupped toward prey)
 local SMOOTH = 10                     -- how quickly the wing eases toward its target
 
 -- Per-model idle-bob phase accumulator. Kept in a WEAK-KEYED Lua table (not a model
@@ -58,6 +65,7 @@ local function applyBirdDefaults(p, name, size, color, material)
 	p.CanQuery = false
 	p.CanTouch = false
 	p.Massless = true
+	p.CastShadow = false   -- ~30 moving cosmetic parts/bird: skip the per-frame shadow pass (perf)
 	return p
 end
 
@@ -111,27 +119,40 @@ function BirdBuilder.Build(teamName, profile)
 	-- Extra detail colors (eyes / talons / feather tips) push the silhouette toward the
 	-- concept sheets while staying inside the same 5-part rig contract.
 	local bodyColor, wingColor, accent, headColor, tailColor
-	local eyeColor, talonColor, tipColor, eyeMaterial
+	local eyeColor, talonColor, clawColor, tipColor, eyeMaterial
+	local pupilColor, pupilMaterial, pupilSize
 	if isEagle then
-		bodyColor = Color3.fromRGB(96, 64, 38)        -- brown
-		wingColor = Color3.fromRGB(74, 50, 30)        -- darker brown
-		headColor = Color3.fromRGB(236, 231, 221)     -- pale bald-eagle head
-		tailColor = Color3.fromRGB(244, 244, 240)     -- bright white tail fan (bald-eagle signature)
-		accent = GameConfig.UI.eagleAccent            -- gold beak/talons
-		talonColor = Color3.fromRGB(224, 176, 48)     -- gold talons
+		-- Adult bald eagle: DARK brown body/wings for maximum contrast with the white head/tail
+		-- (that contrast is the whole silhouette). Feet yellow, claws black, iris pale yellow.
+		bodyColor = Color3.fromRGB(74, 52, 34)        -- dark brown
+		wingColor = Color3.fromRGB(54, 38, 26)        -- darker still (wings darker than body)
+		headColor = Color3.fromRGB(244, 244, 241)     -- bright white head/neck
+		tailColor = Color3.fromRGB(244, 244, 240)     -- bright white tail fan
+		accent = GameConfig.UI.eagleAccent            -- yellow hooked beak
+		talonColor = Color3.fromRGB(240, 196, 44)     -- bright yellow feet/legs
+		clawColor = Color3.fromRGB(20, 18, 16)        -- black claws (real eagle claws are black)
 		tipColor = Color3.fromRGB(30, 22, 14)         -- near-black primary-feather tips
-		eyeColor = Color3.fromRGB(255, 214, 92)       -- glowing gold eye (sheet: "Glow Eyes")
-		eyeMaterial = Enum.Material.Neon
+		eyeColor = Color3.fromRGB(238, 224, 150)      -- pale-yellow iris (real eagle eye, not sci-fi gold)
+		eyeMaterial = Enum.Material.Neon              -- soft stylized glow
+		pupilColor = Color3.fromRGB(12, 12, 12)       -- black pupil (makes the eye read as alive)
+		pupilMaterial = Enum.Material.SmoothPlastic
+		pupilSize = r * 0.09
 	else
-		bodyColor = Color3.fromRGB(24, 24, 28)        -- near-black
-		wingColor = Color3.fromRGB(16, 16, 20)        -- darker
-		headColor = Color3.fromRGB(30, 30, 36)
-		tailColor = Color3.fromRGB(16, 16, 20)        -- crow tail: dark, same as wings
+		-- Crow: glossy black with a cool blue/purple cast (structural iridescence), faked with a
+		-- cool tint + a purple sheen on the coverts + a bright catchlight in a dark eye.
+		bodyColor = Color3.fromRGB(20, 20, 26)        -- cool-cast near-black
+		wingColor = Color3.fromRGB(14, 14, 20)        -- darker
+		headColor = Color3.fromRGB(24, 24, 30)
+		tailColor = Color3.fromRGB(14, 14, 20)        -- dark, same as wings
 		accent = GameConfig.UI.crowAccent             -- accent beak
-		talonColor = Color3.fromRGB(12, 12, 14)       -- dark talons
+		talonColor = Color3.fromRGB(14, 14, 16)       -- dark feet
+		clawColor = Color3.fromRGB(8, 8, 10)          -- near-black claws
 		tipColor = Color3.fromRGB(10, 10, 12)         -- slightly darker wing tips
-		eyeColor = Color3.fromRGB(90, 20, 20)         -- faint dark-red eye glint
-		eyeMaterial = Enum.Material.Glass
+		eyeColor = Color3.fromRGB(14, 14, 16)         -- dark eye
+		eyeMaterial = Enum.Material.SmoothPlastic     -- (Glass was misuse on a tiny opaque ball)
+		pupilColor = Color3.fromRGB(232, 232, 236)    -- bright catchlight glint
+		pupilMaterial = Enum.Material.Neon
+		pupilSize = r * 0.05
 	end
 
 	local model = Instance.new("Model")
@@ -146,6 +167,7 @@ function BirdBuilder.Build(teamName, profile)
 	body.CanCollide = true         -- Body may collide; appendages do not
 	body.CanQuery = true
 	body.CanTouch = true
+	body.CastShadow = true         -- one grounding shadow per bird (appendages stay shadowless)
 	body.Shape = Enum.PartType.Block
 	body.CFrame = CFrame.new(0, 0, 0)
 	body.Parent = model
@@ -158,11 +180,16 @@ function BirdBuilder.Build(teamName, profile)
 	chest.Parent = model
 	weldTo(body, chest)
 
-	-- RUMP: a wedge that tapers the dorsal line down into the tail (tall at the body, knife
-	-- edge aft). Default WedgePart orientation already tapers -Z(tall)→+Z(thin) = front→rear.
-	local rumpLen = bodyLen * 0.5
-	local rump = makeWedge("Rump", Vector3.new(bodyWidth * 0.92, bodyHeight * 0.8, rumpLen), bodyColor)
-	rump.CFrame = body.CFrame * CFrame.new(0, -bodyHeight * 0.1, bodyLen * 0.5 + rumpLen * 0.5 - bodyLen * 0.08)
+	-- RUMP: a long, low wedge that tapers the dorsal AND belly lines down into the tail (tall at
+	-- the body, knife edge aft) for a sleek streamlined rear. Default WedgePart orientation
+	-- already tapers -Z(tall)→+Z(thin) = front→rear.
+	local rumpLen = bodyLen * 0.6
+	local rump = makeWedge("Rump", Vector3.new(bodyWidth * 0.9, bodyHeight * 0.72, rumpLen), bodyColor)
+	-- WedgePart tall face defaults to +Z / knife edge to -Z; yaw 180° so the tall face meets the
+	-- body and it knife-edges into the tail (verified via the wedge-orientation red-team audit).
+	rump.CFrame = body.CFrame
+		* CFrame.new(0, -bodyHeight * 0.12, bodyLen * 0.5 + rumpLen * 0.5 - bodyLen * 0.1)
+		* CFrame.Angles(0, math.rad(180), 0)
 	rump.Parent = model
 	weldTo(body, rump)
 
@@ -184,17 +211,45 @@ function BirdBuilder.Build(teamName, profile)
 	head.Parent = model
 	weldTo(body, head)
 
-	-- BEAK: a hooked raptor beak = a forward wedge plus a small down-curved tip (the raptor
-	-- "hook"). The crow's is slimmer and straighter. Forward = -Z.
-	local beakLen = isEagle and 0.55 or 0.50
-	local beak = makePart("Beak", Vector3.new(r * 0.24, r * 0.30, r * beakLen), accent)
-	beak.CFrame = head.CFrame * CFrame.new(0, -r * 0.04, -(r * headScale * 0.5 + r * beakLen * 0.5))
-	beak.Parent = model
-	weldTo(body, beak)
-	local hook = makePart("BeakTip", Vector3.new(r * 0.18, r * 0.20, r * 0.20), accent)
-	hook.CFrame = beak.CFrame * CFrame.new(0, -r * 0.12, -r * beakLen * 0.45) * CFrame.Angles(math.rad(-35), 0, 0)
+	-- BEAK: a deep, down-curved raptor bill. Per raptor-bill research the culmen (top ridge) runs
+	-- nearly straight over the basal two-thirds then curves down hard into an overhanging hook, and
+	-- the bill is a DEEP "hatchet" (base depth ~0.65× its length) — not a slender cone. Built as a
+	-- short chain of tapering segments hung BELOW a culmen line, so the top edge stays a smooth
+	-- ridge while the belly deepens; a steep near-vertical tip plus a shorter lower mandible give
+	-- the classic overhang. Forward = -Z. Duplicate "Beak" sibling names are safe.
+	-- Each spec = {lenR, depthR, widthR, pitchAfterDeg}; pitchAfter tilts the culmen down for the NEXT link.
+	local beakSpec = isEagle and {
+		{ 0.26, 0.40, 0.30,  7 },   -- base over the cere: deep, culmen almost flat
+		{ 0.20, 0.34, 0.25, 15 },   -- basal ridge: gentle convex
+		{ 0.16, 0.26, 0.19, 30 },   -- distal third: the culmen begins to drop
+	} or {
+		{ 0.22, 0.26, 0.19, 12 },   -- crow: slimmer, straighter bill
+		{ 0.18, 0.19, 0.14, 22 },
+	}
+	local culmen = head.CFrame * CFrame.new(0, r * 0.07, -r * headScale * 0.5)   -- top-front of the face
+	for _, seg in ipairs(beakSpec) do
+		local len, dep, wid = r * seg[1], r * seg[2], r * seg[3]
+		culmen = culmen * CFrame.new(0, 0, -len * 0.5)
+		local part = makePart("Beak", Vector3.new(wid, dep, len * 1.04), accent)
+		part.CFrame = culmen * CFrame.new(0, -dep * 0.5, 0)   -- hang below the culmen (top) line
+		part.Parent = model
+		weldTo(body, part)
+		culmen = culmen * CFrame.new(0, 0, -len * 0.5) * CFrame.Angles(-math.rad(seg[4]), 0, 0)
+	end
+	-- HOOK: a steep, near-vertical down-curved tip (points ~80° below horizontal) overhanging the bill.
+	local hookLen = r * (isEagle and 0.32 or 0.22)
+	local hookDep = r * (isEagle and 0.22 or 0.14)
+	culmen = culmen * CFrame.Angles(-math.rad(isEagle and 30 or 22), 0, 0)
+	local hook = makePart("BeakTip", Vector3.new(r * (isEagle and 0.15 or 0.10), hookDep, hookLen), accent)
+	hook.CFrame = culmen * CFrame.new(0, -hookDep * 0.35, -hookLen * 0.5)
 	hook.Parent = model
 	weldTo(body, hook)
+	-- LOWER MANDIBLE: a shorter, shallower bill floor. Ends short of the hook so the hook overhangs it.
+	local lowerLen = r * (isEagle and 0.46 or 0.40)
+	local lower = makePart("BeakLower", Vector3.new(r * (isEagle and 0.22 or 0.16), r * 0.15, lowerLen), accent)
+	lower.CFrame = head.CFrame * CFrame.new(0, -r * 0.17, -(r * headScale * 0.5 + lowerLen * 0.5))
+	lower.Parent = model
+	weldTo(body, lower)
 
 	-- EYES: two small parts on the head. Neon on the eagle (the sheet's glow eyes); a faint
 	-- glassy glint on the crow. Cosmetic, welded to the hub, no-collide/no-query.
@@ -204,6 +259,13 @@ function BirdBuilder.Build(teamName, profile)
 		eye.CFrame = head.CFrame * CFrame.new(s * r * headScale * 0.42, r * 0.10, -r * headScale * 0.32)
 		eye.Parent = model
 		weldTo(body, eye)
+		-- Pupil (eagle) / catchlight (crow): a tiny ball on the eye's forward face — the single
+		-- cheapest thing that makes an eye read as alive rather than a flat bead.
+		local pupil = makePart("Pupil", Vector3.new(pupilSize, pupilSize, pupilSize), pupilColor, pupilMaterial)
+		pupil.Shape = Enum.PartType.Ball
+		pupil.CFrame = eye.CFrame * CFrame.new(s * r * 0.02, 0, -r * 0.07)
+		pupil.Parent = model
+		weldTo(body, pupil)
 	end
 
 	-- BROW RIDGE: a small wedge angled down over each eye — the raptor scowl. Pronounced on
@@ -211,9 +273,12 @@ function BirdBuilder.Build(teamName, profile)
 	local browDrop = isEagle and math.rad(28) or math.rad(16)
 	for _, s in ipairs({ -1, 1 }) do
 		local brow = makeWedge("Brow", Vector3.new(r * 0.26, r * 0.14, r * 0.34), headColor)
+		-- WedgePart tall face defaults to +Z; yaw 180° so it fronts the eye, then browDrop tilts
+		-- it forward-and-down into a scowl (verified via the wedge-orientation red-team audit).
 		brow.CFrame = head.CFrame
 			* CFrame.new(s * r * headScale * 0.40, r * 0.24, -r * headScale * 0.30)
-			* CFrame.Angles(browDrop, 0, s * math.rad(8))
+			* CFrame.Angles(0, math.rad(180), 0)
+			* CFrame.Angles(browDrop, 0, -s * math.rad(8))
 		brow.Parent = model
 		weldTo(body, brow)
 	end
@@ -221,56 +286,97 @@ function BirdBuilder.Build(teamName, profile)
 	-- TAIL: rear (+Z), a flattened, broad fan. Proportioned to a real raptor: ~⅔ a wing's chord wide and
 	-- about as long front-to-back, thin top-to-bottom. White on the eagle (the bald-eagle tail fan), dark on
 	-- the crow. Overlaps the body rear so there's no gap.
-	local tailWidth = isEagle and 1.5 or 1.05
+	local tailWidth = isEagle and 1.7 or 1.05   -- eagle: broad slab under a fuller fan
 	local tailLen = isEagle and 1.05 or 1.25
 	local tail = makePart("Tail", Vector3.new(r * tailWidth, r * 0.16, r * tailLen), tailColor)
 	tail.CFrame = body.CFrame * CFrame.new(0, r * 0.08, bodyLen * 0.5 + r * 0.35)
 	tail.Parent = model
 	weldTo(body, tail)
 
-	-- RECTRICES: individual tail feathers fanned about the vertical axis, laid just over the
-	-- tail slab so the fan reads as separate feathers. Broad white set on the eagle, a
-	-- narrower darker wedge on the crow.
-	local rectrices = isEagle and 4 or 3
-	local rectSpread = isEagle and math.rad(52) or math.rad(38)
-	local rectLen = r * (isEagle and 1.15 or 1.3)
-	local tailBase = tail.CFrame * CFrame.new(0, r * 0.02, -r * tailLen * 0.35)
+	-- RECTRICES: individual tail feathers fanned about the vertical axis, laid just over the tail
+	-- slab so the fan reads as separate feathers. Research: the bald-eagle tail has 12 rectrices and
+	-- spreads into a BROAD ROUNDED-WEDGE (centre longest, a gentle convex trailing edge — not a deep
+	-- diamond, not square). A wider count + spread + overlapping feather widths make it read as a
+	-- full fan rather than a few spokes. The crow's is a shorter, more even, rounded/square fan.
+	local rectrices = isEagle and 9 or 5
+	local rectSpread = isEagle and math.rad(78) or math.rad(46)   -- fuller fan spread
+	local rectLen = r * (isEagle and 1.25 or 1.3)
+	local rectWidth = r * (isEagle and 0.30 or 0.26)   -- wide enough to overlap into a solid fan
+	local wedgeBias = isEagle and 0.5 or 0.2    -- gentle: rounded-wedge outer edge (not a sharp diamond)
+	local tailBase = tail.CFrame * CFrame.new(0, r * 0.10, -r * tailLen * 0.35)   -- lifted to sit ON the tail slab
 	for i = 0, rectrices - 1 do
 		local t = rectrices > 1 and (i / (rectrices - 1)) or 0.5
 		local ang = (t - 0.5) * rectSpread
-		local feather = makePart("TailFeather", Vector3.new(r * 0.24, r * 0.10, rectLen), tailColor)
-		feather.CFrame = tailBase * CFrame.Angles(0, ang, 0) * CFrame.new(0, 0, rectLen * 0.5)
+		local flen = rectLen * (1 - math.abs(t - 0.5) * wedgeBias)   -- centre longest => wedge
+		local feather = makePart("TailFeather", Vector3.new(rectWidth, r * 0.10, flen), tailColor)
+		feather.CFrame = tailBase * CFrame.Angles(0, ang, 0) * CFrame.new(0, 0, flen * 0.5)
 		feather.Parent = model
 		weldTo(body, feather)
 	end
 
-	-- TALONS: a small pair of legs + gripping claws tucked under the rear belly (the sheets'
-	-- "talon mechanism", static here — a moving talon-strike rig is the later Path-A upgrade).
+	-- LEGS + TALONS: a longer two-segment leg (feathered "trouser" thigh + bare thick tarsus) ending
+	-- in a foot of three splayed forward toes plus a rear hallux. Held in a ready, slightly-forward
+	-- tuck with the talons curled — the length is deliberate so a future Path-A rig can swing the legs
+	-- DOWN-AND-FORWARD and splay the talons for a strike (research: eagles drop the legs ahead of the
+	-- breast, feet leading, toes splayed). Static + welded here; no joints yet. Forward = -Z.
+	local hipY = -bodyHeight * 0.28
+	local thighLen = r * 0.32
+	local tarsusLen = r * 0.38
+	local toeLen = r * 0.30
 	for _, s in ipairs({ -1, 1 }) do
-		local leg = makePart("Leg", Vector3.new(r * 0.14, r * 0.34, r * 0.14), talonColor)
-		leg.CFrame = body.CFrame * CFrame.new(s * r * 0.22, -r * 0.55, r * 0.05)
-		leg.Parent = model
-		weldTo(body, leg)
-		local claw = makePart("Talon", Vector3.new(r * 0.20, r * 0.14, r * 0.34), talonColor)
-		claw.CFrame = leg.CFrame * CFrame.new(0, -r * 0.22, -r * 0.10)
-		claw.Parent = model
-		weldTo(body, claw)
+		-- THIGH: feathered upper leg (body colour), leaned slightly forward so the foot sits ahead of the vent.
+		local thigh = makePart("Leg", Vector3.new(r * 0.22, thighLen, r * 0.22), bodyColor)
+		thigh.CFrame = body.CFrame
+			* CFrame.new(s * r * 0.22, hipY, -r * 0.04)
+			* CFrame.Angles(math.rad(12), 0, 0)              -- lean the whole leg slightly forward
+			* CFrame.new(0, -thighLen * 0.5, 0)
+		thigh.Parent = model
+		weldTo(body, thigh)
+		-- TARSUS: bare, thick, near-vertical shank (yellow on the eagle) — the segment that extends for a strike.
+		local tarsus = makePart("Tarsus", Vector3.new(r * 0.16, tarsusLen, r * 0.16), talonColor)
+		tarsus.CFrame = thigh.CFrame
+			* CFrame.new(0, -thighLen * 0.5, 0)
+			* CFrame.Angles(math.rad(-5), 0, 0)              -- straighten toward vertical below the "knee"
+			* CFrame.new(0, -tarsusLen * 0.5, 0)
+		tarsus.Parent = model
+		weldTo(body, tarsus)
+		-- FOOT: three forward toes splayed across the foot, each curled down into a grip. Black claws.
+		local footHub = tarsus.CFrame * CFrame.new(0, -tarsusLen * 0.5, 0)
+		for _, yaw in ipairs({ -22, 0, 22 }) do
+			local toe = makePart("Talon", Vector3.new(r * 0.09, r * 0.09, toeLen), clawColor)
+			toe.CFrame = footHub
+				* CFrame.Angles(0, math.rad(yaw), 0)         -- splay across the foot
+				* CFrame.Angles(math.rad(-45), 0, 0)         -- curl the toe down-and-forward
+				* CFrame.new(0, 0, -toeLen * 0.5)
+			toe.Parent = model
+			weldTo(body, toe)
+		end
+		-- HALLUX: the rear "killing" claw, shorter, curling down-and-BACK (+Z), so +45° pitch here.
+		local hallux = makePart("Talon", Vector3.new(r * 0.09, r * 0.09, r * 0.20), clawColor)
+		hallux.CFrame = footHub * CFrame.Angles(math.rad(45), 0, 0) * CFrame.new(0, 0, r * 0.11)
+		hallux.Parent = model
+		weldTo(body, hallux)
 	end
 
 	-- WINGS: the arm wing (broad inner slab) carries a covert feather row on top and a fan of
 	-- individual PRIMARY feathers past its tip. The whole wing is ONE moving part (the inner
 	-- slab, Part1 of the Motor6D) with everything welded to it, so it flaps as a rigid piece
 	-- and AnimateWings still only drives the two named joints.
-	local innerSpan  = r * 1.15
-	local innerChord = isEagle and (bodyLen * 0.85) or (bodyLen * 0.60)
+	-- Planform tuned from raptor-ID research: the bald eagle flies a long, BROAD, low-aspect
+	-- "plank" with a nearly straight leading edge, held DEAD FLAT (no dihedral V — the key
+	-- eagle-vs-vulture cue), tipped by ~6 splayed primary "finger" slots. Wingspan reads wide
+	-- (~2.6–2.9× body length via the cosmetic parts; bodyRadius itself is a balance number and
+	-- is left untouched). The crow stays smaller, slimmer-winged and more swept.
+	local innerSpan  = isEagle and (r * 1.6) or (r * 1.15)   -- eagle arm-wing much longer/broader
+	local innerChord = isEagle and (bodyLen * 0.82) or (bodyLen * 0.60)
 	local wingThick  = r * 0.09
-	-- Primary flight feathers: eagle = broad, splayed slots ("fingers"); crow = fewer, longer,
-	-- swept to a sharper point.
-	local primaryCount = isEagle and 4 or 3
-	local primaryLen   = isEagle and (r * 1.5) or (r * 1.85)
-	local primaryChord = isEagle and (r * 0.5) or (r * 0.4)
-	local primarySplay = isEagle and math.rad(9) or math.rad(4)   -- vertical slot spacing
-	local baseSweep    = isEagle and math.rad(18) or math.rad(34) -- overall aft sweep
+	local primaryCount = isEagle and 6 or 3
+	local primaryLen   = isEagle and (r * 1.34) or (r * 1.85)      -- eagle: long full-length "fingers"
+	local primaryChord = isEagle and (r * 0.42) or (r * 0.40)
+	local primarySplay = isEagle and math.rad(2) or math.rad(4)    -- eagle ~flat: finger tips barely raised
+	local baseSweep    = isEagle and math.rad(10) or math.rad(34)  -- eagle: straight leading edge, little sweep
+	local fingerFan    = isEagle and math.rad(26) or math.rad(12)  -- extra aft sweep across the fingers -> swept tip
+	local primaryTaper = isEagle and 0.045 or 0.07                -- gentler eagle taper keeps the tip full-length
 
 	-- The joint pivots at the wing ROOT (inner edge near the body), so the wing
 	-- sweeps up/down about the bird's forward (Z) axis like a real flap.
@@ -289,7 +395,10 @@ function BirdBuilder.Build(teamName, profile)
 
 		-- COVERTS: a short shoulder-feather row along the leading edge, slightly raised & lighter,
 		-- to break up the flat top of the arm wing. Welded to the wing so they flap with it.
-		local covertColor = wingColor:Lerp(Color3.new(1, 1, 1), isEagle and 0.14 or 0.05)
+		-- Coverts: a lighter shoulder on the eagle; a purple-blue iridescent sheen on the crow.
+		local covertColor = isEagle
+			and wingColor:Lerp(Color3.new(1, 1, 1), 0.14)
+			or wingColor:Lerp(Color3.fromRGB(78, 66, 120), 0.22)
 		for c = 0, 1 do
 			local cov = makePart(sideName .. "Covert",
 				Vector3.new(innerSpan * 0.7, wingThick * 0.7, innerChord * 0.34), covertColor)
@@ -303,10 +412,10 @@ function BirdBuilder.Build(teamName, profile)
 		local tipAnchor = wing.CFrame * CFrame.new(side * (innerSpan * 0.5), wingThick * 0.2, 0)
 		for i = 0, primaryCount - 1 do
 			local t = primaryCount > 1 and (i / (primaryCount - 1)) or 0.5   -- 0 = leading, 1 = trailing
-			local chordPos = (t - 0.5) * innerChord * 0.6                     -- spread across the chord
-			local sweep = baseSweep + t * math.rad(12)                        -- rear fingers sweep more
-			local splay = (i - (primaryCount - 1) / 2) * primarySplay         -- vertical slot spacing
-			local len = primaryLen * (1 - 0.10 * i)                           -- outer fingers a touch shorter
+			local chordPos = (t - 0.5) * innerChord * 0.62                    -- spread across the chord
+			local sweep = baseSweep + t * fingerFan                           -- fan: rear fingers sweep more
+			local splay = (i - (primaryCount - 1) / 2) * primarySplay         -- near-flat finger separation
+			local len = primaryLen * (1 - primaryTaper * i)                   -- gentle taper; keeps the tip full
 			local feather = makePart(sideName .. "Primary",
 				Vector3.new(len, wingThick * 0.8, primaryChord), tipColor)
 			feather.CFrame = tipAnchor
@@ -323,9 +432,12 @@ function BirdBuilder.Build(teamName, profile)
 		motor.Part1 = wing
 		-- C0: body-space frame located at the wing ROOT (pivot point).
 		motor.C0 = rootOffset
-		-- C1: wing-space frame so that, with Transform = identity, the wing rests
-		-- at its neutral built position. C1 = wingFrame relative to root frame.
-		motor.C1 = rootOffset:ToObjectSpace(wingLocal)
+		-- C1: the ROOT pivot expressed in wing-local space. Roblox solves the joint as
+		-- Part0*C0*Transform == Part1*C1, so at rest (Transform = I) we need
+		-- body*rootOffset == wing*C1  →  C1 = wingLocal:ToObjectSpace(rootOffset).
+		-- (The operands were previously inverted, which crossed each wing through the body —
+		-- caught by the Motor6D red-team audit.)
+		motor.C1 = wingLocal:ToObjectSpace(rootOffset)
 		motor.Transform = CFrame.new()
 		motor.Parent = body
 
@@ -361,27 +473,35 @@ function BirdBuilder.AnimateWings(model, isFlapping, isDiving, flapPhase, dt)
 	local idle = ((idlePhase[model] or 0) + dt * IDLE_FREQUENCY) % (math.pi * 2)
 	idlePhase[model] = idle
 
-	-- Compute the dihedral (up/down) angle for this frame, shared by both wings.
-	local angle
+	-- Compute this frame's pose, shared by both wings:
+	--   dihedral = up/down tip angle (about the joint's Z/forward axis)
+	--   sweep    = aft yaw of the whole wing (about the joint's Y/up axis) — only used diving
+	local dihedral, sweep
 	if isDiving then
-		-- Swept/folded: wings angle downward and back for a tucked dive silhouette.
-		angle = -DIVE_SWEEP
+		-- Glide-dive: pull the wings AFT (swept-V arrowhead) and drop the tips into a shallow
+		-- anhedral. The two together read as a stooping raptor, not a flat glide.
+		dihedral = -DIVE_ANHEDRAL
+		sweep = DIVE_SWEEPBACK
 	elseif isFlapping then
 		-- Sine flap about neutral; flapPhase comes from the physics engine.
-		angle = math.sin(flapPhase) * FLAP_AMPLITUDE
+		dihedral = math.sin(flapPhase) * FLAP_AMPLITUDE
+		sweep = 0
 	else
-		-- Gentle idle glide: small slow bob.
-		angle = math.sin(idle) * IDLE_AMPLITUDE
+		-- Gentle idle glide: small slow bob, wings held out flat (no sweep).
+		dihedral = math.sin(idle) * IDLE_AMPLITUDE
+		sweep = 0
 	end
 
-	-- Apply symmetrically to each wing joint (rotate about local Z = forward axis,
-	-- which sweeps the wing up/down). FlapSign mirrors left vs right.
+	-- Apply symmetrically to each wing joint. The joint's C0 is a pure translation to the wing
+	-- root, so the Transform's axes align with Body: rotate about Z to sweep the tip up/down
+	-- (dihedral) and about Y to sweep the wing fore/aft. FlapSign (= side) mirrors left vs right;
+	-- aft sweep is -side*sweep (same sign convention as the static primary-feather fan).
 	local function drive(jointName)
 		local motor = body:FindFirstChild(jointName)
 		if not motor or not motor:IsA("Motor6D") then return end
 		local sign = motor:GetAttribute("FlapSign") or 1
-		-- Rotate about the joint's Z axis so positive angle lifts both wing tips.
-		local target = CFrame.Angles(0, 0, sign * angle)
+		-- Yaw aft first, then roll the dihedral, so the swept wing also carries the tip drop.
+		local target = CFrame.Angles(0, -sign * sweep, 0) * CFrame.Angles(0, 0, sign * dihedral)
 		-- Ease toward the target for smooth motion (and graceful state changes).
 		local alpha = math.clamp(dt * SMOOTH, 0, 1)
 		motor.Transform = approachCFrame(motor.Transform, target, alpha)

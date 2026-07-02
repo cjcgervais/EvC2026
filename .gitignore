@@ -25,3 +25,6 @@ sourcemap.json
 
 # Claude local overrides (kept out of team settings)
 .claude/settings.local.json
+
+# evc-loop session-log state (resumable loop state; not committed)
+.loop/

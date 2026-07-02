@@ -1308,9 +1308,52 @@ UserInputService.WindowFocusReleased:Connect(function()
 	setFreeLook(false)
 end)
 
--- One persistent flight loop: it drives whichever bird we currently hold and idles
+--------------------------------------------------------------------------------
+-- REMOTE WING ANIMATION (every bird EXCEPT the one we're actively flying)
+--
+-- Motor6D.Transform does NOT cross the network boundary, so a bird only flaps on
+-- the machine simulating it (its owning client, or the server for AI crows). To
+-- make EVERY bird flap on EVERY screen, each client animates all the OTHER birds
+-- itself, deriving the wing state from already-replicated motion (CFrame + velocity):
+--   • isDiving is EXACT — FlightPhysics defines it as LookVector.Y < -0.2, and CFrame
+--     replicates, so we reproduce the dive-tuck identically to the owner.
+--   • isFlapping is a cosmetic guess from vertical/airspeed (climbing or slow ⇒ flap);
+--     nobody can perceive flap-phase desync on a bird they don't control.
+--   • flapPhase advances locally per-model at FlightPhysics' own rates (~2 rad/s gliding,
+--     ~8 flapping) — zero per-frame network traffic (no SetAttribute spam).
+-- The bird we ARE flying is animated with exact engine state in onFlightStep, so we
+-- skip it here to avoid double-driving the joints.
+--------------------------------------------------------------------------------
+local remoteFlapPhase = setmetatable({}, { __mode = "k" }) -- [model] = phase; weak so it GCs with the model
+
+local function animateOtherBirds(dt)
+	if not birdsFolder then return end
+	for _, model in ipairs(birdsFolder:GetChildren()) do
+		if model ~= birdModel and model:IsA("Model") then
+			local body = model.PrimaryPart
+			if body then
+				-- isDiving: EXACT match to FlightPhysics (nose pitched down past ~11°).
+				local diving = body.CFrame.LookVector.Y < -0.2
+				-- isFlapping: cosmetic — a bird beats its wings to climb or when slow, and
+				-- glides when fast and level/descending.
+				local v = body.AssemblyLinearVelocity
+				local flapping = (not diving) and (v.Y > 2 or v.Magnitude < 55)
+				local freq = flapping and 8 or 2
+				local phase = ((remoteFlapPhase[model] or 0) + dt * freq) % (math.pi * 2)
+				remoteFlapPhase[model] = phase
+				BirdBuilder.AnimateWings(model, flapping, diving, phase, dt)
+			end
+		end
+	end
+end
+
+-- One persistent flight loop: it drives whichever bird we currently hold (exact engine
+-- state) and animates every other visible bird from replicated motion; idles cleanly
 -- when we hold none (between deaths / round resets).
-renderConn = RunService.RenderStepped:Connect(onFlightStep)
+renderConn = RunService.RenderStepped:Connect(function(dt)
+	onFlightStep(dt)
+	animateOtherBirds(dt)
+end)
 
 -- Wire the bird folder once the server has created it (it does so on first spawn).
 -- Deferred so the WaitForChild yield can't delay the TeamAssigned connection above.

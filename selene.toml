@@ -1,0 +1,12 @@
+# Selene lint config for Eagles vs Crows (used by verify.ps1, Tier 1b).
+# The Roblox standard library is fetched/managed by selene on first use.
+std = "roblox"
+
+# The codebase is deliberately --!nonstrict, hand-written Luau. Keep the lints that
+# catch real correctness bugs; relax the stylistic ones that fight the house style.
+[lints]
+mixed_table = "warn"
+unused_variable = "warn"
+shadowing = "warn"
+global_usage = "allow"       # _G.UpdateStaminaUI / _G.SetStallWarning are intentional UI hooks
+multiple_statements = "allow"

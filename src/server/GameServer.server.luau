@@ -1523,8 +1523,10 @@ local function updateAICrows(dt)
 					body.AssemblyAngularVelocity = Vector3.new()
 				end)
 
-				-- Animate wings to match the AI state.
-				BirdBuilder.AnimateWings(entry.model, entry.engine.isFlapping, entry.engine.isDiving, entry.engine.flapPhase, fdt)
+				-- Wings are NOT animated here: Motor6D.Transform does not replicate, so a
+				-- server-side flap is invisible to every client (pure wasted CPU). Each client
+				-- animates all AI crows locally from their replicated CFrame/velocity — see
+				-- BirdController.animateOtherBirds.
 			end
 		end
 	end
