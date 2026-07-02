@@ -1017,7 +1017,27 @@ local function computeMouseAim(dt)
 	local spdRef = ((currentProfile and currentProfile.glideSpeed) or 95) * (C.aimSpeedGainRef or 1.0)
 	local speedScale = clamp(spdNow / math.max(1, spdRef), C.aimLowSpeedGainFloor or 0.5, 1)
 	local pitch = vCmd * (C.aimPitchGain or 2.6) * speedScale - (C.aimPitchDamp or 0.35) * pitchRate01
-	if pitch > 0 then pitch = pitch * aoaHead end  -- ride-the-edge protection on the nose-UP pull only
+	-- COORDINATED-TURN FEEDFORWARD (S27, RESEARCH-instructor-turn.md). Pay the altitude cost of the CURRENT
+	-- bank up front — a nose-up bias ∝ the load-factor excess (sec(bank)-1) the turn needs to hold altitude —
+	-- instead of waiting for the sag to become cursor error (the porpoise). Bank is read from RightVector.Y
+	-- (roll, independent of pitch attitude); cos is floored so sec caps at 5 (~78°) and can't blow up. This is
+	-- ADDED to the PD command, then passes through the SAME aoaHead stall gate below (so it eases off near
+	-- stall at low speed, and is bypassed when powered — like the rest of the nose-up pull). It is open-loop
+	-- (a function of bank, NOT cursor error) so it adds no closed-loop phase lag; ZERO at wings-level so
+	-- straight flight and the loved snap are untouched; and it only exists under mouse-aim (this function) so
+	-- CS-1/CS-5/CS-8 hold. Knob + full rationale: GameConfig.Controls.aimBankFeedforward.
+	-- Only UPRIGHT (UpVector.Y>0): the sec(bank) coordinated-turn model is derived for upright turns, so gate
+	-- (don't attenuate) it off when inverted — same intent as levelAssist's inverted guard below, so it can't
+	-- command wrong-signed nose-up at the top of a banked loop. A normal vertical loop keeps the wings level
+	-- (sinBank≈0 ⇒ FF≈0) so this doesn't touch loop feel. Sign assumes the shipped invertPitch=false, exactly
+	-- like the aoaHead gate on the next line (both act on the pre-invert command where pitch>0 = nose-up).
+	local bankFF = C.aimBankFeedforward or 0
+	if bankFF > 0 and cf.UpVector.Y > 0 then
+		local sinBank = clamp(-cf.RightVector.Y, -1, 1)
+		local cosBank = math.sqrt(math.max(1 - sinBank * sinBank, 0.04))
+		pitch = pitch + (1 / cosBank - 1) * bankFF
+	end
+	if pitch > 0 then pitch = pitch * aoaHead end  -- ride-the-edge protection on the nose-UP pull (and the FF)
 	pitch = clamp(pitch, -1, 1)
 
 	-- BANK + RUDDER fire TOGETHER toward the target (coordinated flight), now PD-damped. When there's no

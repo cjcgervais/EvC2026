@@ -840,7 +840,9 @@ GameConfig.Controls = {
 	-- aimLeadScreenFrac/aimMaxLeadDeg = the reachable-circle SIZE (how far the cursor can lead the nose before it's
 	-- clamped — bigger = a bigger circle you can pilot before the nose catches up). Command is body-relative to the
 	-- nose (so cursor-on-nose = straight) and zoom-independent; the camera is also fixed in aim mode.
-	aimAnglePerPixel    = 0.0035, -- radians the cursor swings per mouse unit (× aimMouseSensitivity) — lowered 0.006->0.0035 (cursor was too sensitive)
+	aimAnglePerPixel    = 0.0024, -- radians the cursor swings per mouse unit (× aimMouseSensitivity). 0.006->0.0035->0.0024
+	                              -- (S27b, Chad: "cursor movement is too sensitive" — kept as a standalone sensitivity ask;
+	                              -- it's orthogonal to the coordination rework). Too sluggish now? back toward 0.003.
 	aimLeadScreenFrac   = 0.95,  -- cursor-circle size: fraction of the way to the top/bottom edge the cursor can lead (0..1).
 	                             -- ⚠️ S26 REVERTED 0.625→0.95 after Chad's play: shrinking this cone does NOT shrink the
 	                             -- on-screen circle he sees (the cone follows the NOSE, which the lagging aim camera puts
@@ -924,7 +926,14 @@ GameConfig.Controls = {
 	aimYawGain       = 1.55,  -- rudder, coordinated WITH the bank (scaled with the gain bumps)
 	aimLevelGain     = 0.9,   -- wings-levelling toward straight flight when there's no bank demand (anti stuck-in-bank)
 	aimPitchDamp     = 0.64,  -- PD: nose-pitch-rate feedback (0.58->0.64: raised in ratio with the S26c gain bump)
+	                          -- ⚠️ S27b tried 0.80 to fight reticle overshoot — REVERTED: didn't fix the horizontal
+	                          -- sail-past (that's a coordination problem, not a damping one) and added arrival lag. The
+	                          -- real fix is the coordinated-flight instructor rework — see HANDOFF S28 research directive.
 	aimRollDamp      = 0.58,  -- PD: roll-rate feedback (0.52->0.58: raised in ratio with the S26c gain bump)
+	                          -- ⚠️ S27b tried 0.72 + S27c added a derivative-on-error "aimHorizLeadDamp" — BOTH REVERTED:
+	                          -- the derivative term amplified mouse jitter (small-input reticle "jumping around", Chad) and
+	                          -- neither killed the horizontal sail-past. Root cause is that the instructor is 3 independent
+	                          -- per-axis PD servos, NOT a coordinated-turn law — see the HANDOFF S28 research directive.
 	aimStallBandDeg  = 7,     -- degrees below stall where the nose-up PULL eases. 4→7 (S26f, Chad: slow-turn porpoise
 	                          -- "still oscillates a little"): the narrow 4° band gated the pull on/off almost bang-bang
 	                          -- as AoA crossed it in a slow turn — 7° makes the ease gradual, killing the limit-cycle.
@@ -940,6 +949,24 @@ GameConfig.Controls = {
 	aimLowSpeedGainFloor = 0.35, -- minimum pitch-gain multiplier at very low airspeed (0.5→0.35 S26f: residual slow-turn
 	                             -- oscillation — softer floor + the wider stall band above. Slow turns too mushy: back to 0.5)
 	aimSpeedGainRef      = 1.0,  -- speed at which full gain returns, as a multiple of profile glideSpeed
+	-- COORDINATED-TURN PITCH FEEDFORWARD (S27, deep-research RESEARCH-instructor-turn.md). Chad: in a HARD
+	-- banked mouse turn the nose DIPS/porpoises ("it goes down to keep the speed… throws you off target when
+	-- merging with the crows"). Root cause: the instructor pulls the nose up ONLY after the bank's lift-sag
+	-- shows up as cursor ERROR (a pure PD error loop), and the S26 stability concessions soften that pull
+	-- exactly in the turn. The fix real autopilots use (ArduPilot PTCH2SRV_RLL) + real raptors use (tail-twist
+	-- nose-up pitch applied WITH the bank; Science Robotics 2024) is a bank-proportional FEEDFORWARD: add
+	-- nose-up pitch as a function of BANK, before the error develops. In a level turn the wing must make
+	-- n=1/cos(bank) times the lift to hold altitude, so the extra-lift demand ∝ (sec(bank)-1) — ZERO at
+	-- wings-level, growing with bank. computeMouseAim adds bankFF = (sec(bank)-1)·this to the pitch command
+	-- BEFORE the AoA/stall gate (so it's stall-limited at low speed, exactly where the merge fight lives) and
+	-- the CS-1 aim gate (mouse-aim only; keyboard still zeroes it). WHY IT DOESN'T RE-PORPOISE: feedforward is
+	-- open-loop (function of bank, not cursor error) so it adds NO closed-loop phase lag — it CANCELS the known
+	-- lift-sag so the PD loop chases LESS, unlike raising P-gain which fights its own damping. Zero at
+	-- wings-level ⇒ straight flight + the signed-off snap feel are numerically UNTOUCHED. Kernel untouched.
+	-- TUNING (ArduPilot's tuned analogue sits near unity on a comparable term; ours is normalized [-1,1], so
+	-- 0.35 is conservative): nose still DIPS in a hard bank → raise toward 0.5-0.6; nose now BALLOONS/climbs
+	-- in turns → lower toward 0.2 (ArduPilot's own reduce-if-it-gains-height rule). 0 = feature off. PROVISIONAL.
+	aimBankFeedforward = 0.35,
 	invertPitch      = false, -- false = cursor ABOVE the nose pitches UP (the cross rises to meet it)
 
 	-- FLAP THROTTLE (sticky, NOT momentary): hold SHIFT to ramp UP-thrust (climb), CTRL to ramp DOWN-thrust
