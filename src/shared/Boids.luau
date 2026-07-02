@@ -50,7 +50,8 @@ end
 --    self         = { position = Vector3, velocity = Vector3 }
 --    neighbors    = array of { position = Vector3, velocity = Vector3 }
 --    goalPoint    = Vector3 | nil  (squad convergence point)
---    formationCfg = GameConfig.Squad.formations entry { spacing, cohesionMul, separationMul }
+--    formationCfg = GameConfig.Squad.formations entry { spacing, cohesionMul, separationMul,
+--                   alignmentMul? } (Squad.mob.steering passes alignmentMul/cohesionMul = 0)
 --    returns a world-space desired acceleration vector, clamped to maxSteerForce.
 --------------------------------------------------------------------------------
 function Boids.computeSteering(self, neighbors, goalPoint, formationCfg)
@@ -62,6 +63,10 @@ function Boids.computeSteering(self, neighbors, goalPoint, formationCfg)
 	local spacing = (formationCfg and formationCfg.spacing) or B.neighborRadius * 0.25
 	local cohesionMul = (formationCfg and formationCfg.cohesionMul) or 1
 	local separationMul = (formationCfg and formationCfg.separationMul) or 1
+	-- alignmentMul: lets a steering profile scale/zero the alignment term the same way the
+	-- cohesion/separation muls work (mob mode passes 0 — independent attackers don't match
+	-- squadmate headings). Lua: 0 is truthy, so an explicit 0 survives the `or 1` fallback.
+	local alignmentMul = (formationCfg and formationCfg.alignmentMul) or 1
 
 	-- Perception cone: neighbors within neighborRadius AND inside neighborFovDeg of
 	-- the bird's forward (its velocity direction). A bird with no speed perceives all.
@@ -137,7 +142,7 @@ function Boids.computeSteering(self, neighbors, goalPoint, formationCfg)
 	-- Weighted sum (GameConfig weights * per-formation muls).
 	local steer = Vector3.new()
 	steer = steer + separation * (B.separationWeight * separationMul)
-	steer = steer + alignment  * B.alignmentWeight
+	steer = steer + alignment  * (B.alignmentWeight * alignmentMul)
 	steer = steer + cohesion   * (B.cohesionWeight * cohesionMul)
 	-- Goal (eagle-chase) uses its OWN weight — the mobbing lever — so it can DOMINATE
 	-- separation and pull the swarm onto the eagle (was pinned to cohesionWeight=1.0, which
@@ -161,7 +166,8 @@ end
 --    - Decompose the heading error (current LookVector -> desiredDir) into a
 --      HORIZONTAL (yaw) component and a VERTICAL (pitch) component in bird space.
 --    - Horizontal error -> ROLL (banking is how birds turn) + a smaller coordinating
---      YAW in the same direction.
+--      YAW in the same direction. Kernel convention: +roll/+yaw = LEFT, so a
+--      rightward error (yawError > 0) maps to NEGATIVE roll/yaw (see S25 note below).
 --    - Vertical error   -> PITCH (nose up to climb, down to descend).
 --    - flap = true when it must gain energy: desired heading is upward OR airspeed is
 --      below the profile glide speed.
@@ -202,8 +208,17 @@ function Boids.steeringToInput(currentCFrame, currentVelocity, desiredDir, profi
 	end
 
 	-- Turn by BANKING: roll proportional to horizontal error, coordinating yaw smaller.
-	input.roll = clamp(yawError, -1, 1)
-	input.yaw = clamp(yawError * 0.35, -1, 1)
+	-- ⚠️ SIGN (S25 — the "they always fly away" root cause): the kernel applies
+	-- CFrame.Angles(pitch, yaw, roll) about LOCAL axes, so +roll RAISES the right wing (banks
+	-- LEFT) and +yaw swings the nose LEFT — see BirdController's key map (A=+1 "bank left") and
+	-- the mouse-aim's negated horizontal command. yawError is +1 for a target on the RIGHT, so
+	-- both channels must be NEGATED to turn TOWARD it. The original un-negated mapping turned
+	-- every AI crow AWAY from its goal — and "goal dead astern" is the STABLE equilibrium of an
+	-- inverted controller, so crows flew calmly straight away from the eagle forever (6 playtests
+	-- of "they scatter and fly away / I can only catch them"; no goal-side tune could make them
+	-- converge on a target while the mapping pointed them away from it).
+	input.roll = clamp(-yawError, -1, 1)
+	input.yaw = clamp(-yawError * 0.35, -1, 1)
 
 	-- Vertical (pitch) error: nose up when target is above current heading.
 	-- Compare desired vertical component against current look vertical component.
