@@ -967,6 +967,32 @@ GameConfig.Controls = {
 	-- 0.35 is conservative): nose still DIPS in a hard bank → raise toward 0.5-0.6; nose now BALLOONS/climbs
 	-- in turns → lower toward 0.2 (ArduPilot's own reduce-if-it-gains-height rule). 0 = feature off. PROVISIONAL.
 	aimBankFeedforward = 0.35,
+	-- S28 COORDINATED-TURN CASCADE (deep-research RESEARCH-coordinated-flight.md — Chad's directive after
+	-- the S27 servo patches rubberbanded). For LARGE HORIZONTAL aim errors the roll/yaw channels stop being
+	-- servos on cursor error and become a bank-to-turn cascade: heading error → sqrt-shaped commanded turn
+	-- RATE (linear small = snappy, bounded-deceleration large = cannot overshoot; ArduPilot sqrt-controller)
+	-- → ONE commanded BANK (φ_d = atan(V·ψ̇_d/g), the coordinated-turn inversion, speed-scaled), slew-limited
+	-- so the command respects the roll loop's lag (Jung & Tsiotras: ignoring that lag IS the overshoot) →
+	-- roll servos the BANK to φ_d (bank error, not cursor error) + yaw coordinates from the SAME turn command.
+	-- Below aimDirectConeDeg (and for near-vertical errors = loops, and inverted flight) the OLD direct law
+	-- runs verbatim — the loved small-input snap, loop commitment, and straight-flight feel are numerically
+	-- IDENTICAL to the S26 baseline. Pitch channel untouched (PD + speed scale + stall gate + bank FF above).
+	aimDirectConeDeg = 10,   -- error cone (deg) where the direct law runs alone; blends to full cascade by 2×
+	                         -- this. MouseFlight aggressiveTurnAngle precedent (~10°). Bigger = more old-feel
+	                         -- range; smaller = coordination takes over sooner.
+	aimTurnP         = 2.5,  -- rad/s of commanded turn rate per rad of heading error (the AGGRESSIVENESS knob,
+	                         -- ≈ 1/NAVL1_PERIOD). Reticle closes big turns too slowly → raise; arrives too hot
+	                         -- (relies on the accel limit) → lower.
+	aimTurnAccel     = 2.0,  -- rad/s² bounded arrival deceleration of the sqrt-controller (the NO-OVERSHOOT
+	                         -- knob). Reticle still sails past the cursor → LOWER this (gentler roll-out
+	                         -- starts earlier); catch-up feels like it brakes too early → raise.
+	aimMaxBankDeg    = 70,   -- bank ceiling the cascade may command (deg). The sec(bank) pitch FF above pays
+	                         -- the altitude; past ~75° that demand explodes, so keep ≤ 72.
+	aimBankSlew      = 2.0,  -- rad/s max slew of the COMMANDED bank — the outer law respecting the roll loop's
+	                         -- lag (Eagle rollRate 3.2; command slower than the plant = the plant can track it).
+	                         -- Bank command feels laggy entering turns → raise toward 2.6; wobbles → lower.
+	aimBankGain      = 3.0,  -- inner bank-tracking servo P: full roll deflection at ~19° of bank error. Tracks
+	                         -- a SMOOTH slewed command, so it doesn't need to be soft; aimRollDamp still damps.
 	invertPitch      = false, -- false = cursor ABOVE the nose pitches UP (the cross rises to meet it)
 
 	-- FLAP THROTTLE (sticky, NOT momentary): hold SHIFT to ramp UP-thrust (climb), CTRL to ramp DOWN-thrust
