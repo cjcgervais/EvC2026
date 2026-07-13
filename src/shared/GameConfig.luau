@@ -730,7 +730,8 @@ GameConfig.Camera = {
 	-- S30 Stage 1: LOOSENED 4.0→2.5 for the FREE-CURSOR mode — the camera catches the aim slower so the freed
 	-- cursor roams out and is "not pulled back to centre quick" (Chad). Only meaningful with aimFreeCursor=true
 	-- (with the clamps on they re-centred the cursor regardless of lag). Sweep 2.0-3.5; view too floaty → raise.
-	aimHeadingLag = 2.5,
+	-- S30: 2.5→2.2 (Chad: "a little wee bit more lag") — the freed cursor roams a touch further before re-centre.
+	aimHeadingLag = 2.2,
 	baseFOV = 70,
 	diveFOV = 95,
 	climbFOV = 62,
@@ -776,6 +777,13 @@ GameConfig.Camera = {
 	-- more top-down view of the eagle.
 	heightFactor     = 0.35, -- base height ratio when zoomed in (a little above the bird)
 	zoomTopDownHeight = 0.55, -- height ratio at full zoom-out (a touch more top-down, but a happy medium — angles stay close)
+	-- CHASE FRAMING (S30, Chad: "the mouse aim + eagle nose pointer should rest at CENTRE screen; drop the view
+	-- of the bird DOWN — the bird should sit LOWER"). The cam rides ABOVE the bird (heightFactor) and looks a touch
+	-- AHEAD, which tilts the look DOWN onto the bird and pushes the forward AIM above centre. Raise the chase look
+	-- target along the camera-up by this fraction of the follow distance to tilt the view UP: the resting aim drops
+	-- to screen CENTRE and the bird sits LOWER. 0 = old framing (bird ~centred, aim high). Aim still ABOVE centre /
+	-- bird too high → raise toward 0.32; aim now BELOW centre / bird too low → lower toward 0.18. Chase-mode only.
+	chaseLookUp = 0.25,
 	-- Loop/crest damping: when the bird's facing rotates fast (e.g. cresting a loop), the chase
 	-- cam softens its follow so the view glides through the flip instead of whipping. crestAngRate
 	-- is the facing angular speed (rad/s) at which damping reaches full; crestDamp is the max
@@ -1021,6 +1029,15 @@ GameConfig.Controls = {
 	-- 0.35 is conservative): nose still DIPS in a hard bank → raise toward 0.5-0.6; nose now BALLOONS/climbs
 	-- in turns → lower toward 0.2 (ArduPilot's own reduce-if-it-gains-height rule). 0 = feature off. PROVISIONAL.
 	aimBankFeedforward = 0.35,
+	-- KNIFE-EDGE TAPER (S30) — fade the bank feedforward above ~combat bank. The sec(bank) FF is only valid for
+	-- an altitude-holding turn (≤ ~combat bank); past that sec EXPLODES (slope near vertical) and its magnitude
+	-- saturates the elevator, so tiny bank wobbles pump the nose UP/DOWN in a steep turn (Chad S30, on the freed
+	-- cursor: "the lateral knife edge produces up-and-down oscillation while turning"). Free-cursor made 65-85°
+	-- banks reachable (the cone capped ~33° before), which is why this tail only just surfaced. Fades the FF to 0
+	-- over a 15° shoulder as |bank| nears this angle: full anti-dip through ≤40° bank, gone above 55°. Nose DIPS
+	-- again in hard turns → raise toward 65; still porpoises at knife-edge with it tapered → the driver is the
+	-- pitch-P, not the FF (next dial). 0 = no taper = byte-identical to today.
+	aimBankFFTaperDeg = 55,
 	-- S28e TURN-RATE LEAD — the coordination law (RESEARCH-coordinated-flight.md applied to THIS kernel; see
 	-- the BANK+RUDDER + lead blocks in BirdController.computeMouseAim for the full derivation). The S26
 	-- servo shape is kept verbatim (it IS the loved snap); the horizontal error is PREDICTED aimLeadTime

@@ -719,7 +719,9 @@ local function updateCamera(dt)
 	if freeLook.active then
 		lookTarget = position
 	else
-		lookTarget = position + headingRef * (dist * 0.12)
+		-- CHASE FRAMING (S30): raise the look target along camUp so the view tilts UP — the resting aim/nose lands
+		-- at screen CENTRE and the bird sits LOWER in frame (Chad). camUp is the framing up (pre-bank-tilt). 0 = old.
+		lookTarget = position + headingRef * (dist * 0.12) + camUp * (dist * (CAM.chaseLookUp or 0))
 		if aimZoom.factor > 1e-3 then
 			-- Look FAR along the beak so the telescope magnifies the aim point (distance matched to the reticle's
 			-- 4000 projection). The zoom centres this exact world point; the aim reticle (shown during zoom in the
@@ -1106,7 +1108,19 @@ local function computeMouseAim(dt)
 	if bankFF > 0 and cf.UpVector.Y > 0 then
 		local sinBank = clamp(-cf.RightVector.Y, -1, 1)
 		local cosBank = math.sqrt(math.max(1 - sinBank * sinBank, 0.04))
-		pitch = pitch + (1 / cosBank - 1) * bankFF
+		-- KNIFE-EDGE TAPER (S30): the sec(bank) FF models the load factor of an ALTITUDE-HOLDING turn — valid to
+		-- ~combat bank, but past that sec explodes (slope near vertical) and its magnitude saturates the elevator,
+		-- so tiny bank wobbles PUMP the nose up/down (Chad: "the lateral knife edge produces up-and-down oscillation
+		-- while turning"). Free-cursor made 65-85° banks reachable (the cone capped ~33° before), exposing this tail.
+		-- Fade the FF to zero across a 15° shoulder as |bank| nears aimBankFFTaperDeg — keeps the loved S27 anti-dip
+		-- in normal-to-hard turns, removes it only in the knife-edge band where it isn't modeling real lift anyway.
+		-- 0 = no taper = byte-identical to today.
+		local ffFade = 1
+		local taperDeg = C.aimBankFFTaperDeg or 0
+		if taperDeg > 0 then
+			ffFade = clamp((taperDeg - math.deg(math.asin(math.abs(sinBank)))) / 15, 0, 1)
+		end
+		pitch = pitch + (1 / cosBank - 1) * bankFF * ffFade
 	end
 	if pitch > 0 then pitch = pitch * aoaHead end  -- ride-the-edge protection on the nose-UP pull (and the FF)
 	pitch = clamp(pitch, -1, 1)
