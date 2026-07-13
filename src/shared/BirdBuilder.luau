@@ -492,6 +492,16 @@ function BirdBuilder.AnimateWings(model, isFlapping, isDiving, flapPhase, dt)
 		sweep = 0
 	end
 
+	-- STRIKE ATTACK POSE (S31): while the server marks this bird's strike ACTIVE (the replicated Body
+	-- attribute StrikeActive), cup the wings up into a flare so the strike READS to every client. Purely
+	-- cosmetic — Motor6D.Transform is client-local and never touches physics; the attribute is set only on
+	-- eagles (GameServer.updateEagleStrikes) so crows are unaffected. The SMOOTH ease below swings the
+	-- flare in on strike and back out on release. Gated + inert-able via GameConfig.Combat.fx.
+	local fx = GameConfig.Combat and GameConfig.Combat.fx
+	if fx and fx.strikePose and body:GetAttribute("StrikeActive") then
+		dihedral = dihedral + math.rad(fx.strikePoseWingDeg or 0)
+	end
+
 	-- Apply symmetrically to each wing joint. The joint's C0 is a pure translation to the wing
 	-- root, so the Transform's axes align with Body: rotate about Z to sweep the tip up/down
 	-- (dihedral) and about Y to sweep the wing fore/aft. FlapSign (= side) mirrors left vs right;

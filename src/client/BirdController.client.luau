@@ -89,6 +89,7 @@ local SwapCrow     = Remotes:WaitForChild("SwapCrow")
 local SetFormation = Remotes:WaitForChild("SetFormation")
 local Respawn      = Remotes:WaitForChild("Respawn")
 local GetThermals  = Remotes:WaitForChild("GetThermals")
+local CombatFX     = Remotes:WaitForChild("CombatFX") -- S->C contact juice: cause, position, victimTeam, killed
 
 -- Eagle strike input: LEFT-CLICK fires a strike EDGE (a tap, not a hold). We send NOTHING the server
 -- must trust — no direction, no hit claim; the server reads the eagle's authoritative bank to pick
@@ -902,6 +903,90 @@ local function updateVortexTrails()
 		tr.Transparency = seq
 	end
 end
+
+--------------------------------------------------------------------------------
+-- CONTACT JUICE — FEATHERS (S31, phase 1). The server fires CombatFX(cause, position, victimTeam,
+-- killed) at every contact/death (GameServer.applyDamage); here we burst a feather cloud at the point.
+-- Pooled, distance-gated, zero per-hit Instance creation: a small ring of anchored emitter parts is
+-- built once and reused round-robin, so a 4-crow melee never allocates. Purely cosmetic — no gameplay,
+-- no kernel, no camera-law touch. Swap `FEATHER_TEXTURE` for a real feather decal when art lands.
+--------------------------------------------------------------------------------
+local FEATHER_TEXTURE = "rbxasset://textures/particles/smoke_main.dds" -- soft placeholder; replace w/ feather decal
+local featherPool   = {}     -- array of {part, emitter}
+local featherCursor = 0
+local FEATHER_POOL_N = 6
+
+local function buildFeatherPool()
+	if #featherPool > 0 then return end
+	local fx = GameConfig.Combat and GameConfig.Combat.fx
+	for _ = 1, FEATHER_POOL_N do
+		local part = Instance.new("Part")
+		part.Name = "FeatherFX"
+		part.Size = Vector3.new(0.2, 0.2, 0.2)
+		part.Transparency = 1
+		part.Anchored = true
+		part.CanCollide = false
+		part.CanQuery = false
+		part.CanTouch = false
+		part.Locked = true
+		local em = Instance.new("ParticleEmitter")
+		em.Texture = FEATHER_TEXTURE
+		em.Rate = 0 -- burst-only, via :Emit
+		em.Lifetime = NumberRange.new((fx and fx.featherLifeMin) or 0.8, (fx and fx.featherLifeMax) or 1.4)
+		em.Speed = NumberRange.new(((fx and fx.featherSpeed) or 22) * 0.5, (fx and fx.featherSpeed) or 22)
+		em.SpreadAngle = Vector2.new(180, 180)
+		em.Acceleration = Vector3.new(0, -((fx and fx.featherGravity) or 30), 0) -- flutter-fall, don't rocket off
+		em.Drag = 4 -- air resistance so they slow and settle like real feathers
+		em.Rotation = NumberRange.new(0, 360)
+		em.RotSpeed = NumberRange.new(-200, 200)
+		local fsz = (fx and fx.featherSize) or 1.5
+		em.Size = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, fsz),
+			NumberSequenceKeypoint.new(1, fsz * 0.25),
+		})
+		em.Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0),    -- spawn fully opaque so the burst is unmissable
+			NumberSequenceKeypoint.new(0.75, 0.15),
+			NumberSequenceKeypoint.new(1, 1),
+		})
+		em.LightEmission = 0
+		em.Parent = part
+		part.Parent = workspace
+		featherPool[#featherPool + 1] = { part = part, emitter = em }
+	end
+end
+
+-- Burst `count` feathers of `color` at world `pos` using the next pooled emitter.
+local function burstFeathers(pos, color, count)
+	buildFeatherPool()
+	if #featherPool == 0 then return end
+	featherCursor = (featherCursor % #featherPool) + 1
+	local slot = featherPool[featherCursor]
+	slot.part.Position = pos
+	slot.emitter.Color = ColorSequence.new(color)
+	slot.emitter:Emit(count)
+end
+
+local FEATHER_CROW  = Color3.fromRGB(28, 28, 34)   -- crow victim: near-black
+local FEATHER_EAGLE = Color3.fromRGB(96, 66, 40)   -- eagle victim: brown body feathers
+
+CombatFX.OnClientEvent:Connect(function(cause, position, victimTeam, _killed)
+	local fx = GameConfig.Combat and GameConfig.Combat.fx
+	if not (fx and fx.enabled) or typeof(position) ~= "Vector3" then return end
+	-- Distance gate: skip FX far from this client's view (swarm cost guard).
+	if camera and (camera.CFrame.Position - position).Magnitude > (fx.range or 400) then return end
+	local eagleVictim = (victimTeam == "Eagles")
+	local color = eagleVictim and FEATHER_EAGLE or FEATHER_CROW
+	local count
+	if eagleVictim then
+		count = fx.featherRam or 40           -- eagle took a ram
+	elseif _killed then
+		count = fx.featherCrowDeath or 42     -- a crow KILLED — the big payoff cloud
+	else
+		count = fx.featherStrike or 22        -- a strike that clipped but didn't kill
+	end
+	burstFeathers(position, color, count)
+end)
 
 --------------------------------------------------------------------------------
 -- INPUT HELPERS — keyboard tap->ramp smoothing + the mouse-aim autopilot.

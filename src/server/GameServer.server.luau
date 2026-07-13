@@ -442,6 +442,7 @@ local function CreateRemotes()
 	event("TakeDamage")       -- S->C: attackerName, targetPlayer, damage
 	event("ScoreUpdate")      -- S->C: scores
 	event("GameNotification") -- S->C: text, color
+	event("CombatFX")         -- S->C: cause, position, victimTeam, killed — contact JUICE (feathers/pose); FX only, no gameplay
 	event("SwapCrow")         -- C->S: index
 	event("SetFormation")     -- C->S: formationName
 	event("Respawn")          -- C->S: request a fresh bird (manual reset; debounced)
@@ -809,6 +810,40 @@ local function autoRepossess(squad)
 	end
 end
 
+-- CROW SPIRAL-DEATH (S31 juice, Chad "the bird spirals down dead"): a killed crow is detached and
+-- tumbles/spirals down for GameConfig.Combat.fx.tumbleDuration before despawning, so a kill READS
+-- instead of the model just vanishing. Anchors the parts (we own the CFrame — a client network owner
+-- can't fight it) then CFrame-animates a gravity fall + tumble spin. Purely cosmetic; the entry is
+-- already removed from Birds before this runs, so the corpse takes NO further part in combat/AI/rounds.
+local function spiralCrowDeath(model, lastVel)
+	local body = model and (model.PrimaryPart or model:FindFirstChild("Body"))
+	if not (model and body) then
+		if model then pcall(function() model:Destroy() end) end
+		return
+	end
+	local fx = GameConfig.Combat and GameConfig.Combat.fx
+	local dur = (fx and fx.tumbleDuration) or 1.4
+	local spin = (fx and fx.tumbleSpin) or 9
+	for _, p in ipairs(model:GetDescendants()) do
+		if p:IsA("BasePart") then p.Anchored = true end
+	end
+	-- Seed the fall from the crow's last velocity (a downed bird keeps some momentum), damped.
+	local vel = (typeof(lastVel) == "Vector3") and (lastVel * 0.4) or Vector3.zero
+	task.spawn(function()
+		local cf = model:GetPivot()
+		local t = 0
+		while t < dur and model.Parent do
+			local dt = task.wait()
+			t += dt
+			vel = Vector3.new(vel.X * 0.98, vel.Y - 60 * dt, vel.Z * 0.98) -- gravity + horizontal drag
+			local rot = (cf - cf.Position) * CFrame.Angles(spin * 0.4 * dt, spin * dt, spin * 0.6 * dt)
+			cf = CFrame.new(cf.Position + vel * dt) * rot
+			model:PivotTo(cf)
+		end
+		pcall(function() model:Destroy() end)
+	end)
+end
+
 -- Apply damage to a bird; handle death + notifications. `attackerEntry` may be nil.
 local function applyDamage(targetEntry, amount, attackerEntry, cause)
 	if not isBirdAlive(targetEntry) then return end
@@ -819,6 +854,14 @@ local function applyDamage(targetEntry, amount, attackerEntry, cause)
 	if Remotes then
 		local attackerName = attackerEntry and attackerEntry.player and attackerEntry.player.Name or "World"
 		Remotes.TakeDamage:FireAllClients(attackerName, targetEntry.player, amount)
+		-- CONTACT JUICE (S31): fire a purely-cosmetic CombatFX event at the contact point so clients can
+		-- burst feathers / play the hit pose. Read the victim position NOW (the death branch below may
+		-- Destroy the model this frame). cause is "beak"/"talon" (strike), "collision" (ram), "crash".
+		-- FX only — no gameplay, no damage; clients gate it on GameConfig.Combat.fx + camera distance.
+		local fxEvent = Remotes:FindFirstChild("CombatFX")
+		if fxEvent and targetEntry.body then
+			fxEvent:FireAllClients(cause, targetEntry.body.Position, targetEntry.team, hp <= 0)
+		end
 	end
 
 	if hp <= 0 then
@@ -829,8 +872,16 @@ local function applyDamage(targetEntry, amount, attackerEntry, cause)
 		local deadSquad = targetEntry.squad
 		local deadModel = targetEntry.model
 		local deadPlayer = targetEntry.player
+		local deadVel = targetEntry.body and targetEntry.body.AssemblyLinearVelocity
 		Birds[deadModel] = nil
-		pcall(function() deadModel:Destroy() end)
+		-- CROW SPIRAL-DEATH juice: tumble a killed crow down instead of vanishing (feathers already burst
+		-- via CombatFX above). Crows only + gated; everything else despawns immediately as before.
+		local fxCfg = GameConfig.Combat and GameConfig.Combat.fx
+		if fxCfg and fxCfg.crowTumble and targetEntry.team == "Crows" then
+			spiralCrowDeath(deadModel, deadVel)
+		else
+			pcall(function() deadModel:Destroy() end)
+		end
 
 		-- Prune the dead model from the owner's birds list. Without this, rec.birds keeps a
 		-- stale (destroyed) ref forever, so the solo-flight respawn check (#rec.birds == 0)
@@ -931,7 +982,10 @@ local function enemyZone(entry, none)
 	local d = target.body.Position - entry.body.Position
 	if d.Magnitude < 1e-3 then return none end
 	d = d.Unit
-	return (d:Dot(-entry.body.CFrame.UpVector) > d:Dot(entry.body.CFrame.LookVector)) and "talon" or "beak"
+	-- Bias the belly(-Up) side so front/side-low crows arm the wide 70° talon instead of the narrow beak
+	-- (Chad "can't get 'em"; Stage-7 showed the talon was never picked). bias = 0 is byte-for-byte today.
+	local bias = (GameConfig.Combat and GameConfig.Combat.talonPickBias) or 0
+	return (d:Dot(-entry.body.CFrame.UpVector) + bias > d:Dot(entry.body.CFrame.LookVector)) and "talon" or "beak"
 end
 
 local function newStrikeState()
@@ -1029,6 +1083,36 @@ local function updateEagleStrikes(dt)
 			local s = entry.strike
 			stepStrike(s, dt)
 
+			-- AUTO-STRIKE (S31 accessibility, Chad "getting a hit is near impossible / a new kid won't time
+			-- clicks"): if enabled and the strike is READY, auto-OPEN the window the instant a crow is actually
+			-- inside the auto-picked zone's cone AND within reach — so a new player lands the hit without
+			-- frame-perfect click timing. LMB still works and still feels like agency; this only fires when
+			-- the geometry is genuinely satisfied. Cooldown + one-hit-per-window are unchanged, so it is NOT a
+			-- death-ray. GameConfig.Combat.autoStrike = false is byte-for-byte today.
+			if s.state == "ready" and GameConfig.Combat and GameConfig.Combat.autoStrike then
+				local stype = enemyZone(entry, "none")
+				local cfg = (stype ~= "none") and strikes[stype]
+				if cfg then
+					local p = entry.profile
+					local reach = cfg.reachStuds or (p.bodyRadius + MAX_BODY_RADIUS + ATTACK_BUFFER) * (cfg.reachFraction or 0.7)
+					reach = reach + (GameConfig.Combat.strikeReachBonus or 0)
+					local target, dist = findNearestEnemy(entry, reach + 6)
+					if target and dist and dist <= reach then
+						local dir = target.body.Position - entry.body.Position
+						if dir.Magnitude > 1e-3
+							and dir.Unit:Dot(strikeAxis(entry.body, cfg)) >= math.cos(math.rad(cfg.coverHalfAngleDeg or 60)) then
+							-- Open the window (as if the player clicked at the perfect moment); the offensive
+							-- pass below lands it once startup elapses, sharing the same cooldown/caught rules.
+							s.state = "active"
+							s.stype = stype
+							s.startupLeft = cfg.startup or 0
+							s.durationLeft = cfg.duration or 0.3
+							s.caught = false
+						end
+					end
+				end
+			end
+
 			-- OFFENSIVE pass: while active (past startup) and not yet spent this window, a crow inside the
 			-- zone's cone (beak=forward / talon=belly) within reach takes the strike's damage. One per window (shares `caught` with
 			-- the defensive parry, so a strike lands EITHER a kill-catch OR an offensive hit, never both).
@@ -1039,6 +1123,10 @@ local function updateEagleStrikes(dt)
 					-- Explicit reachStuds (S17) is a believable swoop-and-strike range; fall back to the
 					-- old point-blank formula only if a strike omits it.
 					local reach = cfg.reachStuds or (p.bodyRadius + MAX_BODY_RADIUS + ATTACK_BUFFER) * (cfg.reachFraction or 0.7)
+					-- STRIKE REACH BUFFER (Chad "need a bigger buffer to strike"): widen the offensive hunt
+					-- sphere so a circling crow just past the nose still gets clipped. Offense only — the parry
+					-- (tryStrikeCatch) and ram are untouched. 0 = byte-for-byte today. See GameConfig.Combat.
+					reach = reach + ((GameConfig.Combat and GameConfig.Combat.strikeReachBonus) or 0)
 					local target, dist = findNearestEnemy(entry, reach + 6)
 					if target and dist and dist <= reach then
 						local dir = target.body.Position - entry.body.Position
@@ -1600,7 +1688,11 @@ local function updateAICrows(dt)
 					-- the ring + climb to recover), or holding the orbit ring (default). Timers set by the
 					-- squad scheduler above; expire naturally back to ORBIT.
 					if entry._attackUntil and now < entry._attackUntil then
-						memberGoal = eaglePos                              -- DIVE-BOMB: commit through the eagle
+						-- DIVE-BOMB: aim at a LED intercept (eaglePos + eagleVel·leadTime) so the pass connects
+						-- instead of pursuit-curving behind a turning eagle and sliding past (Chad "they get away
+						-- so fast"; Stage-7 pursuit-curve). leadTime = 0 ⟹ eaglePos, byte-for-byte today.
+						local leadTime = (GameConfig.Squad.mob.diveBomb and GameConfig.Squad.mob.diveBomb.leadTime) or 0
+						memberGoal = eaglePos + enemy.body.AssemblyLinearVelocity * leadTime -- commit through the eagle
 						isAttacking = true
 					elseif entry._peelUntil and now < entry._peelUntil then
 						memberGoal = mobPeelTarget(eaglePos, body.Position) -- PEEL-OFF: break away + climb

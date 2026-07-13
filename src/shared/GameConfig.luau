@@ -399,6 +399,38 @@ GameConfig.Combat = {
 	-- sends only a fire EDGE, never a direction. ALL PLAYTEST-PROVISIONAL (durations/cooldowns are Chad's asks).
 	bankStrikeThresholdDeg = 18,  -- LEGACY (no longer used; the strike zone is picked by enemy proximity, not bank)
 	strikeSelectRange = 200,      -- studs; an enemy within this range drives the zone pick + reticle lighting
+	-- TALON-PICK BIAS (S31, Chad "the crows are too good at flying, I can't get 'em"): the auto-pick
+	-- (GameServer.enemyZone) chose the narrow 35° BEAK 100% of the time (Stage-7) and the wide 70° belly
+	-- TALON workhorse was NEVER selected, so strikes whiffed on crows arcing across the front-low quadrant.
+	-- This bias is ADDED to the belly(-Up) side of the "more-below-vs-more-ahead" comparison, so front/side-
+	-- low crows now arm the 70° talon (which also SWINGS with bank onto a crossing target) instead of the beak.
+	-- A genuinely head-on crow (LookVector dot dominant) still picks the beak jab. IDENTITY = 0.0 (byte-for-byte
+	-- today); shipped at 0.35 for Chad to fly. ⚠️ flight==balance (red-team): s.stype is locked for the whole
+	-- 4s talon window, so this also arms the wide belly cone for the DEFENSIVE PARRY more often — it pushes on
+	-- the talon's >50%-always-on guardrail. JUDGE BY: landed hits on maneuvering crows (NOT pick-share) AND
+	-- whether 4 crows can still saturate/land front-low rams. Too eagle-favored → drop toward 0.2 (or cut talon
+	-- duration FIRST per the guardrail note below). Barely helps → raise toward 0.5. Revert: set to 0.0.
+	-- AUTO-STRIKE (S31 accessibility, Chad "getting a hit is near impossible… a kid won't time clicks"):
+	-- when true, the eagle's strike auto-fires the instant a crow is genuinely inside the auto-picked
+	-- zone's cone AND within reach (GameServer.updateEagleStrikes) — a new player lands hits without
+	-- frame-perfect timing; the manual LMB click still works. Cooldown + one-hit-per-window unchanged, so
+	-- it's not a death-ray. This was the REAL wall (both design consults): reach/pick couldn't matter while
+	-- landing a hit needed a perfectly-timed click on a briefly-crossing crow. IDENTITY = false (today).
+	-- ⚠️ this is the assist that most reduces the skill floor — likely a "kid tier" default; keep it OFF for
+	-- a ranked/expert tier when the difficulty-tier config lands. Revert: set to false.
+	autoStrike = true,
+	talonPickBias = 0.35,
+	-- STRIKE REACH BUFFER (S31, Chad "still too hard to get them, they fly in circles and get out of the
+	-- way, I need a bigger buffer to strike with"): extra studs added to EVERY strike's offensive reach
+	-- (GameServer.updateEagleStrikes). This is the "buffer" — a bigger sphere so a crow circling just past
+	-- your nose still gets clipped. It affects ONLY the eagle's offensive hunt: the parry (tryStrikeCatch,
+	-- cone-only at body contact) and the ram are UNTOUCHED, so this does NOT change crow lethality. IDENTITY
+	-- = 0 (byte-for-byte today: talon reach 24 / beak 28). Shipped at 12 (→ talon 36 / beak 40) for Chad to
+	-- fly. ⚠️ flight==balance: reach is THE documented "death-ray" lever — a bigger reach means the eagle
+	-- kills circling crows from farther, so fewer survive to mob. JUDGE IN 1-v-4: can you catch them now AND
+	-- can 4 crows still gang up? Too easy / crows evaporate → drop toward 6-8. Still can't reach → raise toward
+	-- 18. If it turns eagle-favored, trim this BEFORE touching cones/damage. Revert: set to 0.
+	strikeReachBonus = 12,
 	-- ⚠️ STRIKE REACH (S17): the offensive hunt reach was `(rEagle+rMax+ATTACK_BUFFER)*reachFraction` ≈
 	-- (4.5+4.5+3)*0.85 ≈ 10.2 studs — barely past the 6.7-stud TOUCHING distance, i.e. you had to nearly
 	-- collide to land a strike. Meanwhile the ARMED reticle lights at strikeSelectRange (200 studs), so a
@@ -416,6 +448,37 @@ GameConfig.Combat = {
 		-- reach (28) than the talon: the narrow 35° cone + short 2s window make it hard to land, so a committed
 		-- head-on jab needs the range to actually connect — this is the strike Chad struggled with most.
 		beak  = { startup = 0.10, duration = 2.0, cooldown = 4.0, axis = "forward", coverHalfAngleDeg = 35, damage = "beak",  reachFraction = 0.85, reachStuds = 28 },
+	},
+
+	-- ▶ CONTACT JUICE (S31, phase 1) — additive CLIENT FX on server-detected contact. The server only
+	-- FIRES a CombatFX event (GameServer.applyDamage); ALL particles/pose run client-side and touch NO
+	-- damage number, NO flight kernel, NO camera composition law (CS-1..CS-9 safe). Feathers + the strike
+	-- wing-pose ship live (Increment 1); talon leg-extension / camera kick / crow tumble are queued INERT
+	-- for Increment 2. Cheap in a swarm: pooled emitters, distance-gated, zero per-hit Instance creation.
+	fx = {
+		enabled       = true,   -- master switch for client contact FX (false = byte-identical to pre-S31)
+		range         = 500,    -- studs; a client skips FX beyond this from its camera (swarm cost guard)
+		-- Feather burst sizes (ParticleEmitter:Emit count) by event — Chad "there should be LOTS of feathers":
+		featherCrowDeath = 42,  -- a crow KILLED (the payoff burst — big cloud you can't miss)
+		featherStrike = 22,     -- a strike lands but doesn't kill (glancing puff)
+		featherRam    = 40,     -- a crow ram lands on the eagle (big burst = "you got hit")
+		featherSize   = 1.5,    -- stud size of each feather at spawn (shrinks over life); bigger = more visible
+		featherLifeMin = 1.0, featherLifeMax = 1.8,  -- s; feathers flutter-fall over this life
+		featherSpeed  = 26,     -- studs/s initial scatter speed
+		featherGravity = 26,    -- studs/s^2 downward accel so they settle instead of rocketing off
+		-- STRIKE ATTACK POSE (client, attribute-driven off Body StrikeActive/StrikeArmedDir; wing pose
+		-- only — never the physics Body root). Wings cup up/forward into a flare while a strike is armed.
+		strikePose        = true,
+		strikePoseWingDeg = 34,  -- deg of extra wing dihedral raised during an armed strike; 0 = no pose
+		-- CROW SPIRAL-DEATH (S31, Chad "the bird spirals down dead"): a killed crow tumbles/spirals down
+		-- for tumbleDuration s before despawning, instead of vanishing — so a kill READS. Server-driven
+		-- (the model is anchored + CFrame-animated). true = on.
+		crowTumble        = true,
+		tumbleDuration    = 1.4,   -- s the dead crow spirals down before it despawns
+		tumbleSpin        = 9,     -- rad/s tumble spin rate
+		-- INCREMENT 2 (still queued, INERT):
+		talonExtendDeg    = 0,   -- deg the legs swing tucked -> extended on a TALON strike (needs leg Motor6Ds)
+		cameraKickDeg     = 0,   -- additive camera kick on taking a ram (0 = off; camera-adjacent, Chad-flies)
 	},
 }
 
@@ -605,6 +668,18 @@ GameConfig.Squad = {
 			attackPeriod  = 1.4,  -- s between attack LAUNCHES. SHORT (was 3.4) so ~1 crow is always mid-dive + often a
 			                      -- 2nd = the eagle is under near-continuous harassment from spread angles. See cadence note.
 			attackDuration = 1.6, -- s the attacker commits toward the eagle (closes the standoff for the pass)
+			leadTime      = 0.35, -- CROW LEAD (S31, Chad "I can't kill them, they get away so fast"): the dive-bomb
+			                      -- aims at a LED intercept (eaglePos + eagleVel·leadTime) instead of the eagle's
+			                      -- CURRENT position. The old zero-lead pursuit-curve arced BEHIND a turning eagle
+			                      -- and slid past at 10-25 studs (Stage-7, 7/7 miss) → crows never entered strike
+			                      -- range, which read as "they get away." A led pass flies a true intercept and
+			                      -- arrives AT the eagle on a readable line → your buffed reach/talon can clip it on
+			                      -- the merge, AND it finally activates the parry (tryStrikeCatch, never-fired). ⚠️
+			                      -- flight==balance: this RAISES crow lethality (passes now connect ≈33 dmg each) —
+			                      -- that's the intent (restarts the mob's attrition clock). If 1-v-4 flips crow-favored,
+			                      -- raise attackPeriod (1.4→~2.2) FIRST, do NOT lower leadTime (keep passes lethal, just
+			                      -- space them). Over-leads past a turning eagle → 0.25; still slides past → 0.45.
+			                      -- IDENTITY = 0 (memberGoal = eaglePos, byte-for-byte today). Revert: set to 0.
 			peelDuration  = 1.4,  -- s the attacker breaks away+climbs to recover before rejoining the ring
 			attackSpeedMul = 1.8, -- LIFTS the AI governor's cruise cap during the pass so the attacker flies as fast
 			                      -- as the KERNEL allows and reaches ram range (vs the ~100 orbit cruise). ⚠️ It does NOT
