@@ -198,10 +198,9 @@ local aimApplied = { pitch = 0, roll = 0, yaw = 0 }
 -- the beak points right at the cursor. nil until seeded to the current nose; resetInput() recentres it.
 local aimTargetDir = nil
 
--- S28 coordinated-turn cascade state: the SLEW-LIMITED commanded bank (rad, + = right). While the cascade
--- is idle (small/vertical/inverted errors) it TRACKS the live bank, so engaging it never steps; nil until
--- first seeded (resetInput clears it with aimTargetDir). See computeMouseAim + RESEARCH-coordinated-flight.md.
-local aimBankCmd = nil
+-- S28e turn-rate-lead washout state: 1 = lead fully active (arrival shaping), eased toward 0 while the
+-- cursor is rim-pinned (sustained-turn command) or a flight key is held (CS-1 mute). See computeMouseAim.
+local aimLeadScale = 1
 
 -- Tap->ramp smoothing for roll and yaw (mirrors pitchRamp) so keyboard banking eases in.
 local rollRamp = { sign = 0, mag = 0 }
@@ -340,7 +339,11 @@ local function setFreeLook(active)
 		-- back to the chase pose at the slow followSmoothing rate (~0.165/frame) — a ~3/4 s sweep through a
 		-- side/perpendicular view that "costs reaction time due to disorientation." Flag a fast crisp return so
 		-- updateCamera re-centres on the heading in ~50-80 ms (see the fast-return in updateCamera).
+		-- snapT = the S28e time FAILSAFE for the flag (red-team F5): the dot>0.9995 consume test chases a
+		-- MOVING target, and in a sustained fast turn (esp. a possessed crow) the steady tracking gap can
+		-- exceed it — the flag would wedge ON and keep the aim cursor-circle clamp suspended indefinitely.
 		cameraState.snapToChase = true
+		cameraState.snapT = 0
 	end
 end
 
@@ -573,10 +576,21 @@ local function updateCamera(dt)
 	if GameConfig.Controls and GameConfig.Controls.mouseAim and not freeLook.active then
 		-- EXPONENTIAL ease (not a constant-rate slew): the view glides toward the heading and eases out at the
 		-- end instead of stopping abruptly, so the catch-up reads smooth (player: "the camera needs to be smoother").
-		local prevAim = cameraState.aimHeading or followDir
+		-- CS-8 SUPERSEDED (Stage 1, Chad-approved 2026-07-12): the camera lags the AIM, not the bird's
+		-- heading, so the world-anchored cursor RE-CENTRES as the view catches aimTargetDir. Fall back to
+		-- followDir (today's behavior, byte-for-byte) whenever the aim is NOT the active driver: no cursor
+		-- yet (nil / post-swap), a flight key held (CS-1 mute — predicate mirrors the aimGate exactly), or
+		-- RMB aim-zoom (awareness-only; must not move the view target). aimTargetDir is fresh here
+		-- (computeMouseAim runs earlier in onFlightStep) and always Unit. RETARGET only — aimHeadingLag
+		-- keeps its value and the fallback IS the inert/identity path. ⚠️ FIRST playtest gate: a rim-pinned
+		-- sustained turn must not PULSE (the screen-circle clamp writes aimTargetDir and the camera now eases
+		-- toward it — a damped loop; if it hunts, feed the ease from the PRE-clamp aim, do NOT raise lag).
+		local keysHeld = (kb.pitch ~= 0 or kb.roll ~= 0 or kb.yaw ~= 0)
+		local easeTarget = (aimTargetDir and not keysHeld and not aimZoom.active) and aimTargetDir or followDir
+		local prevAim = cameraState.aimHeading or easeTarget
 		local aAim = math.clamp(1 - math.exp(-(CAM.aimHeadingLag or 1.4) * dt), 0, 1)
-		local blendedAim = prevAim:Lerp(followDir, aAim)
-		cameraState.aimHeading = (blendedAim.Magnitude > EPS) and blendedAim.Unit or followDir
+		local blendedAim = prevAim:Lerp(easeTarget, aAim)
+		cameraState.aimHeading = (blendedAim.Magnitude > EPS) and blendedAim.Unit or easeTarget
 		headingRef = cameraState.aimHeading
 	else
 		cameraState.aimHeading = nil
@@ -740,9 +754,17 @@ local function updateCamera(dt)
 	local alpha = math.clamp(1 - math.exp(-smoothing * 60 * dt), 0, 1)
 	camera.CFrame = camera.CFrame:Lerp(targetCF, alpha)
 	-- Consume the exit-snap fast-return once the view has essentially reached the chase heading (or if
-	-- free-look was re-armed). One-shot per exit; setFreeLook re-sets it on the next release.
-	if cameraState.snapToChase and (freeLook.active or camera.CFrame.LookVector:Dot(targetCF.LookVector) > 0.9995) then
-		cameraState.snapToChase = nil
+	-- free-look was re-armed). One-shot per exit; setFreeLook re-sets it on the next release. The 0.4 s
+	-- time failsafe (S28e red-team F5) guarantees consumption even when a sustained fast turn keeps the
+	-- moving-target dot test just out of reach (the fast-return itself completes in ~50-80 ms, so 0.4 s
+	-- is far past any legitimate window).
+	if cameraState.snapToChase then
+		cameraState.snapT = (cameraState.snapT or 0) + dt
+		if freeLook.active or camera.CFrame.LookVector:Dot(targetCF.LookVector) > 0.9995
+			or cameraState.snapT > 0.4 then
+			cameraState.snapToChase = nil
+			cameraState.snapT = nil
+		end
 	end
 
 	-- High-speed shake.
@@ -906,7 +928,6 @@ end
 local function computeMouseAim(dt)
 	local C = GameConfig.Controls
 	if not (C and C.mouseAim) or freeLook.active then
-		aimBankCmd = nil -- suspended: drop the cascade's bank command so resume re-seeds from the LIVE bank (red-team R1)
 		return 0, 0, 0
 	end
 	if not (rootPart and rootPart.Parent and camera and flightEngine) then return 0, 0, 0 end
@@ -952,14 +973,23 @@ local function computeMouseAim(dt)
 	-- to the CAMERA: its projected position may never leave a circle CENTRED on the screen covering
 	-- aimCursorAreaFrac of the screen area. World-anchored model preserved (CS-8): the cursor is still
 	-- a world direction and the nose still catches it — this only limits how far off-centre it can be
-	-- PUSHED. In steady flight the (tighter) nose cone binds, so the settled feel is unchanged. ⚠️ In a
-	-- SUSTAINED FAST turn the camera lags the heading (lag ≈ ω/aimHeadingLag), so this bound eats into
-	-- the usable lead and can soft-cap the turn once the allowed lead nears the saturation error (~9° at
-	-- the current gains — eagle max-rate turns brush it; a possessed CROW's higher turn rate hits it
-	-- harder). The centred-circle bound and the cursor-hangs-out camera lag are in direct TENSION —
-	-- knobs: aimCursorAreaFrac up (bigger circle) or aimHeadingLag up (tighter camera, less hang-out).
+	-- PUSHED. ⚠️ S28e: this circle is now the cursor's WORKING bound (the nose cone was widened to a pure
+	-- safety — see aimLeadScreenFrac). Holding the mouse against this rim = the sustained-turn command:
+	-- rimBinding below feeds the turn-rate lead's WASHOUT, so a rim-pinned turn runs at the full S26
+	-- plant-capped rate (the lead only shapes ARRIVALS, when the cursor sits world-fixed INSIDE the circle).
+	-- S28c GATE: stand the clamp down while the free-look EXIT fast-return is still in flight. On Space-exit
+	-- the cursor is correctly re-seeded onto the nose, but for the first frames the camera still sits
+	-- SIDEWAYS from the orbit — projecting the fresh cursor through that STALE camera put the nose far off
+	-- the stale screen centre, and this clamp YANKED the cursor toward it = Chad's "aim jumps a few degrees
+	-- left for no reason". cameraState.snapToChase is TRUE exactly for that window (set on free-look release,
+	-- consumed by updateCamera only once the view has re-reached the chase heading, dot > 0.9995) — so this
+	-- suspends the clamp for precisely the stale frames at ANY frame rate and NOTHING else: every normal
+	-- mouse-aim state (incl. a possessed crow's max-rate turns, where camera↔nose legitimately diverge ~50°+)
+	-- keeps the Chad-confirmed S26 circle exactly as before. (Red-team killed the first attempt — a
+	-- camera↔nose dot>0.5 gate — as frame-rate-dependent AND clamp-disabling for fast crows; don't re-try it.)
+	local rimBinding = false -- true while the player pins the cursor against the circle (= sustained-turn command)
 	local areaFrac = C.aimCursorAreaFrac
-	if areaFrac and areaFrac > 0 then
+	if areaFrac and areaFrac > 0 and not cameraState.snapToChase then
 		local camLocal = camCF:VectorToObjectSpace(aimTargetDir)
 		if camLocal.Z < -EPS then -- only meaningful in front of the camera (Roblox camera looks down -Z)
 			local tx, ty = camLocal.X / -camLocal.Z, camLocal.Y / -camLocal.Z
@@ -981,6 +1011,7 @@ local function computeMouseAim(dt)
 				local s = rPx / px
 				local nd = camCF:VectorToWorldSpace(Vector3.new(tx * s, ty * s, -1))
 				aimTargetDir = (nd.Magnitude > EPS) and nd.Unit or aimTargetDir
+				rimBinding = true
 			end
 		end
 	end
@@ -990,10 +1021,40 @@ local function computeMouseAim(dt)
 	local rgt = localTarget.X
 	local upc = localTarget.Y
 
+	-- S28e TURN-RATE LEAD — the horizontal channel's missing plant-rate feedback (full rationale at the
+	-- BANK+RUDDER block below). Predict the horizontal error ONE aimLeadTime ahead using the eagle's ACTUAL
+	-- heading rate from clean kernel body rates (+ = turning RIGHT: the banked pull pitchVel·sinB turns the
+	-- nose toward the low wing; +yawVel = nose LEFT hence the minus). NOTHING differentiates the mouse —
+	-- the S27c jitter trap stays dead. Upright-faded like the bank FF (inverted ⇒ pure S26 law); near-
+	-- vertical attitudes self-annihilate it (wings level in a loop ⇒ sinB≈0 and the pull is vertical).
+	-- Three corrections from the S28e red-team (all three were BLOCK-level — do not remove):
+	--   1) ERROR-SPACE: d(rgt)/dt = −ψ̇·cosB·cosΔψ, so the lead is scaled by cosB·cosΔψ — without it the
+	--      lead over-anticipates ~2× at combat banks and commands a full roll-OUT with the cursor still
+	--      ~20° away (a mid-turn unload/re-roll bounce).
+	--   2) RIM WASHOUT: while the cursor is PINNED against the screen circle (rimBinding — the player is
+	--      COMMANDING a sustained turn) the lead fades to zero, so rim-pinned turns run at the full S26
+	--      plant-capped rate (eagle ~1.8, crow ~3+ rad/s — the crow's turn identity preserved). A constant
+	--      lead would silently cap sustained turns at ~half rate. When the throw ends, the camera catches
+	--      up, the cursor drops INSIDE the circle (world-fixed), and the full lead shapes the arrival —
+	--      which is exactly the sail-past case.
+	--   3) KEYBOARD MUTE: while any flight key is held (the CS-1 gate set, mirrored here) the lead fades
+	--      to zero — otherwise it pre-charges aimApplied with a saturated COUNTER-turn during a keyboard
+	--      turn that SLAMS on key release (the S26d-certified combo seam). Fades back in over ~150 ms.
+	local sinB = clamp(-cf.RightVector.Y, -1, 1)
+	local cosB = math.sqrt(math.max(1 - sinB * sinB, 0))
+	local headRate = ((flightEngine.pitchVel or 0) * sinB - (flightEngine.yawVel or 0) * cosB)
+		* clamp(cf.UpVector.Y / 0.15, 0, 1)
+	local sinDpsi = clamp(rgt / math.max(cosB, 0.2), -1, 1)
+	local cosDpsi = math.sqrt(math.max(1 - sinDpsi * sinDpsi, 0))
+	local keysHeld = (kb.pitch ~= 0 or kb.roll ~= 0 or kb.yaw ~= 0) -- mirrors the CS-1 aimGate exactly
+	local leadTarget = (rimBinding or keysHeld) and 0 or 1
+	aimLeadScale = aimLeadScale + (leadTarget - aimLeadScale) * math.clamp((C.aimLeadWashRate or 6) * dt, 0, 1)
+	local hPred = clamp(rgt - headRate * (C.aimLeadTime or 0.28) * cosB * cosDpsi * aimLeadScale, -1, 1)
+
 	-- SYMMETRIC shaping (deadzone + EXPO) on BOTH axes — WT "nonlinearity" (RESEARCH §v4). Gentle near
 	-- centre for fine aim, ramping to FULL authority at the edge, so PITCH keeps full pull for a clean
 	-- vertical loop AND a slight sideways cursor no longer snaps into a hard bank. Consistent feel both axes.
-	local hCmd = shapeAxis(rgt, C.aimBankDeadzone or 0.10, C.aimBankExpo or 1.8)
+	local hCmd = shapeAxis(hPred, C.aimBankDeadzone or 0.10, C.aimBankExpo or 1.8)
 	local vCmd = shapeAxis(upc, C.aimPitchDeadzone or 0.05, C.aimPitchExpo or 1.8)
 
 	-- LOOP COMMIT vs stall protection. Ride the edge: the nose-up pull keeps FULL authority until |AoA|
@@ -1046,80 +1107,34 @@ local function computeMouseAim(dt)
 	if pitch > 0 then pitch = pitch * aoaHead end  -- ride-the-edge protection on the nose-UP pull (and the FF)
 	pitch = clamp(pitch, -1, 1)
 
-	-- BANK + RUDDER — S28 COORDINATED-TURN CASCADE (RESEARCH-coordinated-flight.md; Chad's directive after
-	-- the S27 servo patches rubberbanded). Two regimes, blended by error size:
-	--   DIRECT (small / near-vertical / inverted errors): the S26 law VERBATIM — roll/yaw servo the shaped
-	--   cursor error + the wings-levelling assist — so the loved small-input snap, loop commitment and
-	--   straight flight are numerically IDENTICAL to the baseline.
-	--   COORDINATED (large horizontal errors — where the per-axis servos sailed past): ONE turn command
-	--   drives everything. The horizontal heading error goes through a SQRT-CONTROLLER (ArduPilot: linear
-	--   small = snappy; √(2·A·err) large = deceleration into the target bounded by aimTurnAccel ⇒ cannot
-	--   overshoot) to a commanded turn RATE; the coordinated-turn inversion φ_d = atan(V·ψ̇_d/g) turns that
-	--   into ONE commanded BANK (speed-scaled), clamped to aimMaxBankDeg and SLEW-LIMITED (aimBankSlew) so
-	--   the command never outruns the roll loop's own lag — an outer law blind to that lag is structurally
-	--   low-damped (Jung & Tsiotras), i.e. the old sail-past. Roll then servos the BANK onto the command
-	--   (bank error, NOT cursor error — as the heading error shrinks the commanded bank rolls OUT before
-	--   arrival), yaw coordinates ∝ the same turn command, and the pitch channel above (PD + the sec(bank)−1
-	--   FF, stall-gated) is the elevator that pulls the turn: bank+yaw lead, elevator sustains. Nothing
-	--   differentiates the mouse anywhere ⇒ no jitter amplification.
+	-- BANK + RUDDER — S28e ONE-LAW TURN-RATE-LEAD coordination (Chad: "yaw, bank and pitch balanced so the
+	-- reticle snaps to the cursor quickly and then gets it right to centre"). The S26 servo SHAPE below is
+	-- verbatim (it IS the snap); the coordination lives in hPred above. Why this is the balanced form:
+	--   · The VERTICAL channel never overshot because its damping is plant PITCH-RATE feedback. The
+	--     horizontal channel's damp was on ROLL-rate — which settles the BANK, not the HEADING (the
+	--     bank→turn→heading double integrator = every sail-past since S26). headRate is the missing
+	--     HEADING-rate feedback: same medicine, right axis. (Jung & Tsiotras: an outer law blind to the
+	--     inner loop's response IS the low-damped overshoot; the lead time is that awareness.)
+	--   · REGIMES (set by the washout, see the lead block): RIM-PINNED cursor (or keys held) ⇒ lead = 0 ⇒
+	--     the pure S26 law ⇒ full plant-capped sustained turn. Cursor held INSIDE the circle ⇒ settles at
+	--     hPred = 0 ⇔ turn rate ≈ deflection/(τ·cosB·cosΔψ) — a steady proportional-rate fine turn.
+	--     ARRIVAL (cursor world-fixed, error closing) ⇒ hPred crosses zero a lead-time EARLY → the command
+	--     reverses and levelAssist unwinds the bank → the nose arrives ON the cursor. Deterministic.
+	--     aimLeadTime is the ONE knob (the L1-period analogue — RESEARCH-coordinated-flight.md finding 5).
+	--   ⚠️ The S28/S28b sqrt-controller→commanded-bank CASCADE (+ error-size mode blend) is REVERTED —
+	--   Chad's playtest: the blend seam mushed 10-20° inputs ("yaws but won't bank, lost its snap") and the
+	--   slew-limited bank fought the aggressive pitch on big swings ("over-delivering, up and around the
+	--   cursor, porpoising"). Two controllers fighting across a seam is not coordination — do not re-try.
 	-- Signs (keyBindings): bank/yaw RIGHT = negative roll/yaw input; a right bank (curBank > 0) is levelled
-	-- with +roll. The roll-rate damp (aimRollDamp · current roll-rate) damps both regimes' inner servo.
+	-- with +roll. The roll-rate damp (aimRollDamp · current roll-rate) still kills the bank-axis wobble.
 	local curBank = math.asin(clamp(-cf.RightVector.Y, -1, 1)) -- + = banked right (right wing down)
 	-- ...only when upright (UpVector.Y>0) so it never fights the inverted top of a loop.
 	local levelAssist = curBank * (C.aimLevelGain or 0.9)
 		* (1 - math.min(1, math.abs(hCmd))) * math.max(0, cf.UpVector.Y)
 	local rollRate = (currentProfile and currentProfile.rollRate) or 3.2
 	local rollRate01 = clamp((flightEngine.rollVel or 0) / math.max(0.1, rollRate), -1, 1)
-	local rollDirect = -hCmd * (C.aimRollGain or 2.0) + levelAssist - (C.aimRollDamp or 0.30) * rollRate01
-	local yawDirect  = -hCmd * (C.aimYawGain or 0.6)
-	local roll, yaw = rollDirect, yawDirect
-
-	-- Blend weight: 0 inside the direct cone (aimDirectConeDeg), 1 by 2× it — scaled by how HORIZONTAL the
-	-- geometry is (near-vertical nose OR cursor ⇒ a loop ⇒ the heading-plane law degenerates ⇒ stay direct;
-	-- fades in over the last ~20° off vertical) and gated UPRIGHT (inverted ⇒ direct law, the same guard as
-	-- levelAssist and the bank FF).
-	local errAngle = math.acos(clamp(birdLook:Dot(aimTargetDir), -1, 1))
-	local cone = math.rad(C.aimDirectConeDeg or 10)
-	local flatLook = Vector3.new(birdLook.X, 0, birdLook.Z)
-	local flatTgt  = Vector3.new(aimTargetDir.X, 0, aimTargetDir.Z)
-	local horiz = math.min(clamp(flatLook.Magnitude / 0.35, 0, 1), clamp(flatTgt.Magnitude / 0.35, 0, 1))
-	-- Upright gate FADES over UpVector.Y 0..0.15 (red-team W1: a binary gate stepped the roll blend a full
-	-- command in one frame crossing 90° bank). Inside the cascade's own 70° bank cap UpVector.Y > 0.34 ⇒ 1
-	-- ⇒ numerically identical in normal operation; only the momentum-past-vertical transition is smoothed.
-	local wCoord = clamp((errAngle - cone) / math.max(1e-3, cone), 0, 1) * horiz
-		* clamp(cf.UpVector.Y / 0.15, 0, 1)
-	if wCoord > 0.001 and flatLook.Magnitude > EPS and flatTgt.Magnitude > EPS then
-		-- OUTER: signed horizontal heading error (+ = cursor to the RIGHT of the nose)…
-		local fl, ft = flatLook.Unit, flatTgt.Unit
-		local headingErr = math.atan2(-(fl:Cross(ft)).Y, clamp(fl:Dot(ft), -1, 1))
-		-- …through the sqrt-controller to a commanded turn rate, capped at the profile's own pull limit
-		-- (pitchRate — the elevator is what actually swings the nose once banked, so the cap is the plant's,
-		-- never slower than what the old law could achieve; profile-scaled: a possessed crow keeps its agility).
-		local P = C.aimTurnP or 2.5
-		local A = C.aimTurnAccel or 2.0
-		local linDist = A / math.max(0.01, P * P)
-		local aErr = math.abs(headingErr)
-		local turnCmd = (aErr <= linDist) and (aErr * P) or math.sqrt(2 * A * (aErr - linDist * 0.5))
-		local turnMax = (currentProfile and currentProfile.pitchRate) or 2.0
-		turnCmd = math.min(turnCmd, turnMax) * ((headingErr >= 0) and 1 or -1)
-		-- MIDDLE: one commanded bank from the coordinated-turn inversion; clamp + slew (never outrun the roll loop).
-		local g = (GameConfig.Flight and GameConfig.Flight.GRAVITY) or 45
-		local v = math.max(30, flightEngine.speed or 0) -- floor: near-stall demands stay gentle, no div-blowup
-		local maxBank = math.rad(C.aimMaxBankDeg or 70)
-		local bankTgt = clamp(math.atan(v * turnCmd / math.max(1, g)), -maxBank, maxBank)
-		aimBankCmd = aimBankCmd or curBank
-		local slew = (C.aimBankSlew or 2.0) * dt
-		aimBankCmd = aimBankCmd + clamp(bankTgt - aimBankCmd, -slew, slew)
-		-- INNER: roll servos the BANK onto the command; yaw coordinates from the SAME turn command.
-		local rollCoord = -(aimBankCmd - curBank) * (C.aimBankGain or 3.0) - (C.aimRollDamp or 0.30) * rollRate01
-		local yawCoord  = -(turnCmd / math.max(0.1, turnMax)) * (C.aimYawGain or 0.6)
-		roll = rollDirect + (rollCoord - rollDirect) * wCoord
-		yaw  = yawDirect  + (yawCoord  - yawDirect)  * wCoord
-	else
-		aimBankCmd = curBank -- cascade idle: track the live bank so engaging it never steps
-	end
-	roll = clamp(roll, -1, 1)
-	yaw  = clamp(yaw, -1, 1)
+	local roll = clamp(-hCmd * (C.aimRollGain or 2.0) + levelAssist - (C.aimRollDamp or 0.30) * rollRate01, -1, 1)
+	local yaw  = clamp(-hCmd * (C.aimYawGain or 0.6), -1, 1)
 	if C.invertPitch then pitch = -pitch end
 
 	-- Marker screen positions for the render block.
@@ -1225,7 +1240,6 @@ local function onFlightStep(dt)
 		aimApplied.pitch = aimApplied.pitch + (0 - aimApplied.pitch) * resp
 		aimApplied.roll  = aimApplied.roll  + (0 - aimApplied.roll)  * resp
 		aimApplied.yaw   = aimApplied.yaw   + (0 - aimApplied.yaw)   * resp
-		aimBankCmd = nil -- cascade suspended with the aim (RMB zoom / aim off): resume re-seeds from the live bank (red-team R1)
 		-- FREE-LOOK reticles (player ask — "the crux"): keep BOTH markers on screen, but the CURSOR sits at the
 		-- CENTRE of the free-look view (where you're looking) and the amber RETICLE stays on the eagle's BEAK
 		-- direction (projected through the panned camera), so while you look around you see your heading vs your
@@ -1300,6 +1314,7 @@ local function onFlightStep(dt)
 	-- 2. Step the simulation with the live input.
 	flightEngine:Update(dt, inputState)
 
+
 	-- 2b. Obstacle/ground collision (responsive grazing). On a survivable graze we slide the
 	-- bird along the surface locally for zero-latency feel; a lethal head-on impact we do NOT
 	-- clamp — the server's authoritative crash sweep (processCrashes) reads our clean position
@@ -1366,7 +1381,7 @@ local function resetInput()
 	steer.x, steer.y = 0, 0
 	aimCursor.x, aimCursor.y = 0, 0
 	aimTargetDir = nil
-	aimBankCmd = nil
+	aimLeadScale = 1
 	aimApplied.pitch, aimApplied.roll, aimApplied.yaw = 0, 0, 0
 	inputState.pitch, inputState.roll, inputState.yaw = 0, 0, 0
 	inputState.flap, inputState.dive = false, false

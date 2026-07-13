@@ -46,7 +46,11 @@ if (-not $SkipAnalysis) {
                 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
                 $op = $ProgressPreference; $ProgressPreference = 'SilentlyContinue'
                 $iwr = @{
-                    Uri             = 'https://raw.githubusercontent.com/JohnnyMorganz/luau-lsp/main/scripts/globalTypes.d.luau'
+                    # PINNED to the luau-lsp release (keep in lockstep with Bootstrap-Verify.ps1's Version).
+                    # Fetching from 'main' shipped defs a year newer than the 1.32.1 binary -> the parser
+                    # DIED SILENTLY (exit 0xC0000409/127, no output) = the "pre-existing luau-lsp crash"
+                    # every session since S25 misattributed to PowerShell. Version-matched defs analyze fine.
+                    Uri             = 'https://raw.githubusercontent.com/JohnnyMorganz/luau-lsp/1.32.1/scripts/globalTypes.d.luau'
                     OutFile         = $defs
                     UseBasicParsing = $true
                     Headers         = @{ 'User-Agent' = 'evc-verify' }
