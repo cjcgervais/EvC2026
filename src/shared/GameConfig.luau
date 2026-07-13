@@ -801,7 +801,8 @@ GameConfig.Controls = {
 	mouseReturnRoll  = 3.0,
 	mouseReturnPitch = 0.4,
 	mouseExpo       = 1.7,   -- response curve: 1 = linear, >1 = finer control near center
-	invertPitch     = false, -- false = mouse UP pitches nose UP (FPS-style). Set true for stick-style (pull back = up).
+	-- (invertPitch used to be duplicated here — the LIVE key is the one further down with the aim knobs.
+	--  Last-wins made this one dead; deleted S28 when the fixed verify tier finally flagged it.)
 	-- TIME-SCALED PITCH (keyboard W/S): a TAP gives a small, precise AoA nudge; HOLDING ramps the
 	-- pitch authority up to full over pitchRampTime. Lets you make fine attitude adjustments without
 	-- losing strong authority on a sustained climb/dive. Releasing snaps the input to 0 (the nose
@@ -844,15 +845,18 @@ GameConfig.Controls = {
 	                              -- (S27b, Chad: "cursor movement is too sensitive" — kept as a standalone sensitivity ask;
 	                              -- it's orthogonal to the coordination rework). Too sluggish now? back toward 0.003.
 	aimLeadScreenFrac   = 0.95,  -- cursor-circle size: fraction of the way to the top/bottom edge the cursor can lead (0..1).
-	                             -- ⚠️ S26 REVERTED 0.625→0.95 after Chad's play: shrinking this cone does NOT shrink the
-	                             -- on-screen circle he sees (the cone follows the NOSE, which the lagging aim camera puts
-	                             -- off-centre mid-turn) and it made the rubber-band WORSE (the nose catches the cursor ~40%
-	                             -- faster → the sustained-turn deflection decays in pulses: "intermittent pulling, I have
-	                             -- to keep moving the mouse"). The real fix for his centred-5/8-circle + sustained-edge-
-	                             -- deflection ask is a MODEL question (screen-anchored stick vs world-anchored chase) —
-	                             -- CS-8 territory, Chad's call (2026-07-02: he chose KEEP the model). Do NOT re-shrink
-	                             -- this value to chase the circle size — the circle is bounded by aimCursorAreaFrac
-	                             -- (camera-relative, restored S26), which ALSO caps sustained-turn lead — see its note.
+	                             -- ⚠️⚠️ S28e post-mortem — this cone is a LOAD-BEARING STABILIZER, do not widen it:
+	                             -- raising it 0.95→1.8 ("free the cursor, fix the bottom bias") made small deflections
+	                             -- RUBBERBAND harder and let the bird roll THROUGH vertical and REST UPSIDE DOWN
+	                             -- (Chad, playtest 4). Mechanism: when the nose overshoots the cursor, this NOSE-cone
+	                             -- drags the cursor along, capping how far the error can grow behind the swing — a
+	                             -- hidden overshoot limiter. At 52° the error kept growing, roll stayed saturated
+	                             -- through 90°, and inverted-with-nose-on-cursor is a stable rest state (no auto-level;
+	                             -- levelAssist gates off inverted). ALSO: widening it did NOT fix the bottom-biased
+	                             -- cursor region — that bias is the CAMERA-ABOVE geometry (the boresight projects
+	                             -- above screen centre; same root as the RMB-zoom reticle-above-target parallax), not
+	                             -- this cone. ⚠️ S26 history (do NOT shrink either): 0.95→0.625 was tried and REVERTED
+	                             -- — faster catch-up = pulsing. 0.95 is the tested value; leave it.
 	aimMaxLeadDeg       = 70,    -- hard cap on the lead half-angle (deg); the FOV-derived value governs below it
 	-- LEGACY / unused by the nose-chases-cursor model.
 	aimCursorRadiusFrac = 0.9,   -- legacy
@@ -967,32 +971,37 @@ GameConfig.Controls = {
 	-- 0.35 is conservative): nose still DIPS in a hard bank → raise toward 0.5-0.6; nose now BALLOONS/climbs
 	-- in turns → lower toward 0.2 (ArduPilot's own reduce-if-it-gains-height rule). 0 = feature off. PROVISIONAL.
 	aimBankFeedforward = 0.35,
-	-- S28 COORDINATED-TURN CASCADE (deep-research RESEARCH-coordinated-flight.md — Chad's directive after
-	-- the S27 servo patches rubberbanded). For LARGE HORIZONTAL aim errors the roll/yaw channels stop being
-	-- servos on cursor error and become a bank-to-turn cascade: heading error → sqrt-shaped commanded turn
-	-- RATE (linear small = snappy, bounded-deceleration large = cannot overshoot; ArduPilot sqrt-controller)
-	-- → ONE commanded BANK (φ_d = atan(V·ψ̇_d/g), the coordinated-turn inversion, speed-scaled), slew-limited
-	-- so the command respects the roll loop's lag (Jung & Tsiotras: ignoring that lag IS the overshoot) →
-	-- roll servos the BANK to φ_d (bank error, not cursor error) + yaw coordinates from the SAME turn command.
-	-- Below aimDirectConeDeg (and for near-vertical errors = loops, and inverted flight) the OLD direct law
-	-- runs verbatim — the loved small-input snap, loop commitment, and straight-flight feel are numerically
-	-- IDENTICAL to the S26 baseline. Pitch channel untouched (PD + speed scale + stall gate + bank FF above).
-	aimDirectConeDeg = 10,   -- error cone (deg) where the direct law runs alone; blends to full cascade by 2×
-	                         -- this. MouseFlight aggressiveTurnAngle precedent (~10°). Bigger = more old-feel
-	                         -- range; smaller = coordination takes over sooner.
-	aimTurnP         = 2.5,  -- rad/s of commanded turn rate per rad of heading error (the AGGRESSIVENESS knob,
-	                         -- ≈ 1/NAVL1_PERIOD). Reticle closes big turns too slowly → raise; arrives too hot
-	                         -- (relies on the accel limit) → lower.
-	aimTurnAccel     = 2.0,  -- rad/s² bounded arrival deceleration of the sqrt-controller (the NO-OVERSHOOT
-	                         -- knob). Reticle still sails past the cursor → LOWER this (gentler roll-out
-	                         -- starts earlier); catch-up feels like it brakes too early → raise.
-	aimMaxBankDeg    = 70,   -- bank ceiling the cascade may command (deg). The sec(bank) pitch FF above pays
-	                         -- the altitude; past ~75° that demand explodes, so keep ≤ 72.
-	aimBankSlew      = 2.0,  -- rad/s max slew of the COMMANDED bank — the outer law respecting the roll loop's
-	                         -- lag (Eagle rollRate 3.2; command slower than the plant = the plant can track it).
-	                         -- Bank command feels laggy entering turns → raise toward 2.6; wobbles → lower.
-	aimBankGain      = 3.0,  -- inner bank-tracking servo P: full roll deflection at ~19° of bank error. Tracks
-	                         -- a SMOOTH slewed command, so it doesn't need to be soft; aimRollDamp still damps.
+	-- S28e TURN-RATE LEAD — the coordination law (RESEARCH-coordinated-flight.md applied to THIS kernel; see
+	-- the BANK+RUDDER + lead blocks in BirdController.computeMouseAim for the full derivation). The S26
+	-- servo shape is kept verbatim (it IS the loved snap); the horizontal error is PREDICTED aimLeadTime
+	-- ahead using the eagle's ACTUAL heading rate from clean kernel body rates (ψ̇ = pitchVel·sin(bank) −
+	-- yawVel·cos(bank), scaled into the error's space by cosB·cosΔψ; nothing differentiates the mouse) and
+	-- roll/yaw steer from that prediction. A WASHOUT keeps it from ever capping a commanded turn: the lead
+	-- fades to 0 while the cursor is pinned against the screen circle (= the sustained-turn command → full
+	-- S26 plant-capped rate, eagle ~1.8 / possessed crow ~3+ rad/s) and while any flight key is held (CS-1
+	-- mute — no counter-turn pre-charge at the key-release seam). With the cursor world-fixed INSIDE the
+	-- circle, the lead shapes the ARRIVAL: the command reverses a lead-time early, the bank unwinds, the
+	-- nose lands ON the cursor; a held inside-circle deflection gives a steady proportional-rate fine turn.
+	-- The vertical channel already had this medicine (its damp is plant pitch-rate feedback) — this
+	-- balances the horizontal axis the same way.
+	-- ⚠️ HISTORY (do not re-try): the S28/S28b sqrt-controller→commanded-bank cascade + error-size mode
+	-- blend was REVERTED after Chad's play — the blend seam mushed 10-20° inputs ("yaws but won't bank,
+	-- lost its snap") and the slew-limited bank fought the aggressive pitch ("over-delivering, up and
+	-- around the cursor, porpoising"). Its knobs (aimDirectConeDeg/aimTurnP/aimTurnAccel/aimMaxBankDeg/
+	-- aimBankSlew/aimBankGain) are RETIRED.
+	aimLeadTime      = 0,    -- s — turn-rate lead. ⚠️ 0 = the lead is OFF = numerically the PURE S26 servo law
+	                         -- (the Chad-loved baseline). 0.28 was PLAYTEST-REJECTED (2026-07-02, playtest 3:
+	                         -- "porpoising, rubberbanding and lagging in short displacements" — the lead's
+	                         -- feedback through the aimResponse/washout/roll-inertia lags oscillates in ways
+	                         -- the static analysis missed). The machinery is kept ONLY for a Chad-in-the-loop
+	                         -- live-tune from tiny values (0.08-0.12) IF he wants to try — never re-ship a
+	                         -- big value untested. Three structures (cascade v1/v2, lead 0.28) have now failed
+	                         -- his feel test while passing build+red-team: knob changes from the loved
+	                         -- baseline with him flying each step, or don't touch the aim loop.
+	aimLeadWashRate  = 6,    -- per-sec ease of the lead's washout scale (rim-pinned / keys-held → 0; free
+	                         -- cursor → 1). Sets how fast the lead returns after a throw ends (~150 ms to
+	                         -- mostly-on at 6). Short sharp flicks still overshoot a touch → RAISE toward
+	                         -- 9-10 (lead comes back sooner); lead pumping at the circle rim → LOWER.
 	invertPitch      = false, -- false = cursor ABOVE the nose pitches UP (the cross rises to meet it)
 
 	-- FLAP THROTTLE (sticky, NOT momentary): hold SHIFT to ramp UP-thrust (climb), CTRL to ramp DOWN-thrust

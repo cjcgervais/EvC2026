@@ -1,0 +1,8 @@
+date	stage	knob	from	to	settle_s	overshoot_deg	reversals	steady_turn_rads	cam_tau_s	signature_match	chad_verdict	decision	commit
+# Copy this file to .loop/flight-feel/results.tsv (gitignored) and append ONE row per dial flown.
+# settle_s/overshoot_deg/reversals/cam_tau_s = the AFTER step-response capture (F7 lateral, or F6 vertical).
+# signature_match = does the AFTER row match the flight-controls-architect's predicted signature? (yes/no/partial).
+#   A "no" is a FINDING (the mechanism model is wrong), not a cue to keep turning the knob.
+# chad_verdict = his felt quote (the only certification). decision = KEEP | REVERT | STUCK. commit = hash if kept.
+# Example:
+# 2026-07-12	2	aimHeadDamp	0	0.45	0.62	3.1	0	1.6	0.24	yes	"nose lands and stays, snap identical"	KEEP	<hash>

@@ -29,6 +29,9 @@
       "$className": "ServerScriptService",
       "GameServer": {
         "$path": "src/server/GameServer.server.luau"
+      },
+      "ScratchTele": {
+        "$path": "src/server/_ScratchTele.server.luau"
       }
     },
 
