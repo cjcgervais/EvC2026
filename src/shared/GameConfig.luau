@@ -710,10 +710,19 @@ GameConfig.Camera = {
 	-- that is NOT my preference, I wanted it tighter… the reticle should snap tighter to the cursor."
 	-- 1.4→2.6→4.0 (lag time-constant ~0.71s→0.38s→0.25s). S26d: 2.6 was good but mouse-aim COMBINED with
 	-- full-deflection keystrokes still wanted more turn authority (the laggy view read as sluggish
-	-- response during combo flying) → 4.0 per Chad. The old "cursor hangs out" framing is no longer a
-	-- loved feature to protect — tighter tracking also reduces how far the cursor circle drifts in hard
-	-- turns (it and the restored screen clamp are in tension — see Controls.aimCursorAreaFrac).
-	aimHeadingLag = 4.0,
+	-- response during combo flying) → 4.0 per Chad.
+	-- ⚠️ S30 (2026-07-13): the Stage-1 decouple RE-SCOPED this knob (it now lags the AIM, not the bird
+	-- heading). Lowering it to 1.6 to let the world-cursor reach the screen edge was FLOWN + REJECTED (Chad:
+	-- "slow and porposing… still a cone… I don't have full authority of the cursor"). REVERTED to 4.0 (the
+	-- loved Stage-1 baseline). Root problem: the world-anchored cursor + camera-eases-ONTO-aim structurally
+	-- re-centres the cursor, so no lag value gives independent screen authority. Chad chose the proper fix —
+	-- a SCREEN-REFERENCED independent cursor + a lag-FOLLOW camera + a deterministic cascade driven by the
+	-- free cursor (Fable architecture consult; see docs/HANDOFF.md). This knob is part of that redesign.
+	-- S30 Stage 1: LOOSENED 4.0→2.5 for the FREE-CURSOR mode — the camera catches the aim slower so the freed
+	-- cursor roams out and is "not pulled back to centre quick" (Chad). Only meaningful with aimFreeCursor=true
+	-- (with the clamps on they re-centred the cursor regardless of lag). Sweep 2.0-3.5; view too floaty → raise.
+	-- S30: 2.5→2.2 (Chad: "a little wee bit more lag") — the freed cursor roams a touch further before re-centre.
+	aimHeadingLag = 2.2,
 	baseFOV = 70,
 	diveFOV = 95,
 	climbFOV = 62,
@@ -759,6 +768,13 @@ GameConfig.Camera = {
 	-- more top-down view of the eagle.
 	heightFactor     = 0.35, -- base height ratio when zoomed in (a little above the bird)
 	zoomTopDownHeight = 0.55, -- height ratio at full zoom-out (a touch more top-down, but a happy medium — angles stay close)
+	-- CHASE FRAMING (S30, Chad: "the mouse aim + eagle nose pointer should rest at CENTRE screen; drop the view
+	-- of the bird DOWN — the bird should sit LOWER"). The cam rides ABOVE the bird (heightFactor) and looks a touch
+	-- AHEAD, which tilts the look DOWN onto the bird and pushes the forward AIM above centre. Raise the chase look
+	-- target along the camera-up by this fraction of the follow distance to tilt the view UP: the resting aim drops
+	-- to screen CENTRE and the bird sits LOWER. 0 = old framing (bird ~centred, aim high). Aim still ABOVE centre /
+	-- bird too high → raise toward 0.32; aim now BELOW centre / bird too low → lower toward 0.18. Chase-mode only.
+	chaseLookUp = 0.25,
 	-- Loop/crest damping: when the bird's facing rotates fast (e.g. cresting a loop), the chase
 	-- cam softens its follow so the view glides through the flip instead of whipping. crestAngRate
 	-- is the facing angular speed (rad/s) at which damping reaches full; crestDamp is the max
@@ -916,6 +932,18 @@ GameConfig.Controls = {
 	-- binds (≈ half-height − 48px), so to shrink the circle further drop this below ~0.38; raising it
 	-- past ~0.44 has no effect. PLAYTEST-PROVISIONAL.
 	aimCursorAreaFrac = 0.5,
+	-- FREE-THE-CURSOR (S30, Chad: "let the mouse aim operate on the WHOLE screen, let the camera lag").
+	-- The circle's true wall on 16:9 is this fit-inside margin (half-height − margin), NOT aimCursorAreaFrac
+	-- (whose area term already exceeds the cap). Lowering it from 48 lets the cursor reach nearer the top/
+	-- bottom edge = "whole screen" reach; the Stage-1 camera decouple does the re-centring. Identity = 48
+	-- (today's behavior). ⚠️ this margin also keeps the ~48px cursor RING on-screen and guarantees the rim
+	-- stays round — at 8 the ring may clip the very edge at the extreme rim; if that reads badly or the turn
+	-- direction gets ambiguous at the rim (the S26c complaint), raise toward 24–32 (round rim, ring on-screen,
+	-- still most of the screen). Does NOT touch the nose-cone aimLeadScreenFrac (the load-bearing upside-down
+	-- guard — do NOT widen that). PLAYTEST-PROVISIONAL.
+	-- S30: 8 was FLOWN — insufficient alone (the binding wall was the camera lag, not this cap) → REVERTED to
+	-- the 48 identity. Becomes relevant again under the screen-referenced-cursor redesign (Fable consult).
+	aimCursorEdgeMarginPx = 48,
 	-- Gains RAISED (player ask: "reticle catch-up snappy at short movements, rate-limited by the eagle's turn rate
 	-- at big deflections"). Higher gain SATURATES the command for anything but a tiny error, so the bird turns at
 	-- its MAX rate to close small/medium gaps fast (snappy), while big gaps still take the eagle's turn rate to
@@ -938,6 +966,27 @@ GameConfig.Controls = {
 	                          -- the derivative term amplified mouse jitter (small-input reticle "jumping around", Chad) and
 	                          -- neither killed the horizontal sail-past. Root cause is that the instructor is 3 independent
 	                          -- per-axis PD servos, NOT a coordinated-turn law — see the HANDOFF S28 research directive.
+	aimHeadDamp      = 0.45,  -- STAGE A (S30, THE porpoise fix): heading-RATE damp on the roll law. aimRollDamp
+	                          -- settles the BANK; this settles the HEADING (the nose), which nothing damped before —
+	                          -- so the nose sailed PAST the cursor (bank→turn→heading double integrator). Reuses the
+	                          -- headRate math; normalised by pitchRate; added AFTER the saturating P so rim-pinned
+	                          -- full-deflection turns are UNCHANGED — it only bites at arrival, like the loved vertical
+	                          -- channel. UP (→0.6-0.8)=more damping / risk of lazy arrival; DOWN (→0.2, 0)=porpoise
+	                          -- returns; 0 = byte-identical to today. ⚠️ if the overshoot GROWS, the sign is flipped
+	                          -- (BirdController roll law) — flip +↔−. First step of the screen-cursor plan (HANDOFF).
+	-- ▶ SCREEN-CURSOR STAGE 1 (S30) — FREE THE CURSOR (Chad: "free the cursor right away, then build the cascade
+	-- from the right setup"). When true, mouse-aim BYPASSES both cursor clamps (the nose-cone aimLeadScreenFrac +
+	-- the screen-circle aimCursorAreaFrac) so the reticle roams the WHOLE screen; the camera (looser aimHeadingLag
+	-- below) lag-follows it and is what visually re-centres it. The CURRENT cascade still flies the bird — a big
+	-- far-corner throw banking to the ceiling and MUSHING there is the EXPECTED tell that the cascade needs
+	-- rebuilding (Stage 2), NOT a failure. false = today byte-for-byte (both clamps on).
+	aimFreeCursor    = true,
+	-- INVERSION GUARD (REQUIRED with the free cursor — no auto-level, CS-5): fades ONLY bank-DEEPENING roll
+	-- authority as |bank| nears this angle (20° soft shoulder), so a far-corner cursor cannot roll the bird past
+	-- it and rest inverted (the S28 tombstone); leveling/recovery authority is untouched. 85 keeps the bird
+	-- UPRIGHT (UpVector.Y>0 so levelAssist still recovers) while allowing hard ~65-80° turns. Turns feel capped →
+	-- raise; leans too far toward inverted → lower toward 75. 180 = no ceiling. Only active in free-cursor mode.
+	aimRollCeilingDeg = 85,
 	aimStallBandDeg  = 7,     -- degrees below stall where the nose-up PULL eases. 4→7 (S26f, Chad: slow-turn porpoise
 	                          -- "still oscillates a little"): the narrow 4° band gated the pull on/off almost bang-bang
 	                          -- as AoA crossed it in a slow turn — 7° makes the ease gradual, killing the limit-cycle.
@@ -971,6 +1020,15 @@ GameConfig.Controls = {
 	-- 0.35 is conservative): nose still DIPS in a hard bank → raise toward 0.5-0.6; nose now BALLOONS/climbs
 	-- in turns → lower toward 0.2 (ArduPilot's own reduce-if-it-gains-height rule). 0 = feature off. PROVISIONAL.
 	aimBankFeedforward = 0.35,
+	-- KNIFE-EDGE TAPER (S30) — fade the bank feedforward above ~combat bank. The sec(bank) FF is only valid for
+	-- an altitude-holding turn (≤ ~combat bank); past that sec EXPLODES (slope near vertical) and its magnitude
+	-- saturates the elevator, so tiny bank wobbles pump the nose UP/DOWN in a steep turn (Chad S30, on the freed
+	-- cursor: "the lateral knife edge produces up-and-down oscillation while turning"). Free-cursor made 65-85°
+	-- banks reachable (the cone capped ~33° before), which is why this tail only just surfaced. Fades the FF to 0
+	-- over a 15° shoulder as |bank| nears this angle: full anti-dip through ≤40° bank, gone above 55°. Nose DIPS
+	-- again in hard turns → raise toward 65; still porpoises at knife-edge with it tapered → the driver is the
+	-- pitch-P, not the FF (next dial). 0 = no taper = byte-identical to today.
+	aimBankFFTaperDeg = 55,
 	-- S28e TURN-RATE LEAD — the coordination law (RESEARCH-coordinated-flight.md applied to THIS kernel; see
 	-- the BANK+RUDDER + lead blocks in BirdController.computeMouseAim for the full derivation). The S26
 	-- servo shape is kept verbatim (it IS the loved snap); the horizontal error is PREDICTED aimLeadTime
