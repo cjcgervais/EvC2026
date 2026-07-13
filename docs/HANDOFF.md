@@ -4,6 +4,22 @@ Read this first. It tells the next agent exactly where the project stands, the o
 
 ---
 
+## ▶ COLD START — Session 31 CLOSE (2026-07-13): 🪶 NEW DIRECTION GREENLIT — "UPDRAFT" (non-lethal proximity-flight), COMBAT SHELVED
+
+**THE GAME PIVOTED. Chad greenlit "UPDRAFT" — a non-lethal PROXIMITY-FLIGHT SCORE game — and SHELVED the aerial-melee-kill loop.** Read **`docs/UPDRAFT-strategic-plan.md`** (the full plan) + the `project-updraft-direction` memory FIRST. How we got here: iterating combat catchability (talonPickBias, strikeReachBonus, crow-lead, auto-strike, feather/spiral juice — all built, `sandbox/flight-feel`) did NOT make combat fun; Chad concluded the PREMISE was wrong ("going in circles is tiring… melee on small targets is really hard… bird-killing isn't great for kids"). A `deep-research` pass on the Roblox market (108 agents, fact-checked) + a Fable 5 synthesis produced UPDRAFT.
+
+**UPDRAFT in one line:** *become a bird, score by flying dangerously CLOSE to terrain/waterfalls/friends' wingtips* — "almost hit the world" (terrain never dodges) replaces "hit the bird." Superflight's proven loop on our loved kernel; non-lethal reuses the built feather-burst + spiral-tumble as "dazed, lose your combo." Research basis: 2026 Roblox algorithm rewards 28-day RETENTION + friend-bringing; first-session fun is THE lever (kernel is fun in 60s); flight-as-reward is PROVEN (Superflight/Flying Wings); pet-collection REFUTED; ~73% under 18; no flight game in top-20 = open lane; monetization = cosmetics only (all monetization specifics were refuted → inference).
+
+**Core loop = LINE-RIDING:** proximity meter → combo → BANK at a thermal (energy currency, built) or LOSE it in a feather-tumble. Progression = bird skill-CLASSES (Crow/Eagle built) + medal lines gating regions + PB ghosts. Social = Slipstream/flock bonus + ghost races (reuse squad/possession tech). Sandbox = a LAYER (Nests → Course Maker), later. 
+
+**▶ IMMEDIATE NEXT = UPDRAFT Phase 0 (build FIRST, ~1-2 wks): "is line-riding fun?"** Strip combat remotes/UI; add a **proximity scorer** (reuse `BirdCollision` spherecast + a wider probe radius — nearly free) + combo + bank-on-thermal + crash→feather-burst/tumble (both built) + score HUD + spawn-in-air FTUE, on the EXISTING mountain map, no new art. **Gate: Chad plays 30 min and wants line #2.** Then P1 progression → P2 social sky → P3 launch dressing (+Fledgling Mode for <9s = a kernel profile) → P4 Course Maker. Do NOT rebuild combat / pet-collection / a new map first.
+
+**Git state (S31 CLOSE):** flight kernel GRADUATED to `master` @ `6686a0c` (pushed, tag `v1.2-free-cursor-flight-kernel`) — the fixed crown jewel. The parked combat experiments + combat-gameplay-architect + juice are COMMITTED on `sandbox/flight-feel` (the exploration record). **UPDRAFT work starts on a new `updraft` branch.** The `combat-gameplay-architect` agent is parked (combat shelved); the `flight-controls-architect` + flight-feel harness still apply to the kernel.
+
+*(Everything below is the prior combat/kernel history, retained for the record — the kernel detail is still authoritative; the combat "frontier" framing is SUPERSEDED by UPDRAFT above.)*
+
+---
+
 ## ▶ COLD START — Session 30 CLOSE (2026-07-13): ✅ SEALED FREE-CURSOR FLIGHT KERNEL — next frontier = COMBAT
 
 **🔒 THE MOUSE-AIM / FREE-CURSOR / CASCADE / CAMERA FRONTIER IS DONE AND CHAD-LOVED ("its perfect… commit this as a sealed flight kernel").** Tagged **`v1.2-free-cursor-flight-kernel`**; committed `37e66c0` on **`sandbox/flight-feel`** (pushed to origin). **⇒ WORK FROM `sandbox/flight-feel`** — it carries the sealed kernel PLUS the dev instruments (F7/F6 step-response + strike telemetry, both inert). Do NOT reopen the aim kernel without a fresh Chad ask — it now joins the eagle flight kernel as signed-off.
