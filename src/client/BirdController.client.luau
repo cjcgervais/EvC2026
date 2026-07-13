@@ -19,8 +19,8 @@
 	  Q / E        -> YAW    (head-led) — smoothed. Keyboard is additive and dominates at full deflection.
 	  Left Shift   -> FLAP THROTTLE up   (sticky: ramps UP-thrust/climb; holds where set)
 	  Left Ctrl    -> FLAP THROTTLE down (sticky: ramps DOWN-thrust/descent; centre = glide)
-	  Spacebar     -> FREE-LOOK camera (TOGGLE): tap to orbit the camera freely around the bird while
-	                  the bird HOLDS its current flight input (aim autopilot suspended); tap again to resume aim.
+	  Spacebar     -> FREE-LOOK camera (HOLD): hold to orbit the camera freely around the bird while
+	                  the bird HOLDS its current flight input (aim autopilot suspended); RELEASE to resume aim.
 	  Mouse Left   -> STRIKE (tap): the eagle's BANK at the click picks the strike — bank LEFT = left
 	                  talon, bank RIGHT = right talon, ~LEVEL = forward — each with its own active window
 	                  + downtime. The server reads the authoritative bank and owns all timing (anti-cheat).
@@ -365,11 +365,11 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 		-- down-thrust via the sticky flap throttle (ramped from held Ctrl in onFlightStep)
 		return
 	elseif input.KeyCode == Enum.KeyCode.Space then
-		-- FREE-LOOK is a TOGGLE now (Chad: "change to toggle on/off by space, not press and hold").
-		-- Tap to look all around hands-free while the bird HOLDS its maneuver; tap again to snap the
-		-- aim back. The orbit resets each time it's toggled ON (in setFreeLook), so it always begins
+		-- FREE-LOOK is HOLD-to-look (Chad 2026-07-13, reverted from the earlier toggle): HOLD Space to look
+		-- all around hands-free while the bird HOLDS its maneuver; RELEASE snaps the aim back (InputEnded →
+		-- setFreeLook(false)). The orbit resets each time it engages (in setFreeLook), so it always begins
 		-- from the chase pose. Survives crow-swaps via acquire() re-arming to freeLook.active.
-		setFreeLook(not freeLook.active)
+		setFreeLook(true)
 		return
 	elseif input.KeyCode == Enum.KeyCode.F then
 		formationTight = not formationTight
@@ -419,8 +419,12 @@ UserInputService.InputEnded:Connect(function(input)
 	elseif input.KeyCode == Enum.KeyCode.LeftControl then
 		inputState.dive = false
 	end
-	-- NOTE: Space no longer turns free-look off on key-release — it's a TOGGLE (handled in InputBegan).
-	-- Focus loss (WindowFocusReleased) still force-clears it so you never get stuck looking around.
+	-- FREE-LOOK is HOLD (Chad 2026-07-13): RELEASING Space turns it off and runs the CS-2 exit snap
+	-- (setFreeLook(false) → recentre cursor + snapToChase). Focus loss (WindowFocusReleased) still
+	-- force-clears it as a failsafe so you can never get stuck looking around.
+	if input.KeyCode == Enum.KeyCode.Space then
+		setFreeLook(false)
+	end
 
 	-- LEFT-CLICK is a tap (no release action). Release the aim-zoom on RMB-up.
 	if input.UserInputType == Enum.UserInputType.MouseButton2 then
@@ -958,7 +962,7 @@ local function computeMouseAim(dt)
 	aimTargetDir = (tdir.Magnitude > EPS) and tdir.Unit or birdLook
 	local halfFovTan = math.tan(math.rad((camera.FieldOfView or 70) * 0.5))
 	local maxLead = math.min(math.rad(C.aimMaxLeadDeg or 70), math.atan(halfFovTan * (C.aimLeadScreenFrac or 0.95)))
-	if clamp(birdLook:Dot(aimTargetDir), -1, 1) < math.cos(maxLead) then
+	if not C.aimFreeCursor and clamp(birdLook:Dot(aimTargetDir), -1, 1) < math.cos(maxLead) then
 		local axis = birdLook:Cross(aimTargetDir)
 		if axis.Magnitude > 1e-5 then
 			aimTargetDir = CFrame.fromAxisAngle(axis.Unit, maxLead):VectorToWorldSpace(birdLook)
@@ -989,7 +993,7 @@ local function computeMouseAim(dt)
 	-- camera↔nose dot>0.5 gate — as frame-rate-dependent AND clamp-disabling for fast crows; don't re-try it.)
 	local rimBinding = false -- true while the player pins the cursor against the circle (= sustained-turn command)
 	local areaFrac = C.aimCursorAreaFrac
-	if areaFrac and areaFrac > 0 and not cameraState.snapToChase then
+	if areaFrac and areaFrac > 0 and not cameraState.snapToChase and not C.aimFreeCursor then
 		local camLocal = camCF:VectorToObjectSpace(aimTargetDir)
 		if camLocal.Z < -EPS then -- only meaningful in front of the camera (Roblox camera looks down -Z)
 			local tx, ty = camLocal.X / -camLocal.Z, camLocal.Y / -camLocal.Z
@@ -1000,7 +1004,7 @@ local function computeMouseAim(dt)
 			-- 16:9 ⇒ radius ≈ 1.19× half-height), so the rim went FLAT at the top/bottom edge = ambiguous
 			-- turn direction at the rim. The cap keeps the rim round on every screen; margin covers the
 			-- 48px cursor ring + the small bird-vs-camera projection parallax at the rim.
-			local edgeMargin = 48
+			local edgeMargin = C.aimCursorEdgeMarginPx or 48
 			local rPx = math.min(
 				math.sqrt(areaFrac * vp.X * vp.Y / math.pi),
 				vp.Y * 0.5 - edgeMargin,
@@ -1133,7 +1137,32 @@ local function computeMouseAim(dt)
 		* (1 - math.min(1, math.abs(hCmd))) * math.max(0, cf.UpVector.Y)
 	local rollRate = (currentProfile and currentProfile.rollRate) or 3.2
 	local rollRate01 = clamp((flightEngine.rollVel or 0) / math.max(0.1, rollRate), -1, 1)
-	local roll = clamp(-hCmd * (C.aimRollGain or 2.0) + levelAssist - (C.aimRollDamp or 0.30) * rollRate01, -1, 1)
+	-- STAGE A (S30) — HEADING-RATE DAMP (the porpoise / sail-past fix, Chad: "proper instruction to limit the
+	-- porposing"). aimRollDamp above damps ROLL-rate (settles the BANK); the horizontal loop had NO feedback on
+	-- HEADING-rate — and bank→turn→heading is a double integrator, so the nose coasts PAST the cursor after the
+	-- bank has settled (every sail-past since S26). headRate (~line 1045, + = turning RIGHT, upright-faded) is
+	-- that missing feedback; normalise by pitchRate (heading rate in a banked turn is elevator-delivered
+	-- ≈ pitchVel·sinB, bounded by pitchRate — same divisor family as the loved vertical channel's pitchRate01).
+	-- SIGN = + (SAME as levelAssist): a rightward heading swing (headRate>0) is arrested by +roll, which levels a
+	-- right bank (see the signs note above). Added INSIDE the clamp AFTER the saturating P, so a rim-pinned
+	-- full-deflection turn (|−hCmd·gain|≈7.5) stays clipped at ±1 = today's rate EXACTLY; the damp only bites near
+	-- equilibrium (arrival), exactly like pitchRate01. Ships 0.45; 0 = byte-identical to today. ⚠️ if F7 shows
+	-- overshoot GROWING not shrinking, the sign is inverted → flip to −. Revert: aimHeadDamp → 0.
+	local headRate01 = clamp(headRate / math.max(0.1, pitchRate), -1, 1)
+	-- INVERSION ENVELOPE (S30 Stage 1, FREE-CURSOR mode only). No auto-level (CS-5) → a freed far-corner
+	-- cursor could hold roll saturated through vertical and REST INVERTED (the S28 tombstone). Fade ONLY the
+	-- bank-DEEPENING part of the roll command as |bank| nears the ceiling; the leveling/damping part is left
+	-- at full authority so recovery is always available; upright loops (bank≈0) are unaffected. SIGN: the
+	-- kernel banks RIGHT on NEGATIVE roll (signs note above), so a right bank (curBank>0) DEEPENS when the
+	-- roll command is negative ⇒ deepening ⟺ rollP·curBank < 0 (derived + scenario-checked; NOT the +sign the
+	-- proposal assumed). Gated on aimFreeCursor so flag-off is byte-identical to the Stage-A baseline.
+	local rollP = -hCmd * (C.aimRollGain or 2.0)
+	local rollLevel = levelAssist - (C.aimRollDamp or 0.30) * rollRate01 + (C.aimHeadDamp or 0) * headRate01
+	if C.aimFreeCursor then
+		local ceilFade = clamp(((C.aimRollCeilingDeg or 180) - math.deg(math.abs(curBank))) / 20, 0, 1)
+		if ceilFade < 1 and (rollP * curBank) < 0 then rollP = rollP * ceilFade end
+	end
+	local roll = clamp(rollP + rollLevel, -1, 1)
 	local yaw  = clamp(-hCmd * (C.aimYawGain or 0.6), -1, 1)
 	if C.invertPitch then pitch = -pitch end
 

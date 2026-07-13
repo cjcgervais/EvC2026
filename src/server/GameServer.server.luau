@@ -979,6 +979,40 @@ local function onStrike(player)
 	s.caught = false
 end
 
+--------------------------------------------------------------------------------
+-- STAGE 7 STRIKE TELEMETRY (dev instrument — gated by GameConfig.Combat.strikeTelemetry)
+--------------------------------------------------------------------------------
+-- Attributes the both-sides-low contact-rate problem to a MECHANISM (crow pursuit-curve vs eagle cone
+-- geometry vs the speed gate vs timing vs a contact-path bug) BEFORE any combat number is tuned. It
+-- only READS state — never gates or alters a ram, a cooldown, damage, or tryStrikeCatch. Fully inert
+-- when the flag is false: updateStrikeTelemetry early-returns with zero scan/allocation. Rows batch-
+-- flush to the server log ~1 Hz (per-event, never summarized, so dive-bomb burst structure survives).
+-- Dev/solo Studio ONLY (the near-miss scan adds frame work — see the armed-vs-unarmed A/B gate).
+-- Revert: set GameConfig.Combat.strikeTelemetry=false, or delete this block + the two other delimited
+-- STRIKE-TELEMETRY hunks (the updateEagleStrikes hook + the onHeartbeat call + updateStrikeTelemetry).
+local TELEM_RADIUS       = 48    -- studs; near-miss window (captures the ~12-30 pursuit-curve cluster + margin)
+local TELEM_FLUSH_PERIOD = 1.0   -- s; batch-print cadence
+local telemArmed     = false     -- cached from the config flag each frame (also read by the strike hook)
+local telemPairMin   = {}        -- pairKey -> {minSep, relAtMin, touch}: running closest-approach per eagle↔crow pair
+local telemRows      = {}        -- buffered event rows (batch-flushed, never summarized)
+local telemLastFlush = 0
+
+-- Log ONE armed-strike frame vs the nearest enemy — hits AND clean misses, so cone/reach/timing
+-- failures are visible, not just landings. Called (gated) from updateEagleStrikes' offensive pass.
+local function telemStrike(eagle, cfg, target, dist, reach, covered, hit)
+	local axisDot = -2
+	if target then
+		local dir = target.body.Position - eagle.body.Position
+		if dir.Magnitude > 1e-3 then axisDot = dir.Unit:Dot(strikeAxis(eagle.body, cfg)) end
+	end
+	local s = eagle.strike
+	local windowPhase = (s and cfg.duration and cfg.duration > 0) and (s.durationLeft / cfg.duration) or -1
+	telemRows[#telemRows + 1] = string.format(
+		"%.2f\tSTRIKE\t%s\tdist=%.1f\treach=%.1f\taxisDot=%.3f\tconeCos=%.3f\tcovered=%s\twindowPhase=%.2f\thit=%s",
+		os.clock(), tostring(cfg.damage), dist or -1, reach, axisDot,
+		math.cos(math.rad(cfg.coverHalfAngleDeg or 60)), tostring(covered), windowPhase, tostring(hit))
+end
+
 -- Step every eagle's strike timers once per Heartbeat, run the offensive cone pass, and mirror the
 -- HUD attributes. Eagles are snapshot first so the offensive applyDamage (which removes Birds entries)
 -- can't corrupt a live `pairs(Birds)` iteration.
@@ -1016,6 +1050,17 @@ local function updateEagleStrikes(dt)
 								applyDamage(target, dmg, entry, cfg.damage or "talon")
 							end
 						end
+					end
+					-- STRIKE TELEMETRY (Stage 7, gated + read-only): log this armed frame — hit OR clean miss.
+					if telemArmed then
+						local covered = false
+						if target and dist and dist <= reach then
+							local d2 = target.body.Position - entry.body.Position
+							if d2.Magnitude > 1e-3 then
+								covered = d2.Unit:Dot(strikeAxis(entry.body, cfg)) >= math.cos(math.rad(cfg.coverHalfAngleDeg or 60))
+							end
+						end
+						telemStrike(entry, cfg, target, dist, reach, covered, s.caught)
 					end
 				end
 			end
@@ -1161,6 +1206,67 @@ local function processCrashes(dt)
 	for _, entry in ipairs(doomed) do
 		if isBirdAlive(entry) then
 			applyDamage(entry, getHealth(entry.body) + 1, nil, "crash")
+		end
+	end
+end
+
+-- Stage 7 near-miss scan + batch flush. Runs per living eagle only (few), querying crows within
+-- TELEM_RADIUS — O(eagles × neighbors), a handful of pairs/frame, NOT an all-birds O(n²) sweep — so
+-- per-frame sampling keeps minSep accurate without a measurable frame cost. Fully inert when unarmed.
+local function updateStrikeTelemetry()
+	telemArmed = (GameConfig.Combat and GameConfig.Combat.strikeTelemetry) == true
+	if not telemArmed then
+		-- Inert path: no scan, no allocation. Drop any state so a later re-arm starts clean.
+		if next(telemPairMin) then telemPairMin = {} end
+		if #telemRows > 0 then telemRows = {} end
+		return
+	end
+	local now = os.clock()
+
+	-- Sample the closest approach of every eagle↔crow pair currently inside the near-miss window.
+	local seen = {}
+	for _, eagle in pairs(Birds) do
+		if eagle.team == "Eagles" and isBirdAlive(eagle) then
+			local epos = eagle.body.Position
+			birdIndex:forEachInRadius(epos, TELEM_RADIUS, function(crow)
+				if crow.team == eagle.team or not isBirdAlive(crow) then return end
+				local sep = (epos - crow.body.Position).Magnitude
+				if sep > TELEM_RADIUS then return end
+				local key = pairKey(eagle.model, crow.model)
+				seen[key] = true
+				local st = telemPairMin[key]
+				if not st or sep < st.minSep then
+					local relSpeed = (eagle.body.AssemblyLinearVelocity - crow.body.AssemblyLinearVelocity).Magnitude
+					telemPairMin[key] = {
+						minSep = sep, relAtMin = relSpeed,
+						touch = eagle.profile.bodyRadius + crow.profile.bodyRadius,
+					}
+				end
+			end)
+		end
+	end
+
+	-- Terminal event: any tracked pair that left the window (or whose bird died) this frame — emit its
+	-- closest-approach row and drop it (self-pruning, so the state table cannot leak). CONTACT vs MISS
+	-- reads into the decision table (a MISS at minSep 12-30 = the crow pursuit-curve fingerprint).
+	for key, st in pairs(telemPairMin) do
+		if not seen[key] then
+			local outcome = (st.minSep <= st.touch) and "CONTACT" or "MISS"
+			local gatePass = st.relAtMin >= COLLISION_SPEED_MIN
+			telemRows[#telemRows + 1] = string.format(
+				"%.2f\tMERGE\t%s\tminSep=%.1f\ttouch=%.1f\trelAtMin=%.0f\tgatePass=%s",
+				now, outcome, st.minSep, st.touch, st.relAtMin, tostring(gatePass))
+			telemPairMin[key] = nil
+		end
+	end
+
+	-- Batch-flush ALL buffered rows once/sec (never summarized — the burst cadence IS a finding).
+	if now - telemLastFlush >= TELEM_FLUSH_PERIOD then
+		telemLastFlush = now
+		if #telemRows > 0 then
+			print(string.format("[EvC strikeTelem] --- %d rows @ %.2f ---\n%s",
+				#telemRows, now, table.concat(telemRows, "\n")))
+			telemRows = {}
 		end
 	end
 end
@@ -1939,6 +2045,8 @@ local function onHeartbeat(dt)
 	pcall(processCollisions)
 	-- Obstacle/ground crash deaths (feeds the respawn loop).
 	pcall(processCrashes, dt)
+	-- Stage 7 strike telemetry (dev instrument; inert unless GameConfig.Combat.strikeTelemetry).
+	pcall(updateStrikeTelemetry)
 end
 
 --------------------------------------------------------------------------------
