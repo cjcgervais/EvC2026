@@ -171,7 +171,24 @@ local function buildWaterfall()
 	mist.Parent = col
 end
 
--- Precompute perches from tree crowns (treetop) + low clearings (under-canopy).
+-- Keep clear of the waterfall mesa footprint (with an optional extra pad so grove trees stay off it).
+local function mesaTooClose(pos, pad)
+	return (Vector3.new(pos.X - R.deliverPos.X, 0, pos.Z - R.deliverPos.Z)).Magnitude < (340 + (pad or 0))
+end
+
+-- Build a tree at `pos` and seed a squirrel perch on it: a treetop perch on ~55% of trees, else a
+-- low under-canopy clearing perch nearby. Shared by grove trees (backdrop trees skip this = no perch).
+local function plantPerchTree(pos)
+	local crownY = buildTree(pos)
+	if rng:NextNumber() < 0.55 then
+		perchList[#perchList + 1] = { pos = Vector3.new(pos.X, crownY + 6, pos.Z), underCanopy = false }
+	else
+		perchList[#perchList + 1] = { pos = Vector3.new(pos.X + (rng:NextNumber() - 0.5) * 40, 22 + rng:NextNumber() * 16, pos.Z + (rng:NextNumber() - 0.5) * 40), underCanopy = true }
+	end
+end
+
+-- Groves (Fable §B5): squirrels only ever spawn on grove perches, so they cluster into a few tight
+-- clumps → catch chains + style continuity. Everything else is visual-only backdrop forest.
 local function buildWorld()
 	worldFolder = Instance.new("Folder")
 	worldFolder.Name = "RescueWorld"
@@ -179,25 +196,53 @@ local function buildWorld()
 
 	buildWaterfall()
 
-	-- Trees scattered in the valley, avoiding the waterfall mesa footprint.
-	local placed = 0
+	local groveCount   = R.groveCount or 4
+	local perchPerGrove= R.grovePerchCount or 5
+	local groveRad     = R.groveRadius or 130
+	local groveGap     = R.groveMinGap or 520
+
+	-- 1) Place grove CENTRES: spread apart, clear of the mesa, with the grove's radius kept in-bounds.
+	local centreRadMax = math.max(200, (R.valleyRadius or 1600) - groveRad - 60)
+	local groveCentres = {}
 	local guard = 0
-	while placed < (R.treeCount or 40) and guard < 500 do
+	while #groveCentres < groveCount and guard < 400 do
 		guard += 1
 		local ang = rng:NextNumber() * math.pi * 2
-		local rad = 140 + rng:NextNumber() * (R.valleyRadius - 140)
+		local rad = 220 + rng:NextNumber() * (centreRadMax - 220)
+		local c = Vector3.new(math.cos(ang) * rad, 0, math.sin(ang) * rad)
+		if mesaTooClose(c, groveRad) then continue end
+		local ok = true
+		for _, other in ipairs(groveCentres) do
+			if (Vector3.new(c.X - other.X, 0, c.Z - other.Z)).Magnitude < groveGap then ok = false; break end
+		end
+		if ok then groveCentres[#groveCentres + 1] = c end
+	end
+
+	-- 2) Each grove = a tight cluster of perch-trees around its centre.
+	local groveTrees = 0
+	for _, c in ipairs(groveCentres) do
+		for _ = 1, perchPerGrove do
+			-- disc-uniform offset within groveRad
+			local a = rng:NextNumber() * math.pi * 2
+			local r = groveRad * math.sqrt(rng:NextNumber())
+			local pos = Vector3.new(c.X + math.cos(a) * r, 0, c.Z + math.sin(a) * r)
+			plantPerchTree(pos)
+			groveTrees += 1
+		end
+	end
+
+	-- 3) Backdrop forest: the remaining tree budget, scattered valley-wide, NO perches (visual density).
+	local backdrop = math.max(0, (R.treeCount or 68) - groveTrees)
+	local placed = 0
+	guard = 0
+	while placed < backdrop and guard < 800 do
+		guard += 1
+		local ang = rng:NextNumber() * math.pi * 2
+		local rad = 140 + rng:NextNumber() * ((R.valleyRadius or 1600) - 140)
 		local pos = Vector3.new(math.cos(ang) * rad, 0, math.sin(ang) * rad)
-		if (Vector3.new(pos.X - R.deliverPos.X, 0, pos.Z - R.deliverPos.Z)).Magnitude < 340 then
-			continue -- keep clear of the mesa
-		end
-		local crownY = buildTree(pos)
+		if mesaTooClose(pos) then continue end
+		buildTree(pos)   -- no perch: pure backdrop
 		placed += 1
-		-- A treetop perch on ~55% of trees; the rest seed a low clearing perch nearby.
-		if rng:NextNumber() < 0.55 then
-			perchList[#perchList + 1] = { pos = Vector3.new(pos.X, crownY + 6, pos.Z), underCanopy = false }
-		else
-			perchList[#perchList + 1] = { pos = Vector3.new(pos.X + (rng:NextNumber() - 0.5) * 40, 22 + rng:NextNumber() * 16, pos.Z + (rng:NextNumber() - 0.5) * 40), underCanopy = true }
-		end
 	end
 end
 

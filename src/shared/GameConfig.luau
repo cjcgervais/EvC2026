@@ -753,7 +753,13 @@ GameConfig.Rescue = {
 	ftueRadiusMult   = 1.5,    -- first `ftueCatches` catches use a 1.5× sphere so the "aww" fires unearned.
 	ftueCatches      = 3,
 	closingGateFrac  = 0.30,   -- must be closing at ≥ this × eagle glideSpeed (was 0.40; lowered so snatching is easier).
-	tellLeadTime     = 0.40,   -- s; the "determined survivor" tell fires this far ahead (predicted from closing speed).
+	ftueGateFrac     = 0.15,   -- during the first `ftueCatches`, use this EASIER closing gate so a slow/wobbly
+	                           -- 5-yo still catches (Fable §D). A too-slow pass that enters the sphere but misses
+	                           -- the gate triggers the squirrel's "come back!" wave — failure has a face, never silence.
+	tellLeadTime     = 0.60,   -- s; the "determined survivor" tell fires this far ahead (predicted from closing speed).
+	                           -- Was 0.40: at glide ~130/s that warned only ~52 studs before the sphere, so the
+	                           -- plant/flare fired too late to SEE before the catch. 0.60 ≈ 78 studs = the
+	                           -- anticipation beat is actually read (Fable §A3/#4). Revert to 0.40 if tells feel spammy.
 	tellHoldMin      = 1.2,    -- s; once planted the tell LATCHES at least this long (a flickering tell kills the beat).
 	carryCapacity    = 3,      -- squirrels ridable on your back before you must deliver.
 
@@ -768,9 +774,13 @@ GameConfig.Rescue = {
 	slowmoEaseIn     = 0.11,   -- s; fast attack into slow-mo.
 	slowmoSnapBack   = 0.20,   -- s; the "whip" back to real time (the exclamation point).
 	hitStopFrames    = 3,      -- frames of freeze on contact (~50ms; ≥6 reads as lag).
-	camFovDelta      = -5,     -- deg; FOV narrows during slow-mo (shrinks optic flow → reads as slow).
-	camPullIn        = 0.15,   -- fraction closer the camera eases during slow-mo.
-	camCant          = 4,      -- deg; cinematic camera cant during slow-mo.
+	-- S33 Chad playtest: "it zooms in too much when you catch a squirrel — we need it to not do that."
+	-- Both the camera dolly-in (camPullIn) AND the FOV narrow read as a zoom, so both are OFF. The
+	-- slow-mo now reads through desat + cant + hit-stop only (no zoom). Nudge camFovDelta to ~-2 if a
+	-- faint optic-flow "slow" cue is wanted back, but keep camPullIn at 0 (the dolly was the zoom).
+	camFovDelta      = 0,      -- deg; FOV change during slow-mo (was -5 → read as zoom; OFF per playtest).
+	camPullIn        = 0,      -- fraction closer the camera eases during slow-mo (was 0.15 → the zoom-in; OFF).
+	camCant          = 4,      -- deg; cinematic camera cant during slow-mo (a tilt, not a zoom — kept).
 	woohooDelay      = 0.50,   -- s after snap-back completes for the delayed "…woohoo!".
 
 	-- STYLE (Fable §C) — the skill ceiling. Line-riding (skim/thread under canopy) charges a meter that
@@ -811,6 +821,17 @@ GameConfig.Rescue = {
 	valleyRadius     = 1600,   -- squirrels/trees scatter within this radius of origin (was 1000).
 	treeCount        = 68,     -- gray-box trees, bounded for perf (was 46; scaled up with the bigger valley).
 	canopyY          = 110,    -- treetop crown height; under-canopy squirrels sit below this.
+
+	-- GROVES (Fable Packet-02 §B5, queue #1). Squirrels spawn ONLY on grove perches, so they cluster
+	-- into a few tight clumps instead of scattering evenly across the r=1600 valley. This kills the
+	-- ~250-stud dead travel between catches → catch CHAINS + style-meter continuity (2s half-life).
+	-- Each grove is a tight cluster of `grovePerchCount` trees (each seeding one perch); the remaining
+	-- `treeCount` budget is scattered as VISUAL-only backdrop forest (no perches). With groveCount×
+	-- grovePerchCount perches > squirrelCount, respawns still land in groves but keep some variety.
+	groveCount       = 4,      -- number of squirrel groves (clumps) in the valley.
+	grovePerchCount  = 5,      -- perch-trees per grove (>~ live squirrels/grove so respawns have slack).
+	groveRadius      = 130,    -- studs; a grove's trees/perches cluster within this radius of its centre.
+	groveMinGap      = 520,    -- studs; keep grove centres at least this far apart (distinct clumps).
 }
 
 GameConfig.Thermals = {
