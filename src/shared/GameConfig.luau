@@ -768,6 +768,9 @@ GameConfig.Rescue = {
 	arcAirtimeMax    = 0.85,   -- s; airtime ceiling (scales up slightly with closing speed).
 	arcApexHeight    = 10,     -- studs above the perch the leap arcs (presentation gravity, floaty & pretty).
 	arcConvergeFrac  = 0.85,   -- past this fraction of airtime, blend HARD to the talon so the catch never snaps.
+	climbDur         = 0.5,    -- s; after the talon catch, the squirrel SCRAMBLES up the flank to its back seat
+	                           -- over this long (Chad's #9 catch-latch beat). Real-time; the slow-mo snap-back
+	                           -- (≤0.2s) rides down under its first part. Lower→snappier, higher→longer scurry.
 
 	-- CLIENT SLOW-MO PRESENTATION (Fable §B) — dilates anim/FX/audio/camera ONLY; the sim runs real-time.
 	slowmoScale      = 0.25,   -- presentation timescale during the catch window.

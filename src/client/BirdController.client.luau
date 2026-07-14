@@ -1267,12 +1267,28 @@ local function talonPos()
 	return rootPart.CFrame * Vector3.new(0, -2.4, 0.3)
 end
 
--- Where rider `i` (1-based) sits on the back.
-local function seatCFrame(i)
+-- Local (eagle-frame) seat position for rider `i` (1-based); the world seat = rootPart.CFrame * this.
+local function seatLocalPos(i)
 	local r = (currentProfile and currentProfile.bodyRadius) or 4.5
 	local lane = ((i - 1) - ((RES.carryCapacity or 3) - 1) * 0.5)
-	return rootPart.CFrame * CFrame.new(lane * (r * 0.5), r * 0.7, r * 0.2)
+	return Vector3.new(lane * (r * 0.5), r * 0.7, r * 0.2)
 end
+
+-- Where rider `i` (1-based) sits on the back.
+local function seatCFrame(i)
+	return rootPart.CFrame * CFrame.new(seatLocalPos(i))
+end
+
+-- Quadratic Bézier p0→(p1)→p2 (used by the #9 climb-and-latch path).
+local function bezier3(p0, p1, p2, t)
+	local a = p0:Lerp(p1, t)
+	local b = p1:Lerp(p2, t)
+	return a:Lerp(b, t)
+end
+
+-- The talon "basket" in the eagle's LOCAL frame (matches talonPos()'s offset). Start of the climb path.
+local TALON_LOCAL   = Vector3.new(0, -2.4, 0.3)
+local SCRAMBLE_FREQ = 26                 -- rad/s; how fast the limbs scurry during the climb-up.
 
 -- LIVING BACK-RIDERS (Fable §C) — cosmetic per-rider life applied on TOP of the seat CFrame + ride pose.
 -- Pure client presentation (client-only models in CatchFx); never touches control/camera/kernel.
@@ -1433,22 +1449,47 @@ local function stepCatch(dt)
 		end
 		if catch.sq and catch.sq.PrimaryPart then catch.sq:PivotTo(CFrame.new(tp)) end  -- frozen
 	else
-		-- become a back-rider, then let the env ride down (snap-back whip).
-		if not catch.converted then
+		-- CLIMB-AND-LATCH (Chad's #9 vision: "eagle catches with talon → squirrel scrambles up to the
+		-- eagle's back"). After the hit-stop the caught squirrel scurries up the flank from the talon to
+		-- its destined back seat, then hands off to the #2 living-rider system. Runs in real time — the
+		-- slow-mo snap-back (≤0.2s) rides down underneath the first part of the climb, so no extra tail.
+		local climbDur = RES.climbDur or 0.5
+		local ct = catch.t - contactEnd
+		if not catch.climbStarted then
+			catch.climbStarted = true
+			catch.seatIndex = #riders + 1          -- the seat this rider is climbing toward (stable: single catch slot)
+			playWhip()                             -- doubles as the slow-mo snap-back whip (same timing as before)
+		end
+		if ct < climbDur and catch.sq and catch.sq.PrimaryPart then
+			local u = clamp(ct / climbDur, 0, 1)
+			local e = u * u * (3 - 2 * u)          -- smoothstep ease
+			-- talon → seat via a control point pushed out to the seat's flank and forward, so the path
+			-- HUGS the body (climbs up the side) instead of cutting straight through it.
+			local p0 = TALON_LOCAL
+			local p2 = seatLocalPos(catch.seatIndex)
+			local r  = (currentProfile and currentProfile.bodyRadius) or 4.5
+			local p1 = Vector3.new(p2.X * 1.5, (p0.Y + p2.Y) * 0.5, -r * 0.35)
+			local worldPos  = (rootPart.CFrame * CFrame.new(bezier3(p0, p1, p2, e))).Position
+			local seatWorld = (rootPart.CFrame * CFrame.new(p2)).Position
+			local dir = seatWorld - worldPos
+			local ori = (dir.Magnitude > 1e-3)
+				and CFrame.lookAt(worldPos, worldPos + dir, rootPart.CFrame.UpVector)
+				or CFrame.new(worldPos)
+			catch.sq:PivotTo(ori)
+			BirdBuilder.PoseSquirrel(catch.sq, "scramble", dt, catch.t * SCRAMBLE_FREQ)
+		end
+		-- arrived on the back → become a living rider (the #2 substrate). Small settle: it climbed into
+		-- place rather than dropping in, so the landing hop is halved.
+		if not catch.converted and ct >= climbDur then
 			catch.converted = true
-			playWhip()
-			-- Seed this rider's cosmetic life: a random phase/look offset so riders never move in
-			-- lockstep, and a settle timer that plays the hop-and-settle as it lands on the back.
 			riders[#riders + 1] = {
 				model  = catch.sq,
 				phase  = math.random() * math.pi * 2,
 				look   = math.random() * math.pi * 2,
 				t      = 0,
-				settle = RIDER_HOP_DUR,
+				settle = RIDER_HOP_DUR * 0.5,
 			}
 			catch.sq = nil
-		end
-		if catch.t >= contactEnd + (RES.slowmoSnapBack or 0.2) then
 			catch = nil
 		end
 	end

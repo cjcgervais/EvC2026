@@ -33,6 +33,27 @@ then squirrel scrambles up to the eagle's back… The waterfall mechanism worked
   the built substrate. Plus general **squirrel-model polish**. Then the remaining feel-knob values + #10.
 - Note the #GATE report-back (§E) is still worth capturing on the next play (saves/round, tell seen, etc.).
 
+### ▶ S34 (2026-07-14): #9a CATCH-AND-LATCH ANIMATION BUILT (build-green, red-teamed CLEAR, UNPLAYTESTED)
+A cleared-context agent ran `/evc-loop` and built Chad's headline S33 vision — the scramble-up. Previously
+the caught squirrel TELEPORTED from the talon onto its back seat at the hit-stop; now it visibly SCRAMBLES
+up the eagle's flank over ~0.5s (`Rescue.climbDur`) before latching in as a living rider.
+- **Change (client rescue PRESENTATION only — NO control/camera/kernel/CS/balance touch):** new
+  `"scramble"` pose in `BirdBuilder.PoseSquirrel` (hand-over-hand climb); `stepCatch`'s post-contact `else`
+  branch rewritten into a real-time CLIMB phase that flies the presentation squirrel along a quadratic
+  Bézier IN THE EAGLE'S LOCAL FRAME (talon → `seatLocalPos(catch.seatIndex)`, control point out to the
+  flank so it hugs the body), posed `"scramble"`, THEN hands off to the #2 living-rider system; new
+  `seatLocalPos`/`bezier3`/`TALON_LOCAL`/`SCRAMBLE_FREQ` helpers; landing hop halved (climbs in vs drops in).
+  New `GameConfig.Rescue.climbDur = 0.5`.
+- **Red-team `aec63756fe450f097` → CLEAR** (no BLOCK/REVISE). `seatIndex`-stability + env-stranding attacks
+  both FAIL (code correct); CS-1..9/aim/camera/kernel/flight-numbers untouched; teardown mid-climb leaks
+  nothing. 2 NOTEs for Chad: bundled hop-halving (`RIDER_HOP_DUR*0.5`); ~+0.3s longer catch-active window
+  (PvE-only, not a 1-v-4 lever, tunable via `climbDur`).
+- **Verify:** rojo-build PASS; luau-lsp = documented baseline ONLY (0 new); selene UNAVAILABLE (404). Green.
+- **Git:** ONE self-contained commit (BirdBuilder + BirdController + GameConfig + docs/state), ASK-gated —
+  prepared, pending Chad. Ledger detail + the 6-point playtest checklist: `.loop/rescue-phase0/state.md` (S34).
+- **▶ NEXT:** #9b CARRY-10 (raise `carryCapacity` 3→10 + widen the seat-lane layout — a distinct edit), then
+  squirrel-model polish, then feel-knob VALUES on Chad's Play, then #10 Phase-1 world.
+
 ### ▶ RESCUE PHASE-0 QUEUE (work top-down in the loop)
 - **#0 [DONE S32]** bigger trigger (`triggerRadius` 28→42) + easier snatch (`closingGateFrac` 0.40→0.30) + bigger map (`valleyRadius` 1000→1600, `treeCount`→68, `squirrelCount`→15). *(Chad's two asks — applied; he re-plays to confirm.)*
 - **#1 [DONE S33] GROVES** (Fable §B5): `RescueServer.buildWorld` clusters perch-trees into `groveCount=4` groves (`grovePerchCount=5`, `groveRadius=130`, `groveMinGap=520`) + backdrop scatter; squirrels spawn ONLY on the 20 grove perches → catch chains + style continuity.
@@ -43,7 +64,8 @@ then squirrel scrambles up to the eagle's back… The waterfall mechanism worked
 - **#6 [DONE S33] STAMP SEQUENCING** (Fable §B4): GOTCHA(0) → tier+STYLE sub-stamp at +0.4s (STYLE only when >×1.5) → woohoo audio 0.5s post-snap-back. ≤2 visual stamps, always staggered.
 - **#7 [DONE S33] FTUE SOFT-FAIL** (Fable §D): easier `ftueGateFrac=0.15` during the first catches + a "come back!" `waveBig` reaction when you enter the sphere too slow (no fail sound, never silence).
 - **#8 [DONE S33] WAYFINDING** (Fable §D): while carrying ≥1, a faint gold `Beam` streamer arcs from the eagle toward the waterfall (diegetic compass, zero UI).
-- **#9 [LATER PHASE — Chad-directed] CARRY-10 + CRAWL-AND-LATCH:** raise `carryCapacity` to 10; rescued squirrels animate CRAWLING UP the eagle and LATCHING onto his back (climb-on animation + a cling pose + more back seats). #2's living-rider system is now the built prereq. Chad: *"lets say he can carry 10 squirrels that latch onto him for a later phase."*
+- **#9a [DONE S34] CRAWL-AND-LATCH ANIMATION:** the caught squirrel now SCRAMBLES up the eagle's flank from the talon to its back seat (real-time CLIMB phase in `stepCatch` + `"scramble"` pose + `Rescue.climbDur=0.5`), then latches in via the #2 living-rider system. Build-green, red-teamed CLEAR, UNPLAYTESTED. *(Chad's S33 headline vision.)*
+- **#9b CARRY-10:** raise `carryCapacity` 3→10 + widen the seat-lane layout so 10 riders fit (distinct edit — seat layout + round pacing). Chad: *"lets say he can carry 10 squirrels that latch onto him."* **← DO NEXT.**
 - **#10 PHASE-1 WORLD:** real trunk/canopy collision + a dedicated valley that skips the combat `BuildMap` (currently kept as floor+backdrop); then line-riding style measures the canopy the player threads.
 - **#GATE [needs Chad's Play — NOT loopable, DO THIS NEXT]:** fly the Packet-02 §A checklist → *"grin at the 3rd catch + push your luck for one more before the waterfall?"* + capture the §E report-back → Fable Packet 03. Also report which gray-box sound ids resolved (Packet 01 §E). This is the only step the loop cannot self-certify.
 
