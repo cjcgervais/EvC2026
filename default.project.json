@@ -30,6 +30,9 @@
       "GameServer": {
         "$path": "src/server/GameServer.server.luau"
       },
+      "RescueServer": {
+        "$path": "src/server/RescueServer.server.luau"
+      },
       "ScratchTele": {
         "$path": "src/server/_ScratchTele.server.luau"
       }

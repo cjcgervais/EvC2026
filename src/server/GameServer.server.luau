@@ -1273,7 +1273,11 @@ end
 -- so any bird that tunnels far below the world dies regardless.
 local function processCrashes(dt)
 	local params = getCollisionParams()
-	local crashSpeed = GameConfig.Flight.CRASH_SPEED
+	-- P3 non-lethal terrain (EAGLES TO THE RESCUE): a huge effective crash speed makes terrain impacts
+	-- graze-slide (never kill). Mirrors the client gate in BirdController.onFlightStep so the two never
+	-- disagree. Stored Flight.CRASH_SPEED is untouched. The Y<GROUND_FAILSAFE_Y kill still applies.
+	local crashSpeed = (GameConfig.Rescue and GameConfig.Rescue.enabled and GameConfig.Rescue.nonLethalTerrain)
+		and 1e9 or GameConfig.Flight.CRASH_SPEED
 	local invDt = 1 / math.max(dt, 1e-3)
 	local doomed = {}
 	for _, entry in pairs(Birds) do

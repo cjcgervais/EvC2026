@@ -4,6 +4,33 @@ Read this first. It tells the next agent exactly where the project stands, the o
 
 ---
 
+## ▶ COLD START — Session 32 (2026-07-13): 🦅🔥🐿️ EAGLES TO THE RESCUE — Phase-0 PLAYABLE SLICE BUILT (build-green, red-teamed, UNPLAYTESTED)
+
+**THE GAME IS NOW "EAGLES TO THE RESCUE."** Chad greenlit the direction (see `docs/EAGLES-TO-THE-RESCUE-plan.md`, the creative bible) and, while away, gave FULL AUTONOMY to build the Phase-0 playable slice in the sandbox with a Fable consult at every turn. Done this session. **This SUPERSEDES the UPDRAFT proximity-flight loop below (Chad flew UPDRAFT, called it DULL) and combat (shelved).** Read the bible + `docs/rescue-consults/PACKET-01/02` (Fable design specs) + the `project-rescue-phase0` memory FIRST.
+
+**One line:** dive a hero eagle under a burning forest; terrified squirrels LEAP for your talons in slow-motion (always caught — skill is the APPROACH, never the grab); carry them on your back UP the waterfall updraft to safety. Non-lethal, cute, ages 5-20. Built entirely AROUND the LOCKED flight kernel/camera.
+
+**▶ IMMEDIATE NEXT = CHAD PLAYTESTS THE SLICE.** Serve `updraft` (`.\serve.ps1`), Play SOLO (you spawn as the eagle, no crows). Fly the **Packet-02 §A checklist** (`docs/rescue-consults/PACKET-02-phase0-review.md`) to answer the gate: *"did you grin at the 3rd catch, and push your luck for one more before the waterfall?"* Capture the **§E report-back**. Likely first tunes (all in `GameConfig.Rescue`): `slowmoScale` 0.25→0.45 (if slow-mo costs control), `tellLeadTime` 0.40→0.60 (if you never SEE the squirrel notice you), cluster squirrels into groves. Then Fable Packet 03.
+
+**What's built (branch `updraft`, UNCOMMITTED — build PASS, luau-lsp clean vs the documented baseline, red-teamed):**
+- `GameConfig.Rescue` (all Fable numbers) · `Debug.aiCrowOpponents=false` (no combat crows) · `Updraft.enabled=false` (its line-riding scorer is now the rescue STYLE meter).
+- `BirdBuilder.BuildSquirrel` + `PoseSquirrel` (gray-box bean-with-eyes; wave/plant/starfish/ride).
+- **NEW `src/server/RescueServer.server.luau`** (mapped in `default.project.json`) — gray-box valley (trees + waterfall mesa + SOLID safe pad + updraft VFX), 11 beacon squirrels on perches, 2-min round + score + carry(3)/deliver, triage balloon-lift in the last 60s, own `RescueRemotes` folder. COEXISTS with GameServer (which still spawns + net-owns the flyable eagle; combat code untouched).
+- `BirdController` rescue section — detection + 0.4s latched tell + ballistic arc-intercept catch (relative-velocity→0 IS the slow-mo, per Fable) + client slow-mo presentation (ColorCorrection desat + a PURE beat-time camera post-transform, identity when idle — CS-untouched) + feathers/POMF/hit-stop/GOTCHA + back-riders + waterfall deliver + style meter (reuses `computeProximity`).
+- `GameUI` rescue HUD (timer/score/saved/carry/style + GOTCHA/DELIVERED stamps); combat HUD hidden in rescue.
+- **P3 non-lethal terrain:** gated effective CRASH_SPEED=1e9 on both collision sites (stored 45 untouched; combat byte-identical if un-shelved); Y<-200 failsafe kept.
+- gray-box sound (rbxasset + PlaybackSpeed; silent-fallback if an id doesn't resolve — Chad reports which did).
+
+**Red-team (agent `a7c586eaa7111a3ea`) → 2 BLOCK + 2 REVISE, ALL FIXED:** BLOCK1 death-mid-catch stranded the global desaturation → `resetRescuePresentation()` in `teardownDrive`. BLOCK2 rescue world non-solid vs the coexisting solid combat map → made mesa/pad/rimpool solid (queryable); **trees stay VISUAL for Phase 0 per the bible's stated scope — the ONE known open design item** (Phase-1 = real trunk/canopy collision + a dedicated valley that skips the combat `BuildMap`; combat map currently kept as floor+backdrop). REVISE3 client-trusted catch → server distance gate + PHASE-0-TRUST note. REVISE4 carry desync → idle reconcile to server carry. A confirmation re-review ran (agent `a9575b3903d52b563`).
+
+**LOCKED-spec integrity:** CS-1..CS-9 untouched. The camera decoration is a pure beat-time post-transform on the chase OUTPUT, verified byte-identical when `rescueCam.env=0`; it never reads input or feeds the aim/control frame. No kernel/aim-law edit.
+
+**Git:** everything is on `updraft`, UNCOMMITTED. Commit is git-gated (ASK) → PREPARED and ready; Chad approves it (or I commit on his return). Ledger/session log: `.loop/rescue-phase0/state.md`.
+
+*(Everything below is prior history — UPDRAFT and combat — SUPERSEDED by the rescue direction above, retained for the record. The flight-kernel detail remains authoritative.)*
+
+---
+
 ## ▶ COLD START — Session 31 CLOSE (2026-07-13): 🪶 NEW DIRECTION GREENLIT — "UPDRAFT" (non-lethal proximity-flight), COMBAT SHELVED
 
 **THE GAME PIVOTED. Chad greenlit "UPDRAFT" — a non-lethal PROXIMITY-FLIGHT SCORE game — and SHELVED the aerial-melee-kill loop.** Read **`docs/UPDRAFT-strategic-plan.md`** (the full plan) + the `project-updraft-direction` memory FIRST. How we got here: iterating combat catchability (talonPickBias, strikeReachBonus, crow-lead, auto-strike, feather/spiral juice — all built, `sandbox/flight-feel`) did NOT make combat fun; Chad concluded the PREMISE was wrong ("going in circles is tiring… melee on small targets is really hard… bird-killing isn't great for kids"). A `deep-research` pass on the Roblox market (108 agents, fact-checked) + a Fable 5 synthesis produced UPDRAFT.

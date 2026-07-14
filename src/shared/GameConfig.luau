@@ -595,7 +595,9 @@ GameConfig.Squad = {
 	-- each crow seeks a point on an ORBIT SHELL around the eagle and circles it (GameServer.mobOrbitTarget
 	-- feeds this as the boids goalPoint). Increment 2 will add the staggered dive-bomb + peel-off passes.
 	mob = {
-		enabled       = true,  -- Increment 1 orbit. ON now that AI flight control is fixed (governor +
+		enabled       = false, -- UPDRAFT Phase 0: crows CALMED (no dive-bomb mobbing) for the line-riding
+		                       -- flight test — combat is shelved. Flip back to true only to revisit the mob.
+		                       -- (was: Increment 1 orbit. ON now that AI flight control is fixed (governor +
 		                       -- autopilot → crows fly controlled, dogfight well). This binds each crow to a
 		                       -- standoff ring around the eagle so they MOB instead of "flocking off and going
 		                       -- far away" (playtest 2026-07-01). Needs goalWeight raised (below) to beat
@@ -708,6 +710,107 @@ GameConfig.Squad = {
 -- reduces sink / gives a gentle climb when combined with gliding lift — it doesn't levitate you).
 -- WATCH-ITEM (RESEARCH §v3): real thermal climb is slow; if reaching the apex is tedious in
 -- playtest, raise strength above the scaled value as a gameplay concession.
+--------------------------------------------------------------------------------
+-- UPDRAFT (S31 pivot) — proximity-flight SCORE loop. Phase 0 test: "is line-riding FUN?"
+-- Fly CLOSE to terrain → combo grows (closer + faster + longer) → BANK it by pulling away clean, or
+-- LOSE it by crashing (feather-burst, keep flying — non-lethal). Client-computed for feel (see
+-- BirdController + docs/UPDRAFT-strategic-plan.md). All PLAYTEST-PROVISIONAL — tune to taste.
+--------------------------------------------------------------------------------
+GameConfig.Updraft = {
+	enabled        = false,  -- SUPERSEDED by GameConfig.Rescue (S32): the line-riding proximity scorer
+	                         -- is repurposed as the rescue STYLE meter (reuses computeProximity). Off here
+	                         -- so the two HUDs don't both draw. Flip on only to revisit standalone line-riding.
+	proximityDist  = 45,     -- studs; terrain within this counts as a ridable "line". Bigger = more forgiving.
+	sweetSpot      = 8,      -- studs; at/under this, closeness maxes at 1.0 — the knife-edge thrill.
+	minSpeed       = 55,     -- studs/s; below this no combo grows (must actually be FLYING a line, not hovering).
+	refSpeed       = 160,    -- studs/s; speed at which the speed bonus = 1.0 (eagle cruises ~130-170).
+	comboRate      = 120,    -- combo points/sec at max closeness + ref speed (the earn rate).
+	multPerSec     = 0.6,    -- multiplier climb per second while riding a line (risk sustained = reward).
+	multMax        = 8,      -- multiplier cap.
+	bankDelay      = 0.8,    -- s of clean pull-away (not close, no crash) before the combo auto-BANKS to score.
+	crashLoss      = 1.0,    -- fraction of the unbanked combo lost on a crash (1 = lose it all).
+}
+
+--------------------------------------------------------------------------------
+-- EAGLES TO THE RESCUE (S32 Phase 0) — the sacred slow-mo auto-catch loop.
+-- Fly a fast line past a stranded squirrel → it LEAPS for your talons in slow-motion →
+-- guaranteed catch → carry on your back → deliver up the waterfall updraft. Non-lethal, kid-first.
+-- All numbers from the Fable Packet-01 consult (docs/rescue-consults/PACKET-01-the-catch.md);
+-- PLAYTEST-PROVISIONAL — ground truth is Chad's Play. Consumed by RescueServer + BirdController.
+--------------------------------------------------------------------------------
+GameConfig.Rescue = {
+	enabled          = true,   -- master switch for the whole rescue loop + HUD
+	-- P3 "danger without cruelty": terrain NEVER kills in rescue mode — the eagle slides/bounces off
+	-- (Phase 1 adds the cartoon bounce + dazed recovery). Implemented as a gated effective CRASH_SPEED
+	-- at the two collision call sites (server processCrashes + client onFlightStep); the stored
+	-- Flight.CRASH_SPEED (45) is UNCHANGED so combat is byte-identical if ever un-shelved. The deep
+	-- Y < GROUND_FAILSAFE_Y (-200) kill still applies (nothing legitimately flies that low in the valley).
+	nonLethalTerrain = true,
+
+	-- THE CATCH TRIGGER (Fable §A). Any fast flyby through the sphere fires — no aiming, guaranteed.
+	triggerRadius    = 28,     -- studs; flyby sphere around the squirrel. Bigger = more forgiving.
+	ftueRadiusMult   = 1.5,    -- first `ftueCatches` catches use a 1.5× sphere so the "aww" fires unearned.
+	ftueCatches      = 3,
+	closingGateFrac  = 0.40,   -- must be closing on the squirrel at ≥ this × eagle glideSpeed (forbids hover-camping).
+	tellLeadTime     = 0.40,   -- s; the "determined survivor" tell fires this far ahead (predicted from closing speed).
+	tellHoldMin      = 1.2,    -- s; once planted the tell LATCHES at least this long (a flickering tell kills the beat).
+	carryCapacity    = 3,      -- squirrels ridable on your back before you must deliver.
+
+	-- THE LEAP ARC (Fable §A). Ballistic, solved to intercept the eagle's PREDICTED talon position.
+	arcAirtimeMin    = 0.50,   -- s; airtime floor.
+	arcAirtimeMax    = 0.85,   -- s; airtime ceiling (scales up slightly with closing speed).
+	arcApexHeight    = 10,     -- studs above the perch the leap arcs (presentation gravity, floaty & pretty).
+	arcConvergeFrac  = 0.85,   -- past this fraction of airtime, blend HARD to the talon so the catch never snaps.
+
+	-- CLIENT SLOW-MO PRESENTATION (Fable §B) — dilates anim/FX/audio/camera ONLY; the sim runs real-time.
+	slowmoScale      = 0.25,   -- presentation timescale during the catch window.
+	slowmoEaseIn     = 0.11,   -- s; fast attack into slow-mo.
+	slowmoSnapBack   = 0.20,   -- s; the "whip" back to real time (the exclamation point).
+	hitStopFrames    = 3,      -- frames of freeze on contact (~50ms; ≥6 reads as lag).
+	camFovDelta      = -5,     -- deg; FOV narrows during slow-mo (shrinks optic flow → reads as slow).
+	camPullIn        = 0.15,   -- fraction closer the camera eases during slow-mo.
+	camCant          = 4,      -- deg; cinematic camera cant during slow-mo.
+	woohooDelay      = 0.50,   -- s after snap-back completes for the delayed "…woohoo!".
+
+	-- STYLE (Fable §C) — the skill ceiling. Line-riding (skim/thread under canopy) charges a meter that
+	-- MULTIPLIES catch points. Never gates the catch. Reuses the terrain proximity ray-fan.
+	styleProxDist    = 40,     -- studs; terrain within this charges style (the line-riding closeness).
+	styleSweetSpot   = 7,      -- studs; at/under this, closeness = 1.0 (the knife-edge).
+	minStyleSpeed    = 60,     -- studs/s; must actually be flying a line (not hovering) to charge style.
+	styleChargeRate  = 0.9,    -- style-meter units/sec at max closeness (meter feeds styleMult = 1 + meter).
+	styleDecayHalf   = 2.0,    -- s; meter half-life when not riding a line (must fly the line INTO the catch).
+	styleMultMax     = 3.0,    -- cap on the catch multiplier from style.
+	swiftFrac        = 0.60,   -- closing speed ≥ this × glideSpeed on catch = "SWIFT!" bonus stamp.
+	blazingFrac      = 0.90,   -- ≥ this = "BLAZING!".
+
+	-- SCORING.
+	basePoints       = 100,    -- base points per rescue (generous, identical for everyone).
+	deliverBonus     = 25,     -- per-squirrel bonus when you DELIVER a batch to the safe zone.
+	speedStampBonus  = 50,     -- SWIFT/BLAZING flat bonus.
+
+	-- THE ROUND.
+	roundLength      = 120,    -- s; a 2-minute round.
+	intermission     = 6,      -- s between rounds.
+	triageAt         = 60,     -- s remaining when the scripted beacon-expiry (fake fire triage) begins.
+	squirrelCount    = 11,     -- squirrels live on the field at once.
+	respawnDelay     = 5,      -- s before a caught/expired squirrel re-appears at a fresh perch.
+
+	-- DELIVERY (the waterfall safe zone). Shared world constants (server builds it, client rides the
+	-- updraft) so no remote is needed for the geometry.
+	deliverRadius    = 70,     -- studs; entering (horizontally) this with cargo delivers the batch.
+	deliverPos       = Vector3.new(1150, 250, 0), -- top-of-waterfall safe pad centre (world).
+	deliverPadY      = 250,    -- Y of the safe pad (deliver when above ~this).
+	updraftBaseY     = 20,     -- updraft column runs from here…
+	updraftTopY      = 280,    -- …to here (ride it up the waterfall face).
+	updraftRadius    = 90,     -- studs; horizontal radius of the waterfall updraft column.
+	updraftStrength  = 210,    -- upward accel (studs/s²) at the column centre (composes w/ Thermals).
+
+	-- WORLD placement (server-side gray-box valley). Squirrels + trees live in this XZ box.
+	valleyRadius     = 1000,   -- squirrels/trees scatter within this radius of origin.
+	treeCount        = 46,     -- gray-box trees (bounded for perf).
+	canopyY          = 110,    -- treetop crown height; under-canopy squirrels sit below this.
+}
+
 GameConfig.Thermals = {
 	count = 8,
 	radius = meters(110),     -- ≈393 studs
@@ -736,7 +839,9 @@ GameConfig.Debug = {
 	-- `Squad.size` so a solo player can practice the talon/beak parry without a second human.
 	-- The bots count for NOTHING in scoring (round logic still keys off human players); they
 	-- exist only in the soloFlight branch and are cleared the moment a real match can be fielded.
-	aiCrowOpponents = true,
+	-- EAGLES-TO-THE-RESCUE (S32): combat is shelved — the solo eagle now flies a rescue round,
+	-- NOT a dogfight. No crows on the field. Flip back to true only to revisit combat.
+	aiCrowOpponents = false,
 }
 
 --------------------------------------------------------------------------------

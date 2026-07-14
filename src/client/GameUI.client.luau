@@ -793,7 +793,7 @@ RunService.RenderStepped:Connect(function()
 
 	-- Strike meter (eagle only): the server sets StrikeMeter/StrikeActive/StrikeArmedDir on the eagle Body.
 	local sMeter = body:GetAttribute("StrikeMeter")
-	if typeof(sMeter) == "number" then
+	if typeof(sMeter) == "number" and not (GameConfig.Rescue and GameConfig.Rescue.enabled) then
 		weaponsFrame.Visible = true
 		paintStrike(sMeter, body:GetAttribute("StrikeActive") == true, body:GetAttribute("StrikeArmedDir"))
 	else
@@ -849,6 +849,180 @@ function _G.UpdateFlapUI(throttle, freqHz, power)
 		local dir = throttle > 0 and "\u{25B2}" or "\u{25BC}" -- ▲ up-thrust / ▼ down-thrust
 		flapText.Text = string.format("%s %.1fHz \194\183 %d%%", dir, tonumber(freqHz) or 0, pct)
 	end
+end
+
+--------------------------------------------------------------------------------
+-- EAGLES TO THE RESCUE HUD (S32) — timer, score, carry, style meter, and the big center STAMP.
+-- Reads _G.RescueSnapshot() (set by BirdController) each frame; exposes _G.RescueStamp for the beat.
+-- When rescue is enabled we hide the combat-specific readouts (team banner, Eagles/Crows score,
+-- strike meter, combat control hint) so the HUD reads as a rescue game.
+--------------------------------------------------------------------------------
+local RESCUE_ON = GameConfig.Rescue and GameConfig.Rescue.enabled
+if RESCUE_ON then
+	teamBanner.Visible = false
+	scoreFrame.Visible = false
+	controlHint.Text = "<b><font color=\"#ffd24a\">FLY FAST past a squirrel</font></b> to catch it!   \194\183   Carry them up the <b><font color=\"#8fd8ff\">WATERFALL</font></b> to safety   \194\183   SPACE = look around"
+
+	-- TIMER + PHASE (top center)
+	local topFrame = Instance.new("Frame")
+	topFrame.Name = "RescueTop"
+	topFrame.AnchorPoint = Vector2.new(0.5, 0)
+	topFrame.Size = UDim2.new(0, 360, 0, 84)
+	topFrame.Position = UDim2.new(0.5, 0, 0, 8)
+	topFrame.BackgroundColor3 = UI.hudColor
+	topFrame.BackgroundTransparency = UI.hudTransparency
+	topFrame.BorderSizePixel = 0
+	topFrame.Parent = screenGui
+	local tfc = Instance.new("UICorner"); tfc.CornerRadius = UDim.new(0, 12); tfc.Parent = topFrame
+
+	local timerLabel = Instance.new("TextLabel")
+	timerLabel.Name = "Timer"
+	timerLabel.Size = UDim2.new(1, -16, 0, 44); timerLabel.Position = UDim2.new(0, 8, 0, 4)
+	timerLabel.BackgroundTransparency = 1; timerLabel.Font = Enum.Font.GothamBlack; timerLabel.TextScaled = true
+	timerLabel.TextColor3 = Color3.fromRGB(255, 255, 255); timerLabel.TextStrokeTransparency = 0.4
+	timerLabel.Text = "2:00"; timerLabel.Parent = topFrame
+
+	local scoreLabel = Instance.new("TextLabel")
+	scoreLabel.Name = "Score"
+	scoreLabel.Size = UDim2.new(1, -16, 0, 30); scoreLabel.Position = UDim2.new(0, 8, 0, 50)
+	scoreLabel.BackgroundTransparency = 1; scoreLabel.Font = Enum.Font.GothamBold; scoreLabel.TextScaled = true
+	scoreLabel.TextColor3 = Color3.fromRGB(255, 214, 120); scoreLabel.TextStrokeTransparency = 0.5
+	scoreLabel.Text = "🐿️ 0"; scoreLabel.Parent = topFrame
+
+	-- CARRY + STYLE (bottom center, above the control hint)
+	local carryFrame = Instance.new("Frame")
+	carryFrame.Name = "RescueCarry"
+	carryFrame.AnchorPoint = Vector2.new(0.5, 1)
+	carryFrame.Size = UDim2.new(0, 320, 0, 56)
+	carryFrame.Position = UDim2.new(0.5, 0, 1, -64)
+	carryFrame.BackgroundColor3 = UI.hudColor
+	carryFrame.BackgroundTransparency = UI.hudTransparency
+	carryFrame.BorderSizePixel = 0
+	carryFrame.Parent = screenGui
+	local cfc = Instance.new("UICorner"); cfc.CornerRadius = UDim.new(0, 10); cfc.Parent = carryFrame
+
+	local carryLabel = Instance.new("TextLabel")
+	carryLabel.Name = "Carry"
+	carryLabel.Size = UDim2.new(0.5, -8, 1, -8); carryLabel.Position = UDim2.new(0, 8, 0, 4)
+	carryLabel.BackgroundTransparency = 1; carryLabel.Font = Enum.Font.GothamBold; carryLabel.TextScaled = true
+	carryLabel.TextColor3 = Color3.fromRGB(255, 255, 255); carryLabel.TextXAlignment = Enum.TextXAlignment.Left
+	carryLabel.Text = "🐿️ 0/3"; carryLabel.Parent = carryFrame
+
+	local styleLabel = Instance.new("TextLabel")
+	styleLabel.Name = "Style"
+	styleLabel.Size = UDim2.new(0.5, -8, 0, 22); styleLabel.Position = UDim2.new(0.5, 0, 0, 4)
+	styleLabel.BackgroundTransparency = 1; styleLabel.Font = Enum.Font.GothamBold; styleLabel.TextScaled = true
+	styleLabel.TextColor3 = Color3.fromRGB(150, 230, 255); styleLabel.TextXAlignment = Enum.TextXAlignment.Right
+	styleLabel.Text = ""; styleLabel.Parent = carryFrame
+
+	local styleBg = Instance.new("Frame")
+	styleBg.Size = UDim2.new(0.5, -16, 0, 12); styleBg.Position = UDim2.new(0.5, 8, 1, -18)
+	styleBg.BackgroundColor3 = Color3.fromRGB(30, 34, 40); styleBg.BorderSizePixel = 0; styleBg.Parent = carryFrame
+	local sbc = Instance.new("UICorner"); sbc.CornerRadius = UDim.new(0, 4); sbc.Parent = styleBg
+	local styleFill = Instance.new("Frame")
+	styleFill.Size = UDim2.new(0, 0, 1, 0); styleFill.BackgroundColor3 = Color3.fromRGB(120, 210, 255)
+	styleFill.BorderSizePixel = 0; styleFill.Parent = styleBg
+	local sfc = Instance.new("UICorner"); sfc.CornerRadius = UDim.new(0, 4); sfc.Parent = styleFill
+
+	-- BIG CENTER STAMP (GOTCHA! / DELIVERED!)
+	local stamp = Instance.new("TextLabel")
+	stamp.Name = "RescueStamp"
+	stamp.AnchorPoint = Vector2.new(0.5, 0.5)
+	stamp.Size = UDim2.new(0, 640, 0, 120)
+	stamp.Position = UDim2.new(0.5, 0, 0.4, 0)
+	stamp.BackgroundTransparency = 1
+	stamp.Font = Enum.Font.GothamBlack
+	stamp.TextScaled = true
+	stamp.TextColor3 = Color3.fromRGB(255, 230, 140)
+	stamp.TextStrokeTransparency = 0.2
+	stamp.TextTransparency = 1
+	stamp.Text = ""
+	stamp.ZIndex = 20
+	stamp.Parent = screenGui
+
+	local substamp = Instance.new("TextLabel")
+	substamp.Name = "RescueSubStamp"
+	substamp.AnchorPoint = Vector2.new(0.5, 0.5)
+	substamp.Size = UDim2.new(0, 520, 0, 48)
+	substamp.Position = UDim2.new(0.5, 0, 0.4, 74)
+	substamp.BackgroundTransparency = 1
+	substamp.Font = Enum.Font.GothamBold
+	substamp.TextScaled = true
+	substamp.TextColor3 = Color3.fromRGB(150, 230, 255)
+	substamp.TextStrokeTransparency = 0.3
+	substamp.TextTransparency = 1
+	substamp.Text = ""
+	substamp.ZIndex = 20
+	substamp.Parent = screenGui
+
+	local stampToken = 0
+	local RARITY_COLOR = {
+		Brown = Color3.fromRGB(255, 230, 140), Silver = Color3.fromRGB(220, 232, 245),
+		Gold = Color3.fromRGB(255, 205, 80), Rainbow = Color3.fromRGB(255, 140, 210),
+	}
+	function _G.RescueStamp(kind, tier, rarity, mult, n)
+		if kind == "gotcha" then
+			stampToken += 1
+			local myTok = stampToken
+			local prefix = (rarity and rarity ~= "Brown") and (string.upper(rarity) .. " ") or ""
+			stamp.Text = prefix .. "GOTCHA!"
+			stamp.TextColor3 = RARITY_COLOR[rarity] or Color3.fromRGB(255, 230, 140)
+			stamp.TextTransparency = 0
+			stamp.Size = UDim2.new(0, 560, 0, 110)
+			TweenService:Create(stamp, TweenInfo.new(0.18, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+				{ Size = UDim2.new(0, 660, 0, 128) }):Play()
+			TweenService:Create(stamp, TweenInfo.new(0.9, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+				{ TextTransparency = 1 }):Play()
+			-- style/speed sub-stamp lands a beat later (Fable §C: never diminish the base catch)
+			local bits = {}
+			if tier and tier ~= "" then bits[#bits + 1] = tier .. "!" end
+			if mult and mult > 1.05 then bits[#bits + 1] = string.format("STYLE ×%.1f", mult) end
+			if #bits > 0 then
+				task.delay(0.3, function()
+					if myTok ~= stampToken then return end
+					substamp.Text = table.concat(bits, "   ")
+					substamp.TextTransparency = 0
+					TweenService:Create(substamp, TweenInfo.new(0.9, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+						{ TextTransparency = 1 }):Play()
+				end)
+			end
+		elseif kind == "deliver" then
+			stampToken += 1
+			stamp.Text = "DELIVERED ×" .. tostring(n or 1) .. "!"
+			stamp.TextColor3 = Color3.fromRGB(150, 235, 160)
+			stamp.TextTransparency = 0
+			stamp.Size = UDim2.new(0, 560, 0, 110)
+			TweenService:Create(stamp, TweenInfo.new(1.0, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+				{ TextTransparency = 1 }):Play()
+		end
+	end
+
+	-- Per-frame rescue HUD update.
+	RunService.RenderStepped:Connect(function()
+		local snap = _G.RescueSnapshot and _G.RescueSnapshot()
+		if type(snap) ~= "table" then return end
+		local t = math.max(0, math.floor((snap.timeLeft or 0)))
+		timerLabel.Text = string.format("%d:%02d", math.floor(t / 60), t % 60)
+		if snap.phase == "active" then
+			timerLabel.TextColor3 = (t <= 15) and Color3.fromRGB(255, 120, 110) or Color3.fromRGB(255, 255, 255)
+		elseif snap.phase == "intermission" then
+			timerLabel.TextColor3 = Color3.fromRGB(180, 220, 255)
+		else
+			timerLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
+		end
+		scoreLabel.Text = "🐿️ " .. tostring(snap.score or 0) .. "   ·   Saved " .. tostring(snap.rescued or 0)
+		local cap = snap.capacity or 3
+		carryLabel.Text = "🐿️ " .. tostring(snap.carry or 0) .. "/" .. tostring(cap)
+		carryLabel.TextColor3 = (snap.carry or 0) >= cap and Color3.fromRGB(255, 180, 90) or Color3.fromRGB(255, 255, 255)
+		local styleMult = 1 + (snap.style or 0)
+		if styleMult > 1.05 then
+			styleLabel.Text = string.format("STYLE ×%.1f", styleMult)
+			styleFill.Size = UDim2.new(math.clamp((styleMult - 1) / 2, 0, 1), 0, 1, 0)
+		else
+			styleLabel.Text = ""
+			styleFill.Size = UDim2.new(0, 0, 1, 0)
+		end
+	end)
 end
 
 print("Game UI Loaded!")

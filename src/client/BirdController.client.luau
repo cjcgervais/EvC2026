@@ -121,6 +121,12 @@ local isAlive       = false
 local thermalData   = {}
 local renderConn    = nil
 
+-- RESCUE camera-decoration state (EAGLES TO THE RESCUE). `env` (0..1) is the slow-mo intensity the
+-- catch beat drives; updateCamera reads it to apply a PURE beat-time post-transform (FOV narrow +
+-- pull-in + cant) on the LOCKED chase's OUTPUT — identity when env=0, never feeds the control frame.
+-- Forward-declared here so updateCamera (defined earlier than the rescue section) can see it.
+local rescueCam = { env = 0 }
+
 -- Live flight input the physics engine consumes every frame. pitch/roll/yaw are REBUILT
 -- each frame in onFlightStep from `kb` (keyboard) + mouse-steer; flap/dive are set directly.
 local inputState = {
@@ -784,6 +790,18 @@ local function updateCamera(dt)
 		)
 	end
 
+	-- RESCUE SLOW-MO CAMERA DECORATION (beat-time only; identity when env=0). A PURE post-transform on
+	-- the LOCKED chase's OUTPUT: pull the camera in and cant it during the catch. Never reads input,
+	-- never feeds the aim/control frame; returns to identity as the beat ends. See rescueCam + the rescue
+	-- section. This is the sanctioned layer-on decoration (rescue-gameplay-architect), NOT a chase edit.
+	local rEnv = (GameConfig.Rescue and GameConfig.Rescue.enabled) and (rescueCam.env or 0) or 0
+	if rEnv > 1e-3 then
+		local RC = GameConfig.Rescue
+		local pull = (RC.camPullIn or 0.15) * dist * rEnv
+		local cant = math.rad(RC.camCant or 4) * rEnv
+		camera.CFrame = camera.CFrame * CFrame.new(0, 0, -pull) * CFrame.Angles(0, 0, cant)
+	end
+
 	-- FOV by dive/climb/speed.
 	local targetFOV = CAM.baseFOV
 	if flightEngine.isDiving then
@@ -794,6 +812,10 @@ local function updateCamera(dt)
 	-- AIM-ZOOM narrows the FOV LAST so it composes with (doesn't get stomped by) the attitude/speed FOV.
 	if aimZoom.factor > 1e-3 then
 		targetFOV = targetFOV + ((CAM.aimFOV or 45) - targetFOV) * aimZoom.factor
+	end
+	-- Rescue slow-mo FOV narrow (composes last; identity when env=0 — shrinks optic flow → reads as slow).
+	if rEnv > 1e-3 then
+		targetFOV = targetFOV + (GameConfig.Rescue.camFovDelta or -5) * rEnv
 	end
 	-- Floor lowered 50 -> 12 so the right-click zoom (aimFOV) can actually reach a strong telescope
 	-- magnification (the old 50 floor was capping it). Normal dive/climb/base FOVs are all well above this.
@@ -987,6 +1009,593 @@ CombatFX.OnClientEvent:Connect(function(cause, position, victimTeam, _killed)
 	end
 	burstFeathers(position, color, count)
 end)
+
+--------------------------------------------------------------------------------
+-- UPDRAFT PROXIMITY SCORE (S31 Phase 0 — "is line-riding FUN?"). Fly CLOSE to terrain → combo grows
+-- (closer + faster + longer) → BANK it by pulling away clean, or LOSE it in a crash (feather puff, keep
+-- flying — non-lethal). Client-computed for feel; a self-contained prototype HUD to fold into GameUI once
+-- the loop is proven. Tunables live in GameConfig.Updraft. Reuses the feather pool + collision params.
+--------------------------------------------------------------------------------
+local updraft = { score = 0, combo = 0, mult = 1, awayTime = 0, riding = false }
+local UP_DIRS = {
+	Vector3.new(0, -1, 0),  Vector3.new(0, 1, 0),
+	Vector3.new(1, 0, 0),   Vector3.new(-1, 0, 0),
+	Vector3.new(0, 0, 1),   Vector3.new(0, 0, -1),
+	Vector3.new(0.7, -0.7, 0),  Vector3.new(-0.7, -0.7, 0),
+	Vector3.new(0, -0.7, 0.7),  Vector3.new(0, -0.7, -0.7),
+}
+
+-- Nearest terrain distance around the bird (min over a fan of rays), or math.huge if nothing within range.
+local function computeProximity(pos, maxDist)
+	local params = getCollisionParams()
+	if not params then return math.huge end
+	local best = math.huge
+	for _, dir in ipairs(UP_DIRS) do
+		local hit = workspace:Raycast(pos, dir * maxDist, params)
+		if hit then
+			local d = (hit.Position - pos).Magnitude
+			if d < best then best = d end
+		end
+	end
+	return best
+end
+
+-- Prototype score HUD (self-contained; moves into GameUI when the loop is proven).
+local updraftGui, updraftScoreLbl, updraftComboLbl
+local function buildUpdraftHUD()
+	if updraftGui then return end
+	local pg = player:FindFirstChildOfClass("PlayerGui") or player:WaitForChild("PlayerGui")
+	updraftGui = Instance.new("ScreenGui")
+	updraftGui.Name = "UpdraftHUD"
+	updraftGui.ResetOnSpawn = false
+	updraftGui.IgnoreGuiInset = true
+	updraftGui.Parent = pg
+	updraftScoreLbl = Instance.new("TextLabel")
+	updraftScoreLbl.BackgroundTransparency = 1
+	updraftScoreLbl.AnchorPoint = Vector2.new(0.5, 0)
+	updraftScoreLbl.Position = UDim2.new(0.5, 0, 0.03, 0)
+	updraftScoreLbl.Size = UDim2.new(0, 420, 0, 46)
+	updraftScoreLbl.Font = Enum.Font.GothamBold
+	updraftScoreLbl.TextScaled = true
+	updraftScoreLbl.TextColor3 = Color3.fromRGB(255, 255, 255)
+	updraftScoreLbl.TextStrokeTransparency = 0.4
+	updraftScoreLbl.Text = "0"
+	updraftScoreLbl.Parent = updraftGui
+	updraftComboLbl = Instance.new("TextLabel")
+	updraftComboLbl.BackgroundTransparency = 1
+	updraftComboLbl.AnchorPoint = Vector2.new(0.5, 0)
+	updraftComboLbl.Position = UDim2.new(0.5, 0, 0.115, 0)
+	updraftComboLbl.Size = UDim2.new(0, 380, 0, 34)
+	updraftComboLbl.Font = Enum.Font.GothamBold
+	updraftComboLbl.TextScaled = true
+	updraftComboLbl.TextColor3 = Color3.fromRGB(255, 210, 90)
+	updraftComboLbl.TextStrokeTransparency = 0.5
+	updraftComboLbl.Text = ""
+	updraftComboLbl.Parent = updraftGui
+end
+
+local function updateUpdraftHUD(closeness)
+	buildUpdraftHUD()
+	updraftScoreLbl.Text = "🪶 " .. string.format("%d", math.floor(updraft.score + 0.5))
+	if updraft.combo >= 1 then
+		updraftComboLbl.Text = string.format("COMBO  x%.1f   +%d", updraft.mult, math.floor(updraft.combo))
+		local c = math.clamp(closeness, 0, 1)
+		updraftComboLbl.TextColor3 = Color3.fromRGB(255, 255, 255):Lerp(Color3.fromRGB(255, 170, 30), 0.35 + 0.65 * c)
+		updraftComboLbl.TextTransparency = 0
+	else
+		updraftComboLbl.TextTransparency = 1
+	end
+end
+
+-- Advance the line-riding score one frame. `crashed` comes from the collision resolve in onFlightStep.
+local function updateUpdraft(dt, crashed)
+	local U = GameConfig.Updraft
+	if not (U and U.enabled) or not (rootPart and rootPart.Parent) then return end
+	local pos = rootPart.Position
+	local speed = (flightEngine and flightEngine.speed) or 0
+
+	if crashed then
+		if updraft.combo > 0 then
+			updraft.combo = updraft.combo * (1 - (U.crashLoss or 1))
+			updraft.mult = 1
+			burstFeathers(pos, FEATHER_EAGLE, 30) -- crash puff — non-lethal, you keep flying
+		end
+		updraft.awayTime = 0
+		updraft.riding = false
+		updateUpdraftHUD(0)
+		return
+	end
+
+	local minDist = computeProximity(pos, U.proximityDist or 45)
+	local closeness = 0
+	if minDist < (U.proximityDist or 45) then
+		closeness = math.clamp((U.proximityDist - minDist) / math.max(1, (U.proximityDist or 45) - (U.sweetSpot or 8)), 0, 1)
+	end
+
+	if closeness > 0 and speed >= (U.minSpeed or 55) then
+		local speedFactor = math.clamp(speed / (U.refSpeed or 160), 0, 1.5)
+		updraft.combo = updraft.combo + closeness * speedFactor * (U.comboRate or 120) * dt
+		updraft.mult = math.min(U.multMax or 8, updraft.mult + closeness * (U.multPerSec or 0.6) * dt)
+		updraft.awayTime = 0
+		updraft.riding = true
+	else
+		updraft.riding = false
+		if updraft.combo > 0 then
+			updraft.awayTime = updraft.awayTime + dt
+			if updraft.awayTime >= (U.bankDelay or 0.8) then
+				updraft.score = updraft.score + updraft.combo * updraft.mult -- BANK the line
+				updraft.combo = 0
+				updraft.mult = 1
+				updraft.awayTime = 0
+			end
+		end
+	end
+	updateUpdraftHUD(closeness)
+end
+
+--------------------------------------------------------------------------------
+-- EAGLES TO THE RESCUE (S32 Phase 0) — the SACRED slow-mo auto-catch, carry, deliver, style.
+-- Design: docs/rescue-consults/PACKET-01-the-catch.md (Fable). Built AROUND the LOCKED kernel + camera
+-- (detection + presentation ONLY; the sim + input run real-time). Fable's key insight: the intercept
+-- solve drives the squirrel's RELATIVE velocity to ~0, so a real-time object wearing dilated FX READS
+-- as slow-mo — we never dilate world motion. All numbers in GameConfig.Rescue.
+--------------------------------------------------------------------------------
+local RES = GameConfig.Rescue
+local SoundService = game:GetService("SoundService")
+local Lighting     = game:GetService("Lighting")
+
+local function lerpN(a, b, t) return a + (b - a) * t end
+
+-- Rescue remotes (RescueServer's OWN folder; wired in a task so WaitForChild can't stall startup).
+local catchRemote, deliverRemote
+local rescueState = {
+	phase = "intermission", carry = 0, capacity = (RES and RES.carryCapacity) or 3,
+	score = 0, delivered = 0, rescued = 0, timeLeft = 0,
+}
+task.spawn(function()
+	if not (RES and RES.enabled) then return end
+	local rr = ReplicatedStorage:WaitForChild("RescueRemotes", 30)
+	if not rr then return end
+	catchRemote   = rr:WaitForChild("CatchSquirrel")
+	deliverRemote = rr:WaitForChild("DeliverSquirrels")
+	rr:WaitForChild("RescueState").OnClientEvent:Connect(function(s)
+		if type(s) == "table" then rescueState = s end
+	end)
+end)
+
+local squirrelsFolder
+task.spawn(function()
+	if RES and RES.enabled then squirrelsFolder = workspace:WaitForChild("Squirrels", 30) end
+end)
+
+-- Presentation models (leaping squirrel + back-riders) live here — client-only, never queried.
+local catchFxFolder
+local function ensureCatchFx()
+	if catchFxFolder and catchFxFolder.Parent then return catchFxFolder end
+	catchFxFolder = Instance.new("Folder")
+	catchFxFolder.Name = "RescueCatchFX"
+	catchFxFolder.Parent = workspace
+	return catchFxFolder
+end
+
+-- Desaturate grammar for slow-mo (Fable §B) — a local ColorCorrectionEffect, driven by the beat env.
+local rescueCC
+local function slowmoDesat(env)
+	if not rescueCC then
+		rescueCC = Instance.new("ColorCorrectionEffect")
+		rescueCC.Name = "RescueSlowmoCC"
+		rescueCC.Parent = Lighting
+	end
+	rescueCC.Enabled = env > 0.01
+	rescueCC.Saturation = -0.55 * env
+	rescueCC.Brightness = 0.03 * env
+	rescueCC.Contrast   = 0.06 * env
+end
+
+--------------------------------------------------------------------------------
+-- SOUND (gray-box — Fable §E: rbxasset content + PlaybackSpeed = intervals/pitch-bends). If an id
+-- doesn't resolve in this build it simply stays silent (no error); Chad reports which resolved.
+--------------------------------------------------------------------------------
+local SFX_PING   = "rbxasset://sounds/electronicpingshort.wav"
+local SFX_SWOOSH = "rbxasset://sounds/swoosh.wav"
+local SFX_SNAP   = "rbxasset://sounds/switch.wav"
+
+local function playSound(id, vol, speed)
+	local s = Instance.new("Sound")
+	s.SoundId = id
+	s.Volume = vol or 0.5
+	s.PlaybackSpeed = speed or 1
+	s.Parent = SoundService
+	s:Play()
+	s.Ended:Once(function() s:Destroy() end)
+	task.delay(4, function() if s and s.Parent then s:Destroy() end end)
+	return s
+end
+-- rising major-third "magic" chord: root then ×1.26.
+local function playChord()
+	playSound(SFX_PING, 0.5, 1.0)
+	task.delay(0.12, function() playSound(SFX_PING, 0.5, 1.26) end)
+end
+local function playPomf()
+	playSound(SFX_SNAP, 0.7, 0.55)          -- soft low pillow-thump
+	playSound(SFX_SWOOSH, 0.35, 0.7)
+end
+local function playGotcha()
+	playSound(SFX_PING, 0.6, 1.0)
+	task.delay(0.08, function() playSound(SFX_PING, 0.6, 1.5) end)  -- bright two-note stinger
+end
+local function playHup()
+	playSound(SFX_SWOOSH, 0.3, 2.0)         -- tiny-creature effort, pitched up
+end
+local function playWhip()
+	playSound(SFX_SWOOSH, 0.45, 1.2)
+end
+local function playWoohoo()
+	-- a happy "wheee!" — one tone bent up 1.2 -> 2.0 while playing.
+	local s = playSound(SFX_PING, 0.5, 1.2)
+	if s then
+		task.spawn(function()
+			for i = 1, 8 do
+				if not (s and s.Parent) then return end
+				s.PlaybackSpeed = 1.2 + (0.8 * i / 8)
+				task.wait(0.035)
+			end
+		end)
+	end
+end
+
+--------------------------------------------------------------------------------
+-- RESCUE STATE (client)
+--------------------------------------------------------------------------------
+local styleMeter = 0            -- 0..(styleMultMax-1); charges on line-riding, feeds styleMult = 1 + meter
+local catchCount = 0            -- lifetime catches (FTUE generosity for the first few)
+local squirrelPhase = 0         -- drives the wave animation
+local tellId = nil              -- the squirrel currently showing the "determined survivor" tell
+local tellTimer = 0             -- latch countdown (Fable: hold the tell ≥ tellHoldMin)
+local catch = nil               -- the active catch beat (a table) or nil
+local riders = {}               -- back-riders: array of { model = Model }
+local deliverCooldown = 0
+
+local function eagleGlide()
+	return (currentProfile and currentProfile.glideSpeed) or 130
+end
+
+-- The talon "basket" — a point just under the belly the leap intercepts.
+local function talonPos()
+	return rootPart.CFrame * Vector3.new(0, -2.4, 0.3)
+end
+
+-- Where rider `i` (1-based) sits on the back.
+local function seatCFrame(i)
+	local r = (currentProfile and currentProfile.bodyRadius) or 4.5
+	local lane = ((i - 1) - ((RES.carryCapacity or 3) - 1) * 0.5)
+	return rootPart.CFrame * CFrame.new(lane * (r * 0.5), r * 0.7, r * 0.2)
+end
+
+local FEATHER_GOLD = Color3.fromRGB(255, 210, 90)
+
+-- A quick expanding gold ring at the catch (pooled-free; self-destructs).
+local function goldRing(pos)
+	local ring = Instance.new("Part")
+	ring.Shape = Enum.PartType.Cylinder
+	ring.Size = Vector3.new(0.6, 4, 4)
+	ring.CFrame = CFrame.new(pos) * CFrame.Angles(0, 0, math.rad(90))
+	ring.Anchored = true
+	ring.CanCollide = false
+	ring.CanQuery = false
+	ring.Material = Enum.Material.Neon
+	ring.Color = FEATHER_GOLD
+	ring.Transparency = 0.1
+	ring.Parent = ensureCatchFx()
+	task.spawn(function()
+		for i = 1, 12 do
+			if not ring.Parent then return end
+			local sc = 1 + i * 2.2
+			ring.Size = Vector3.new(0.6, 4 * sc, 4 * sc)
+			ring.Transparency = 0.1 + 0.9 * (i / 12)
+			task.wait(0.02)
+		end
+		ring:Destroy()
+	end)
+end
+
+-- Build the client-only presentation squirrel that leaps + then rides.
+local function buildPresentationSquirrel(color)
+	local sq = BirdBuilder.BuildSquirrel(2.4, { body = color })
+	for _, p in ipairs(sq:GetDescendants()) do
+		if p:IsA("BasePart") then p.CanQuery = false; p.CanTouch = false; p.CanCollide = false end
+	end
+	if sq.PrimaryPart then sq.PrimaryPart.Anchored = true end
+	-- gold mote trail off the body (dilated during slow-mo).
+	local att = Instance.new("Attachment")
+	att.Parent = sq.PrimaryPart
+	local mote = Instance.new("ParticleEmitter")
+	mote.Name = "Mote"
+	mote.Color = ColorSequence.new(FEATHER_GOLD)
+	mote.LightEmission = 0.8
+	mote.Size = NumberSequence.new(0.9, 0.1)
+	mote.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.2), NumberSequenceKeypoint.new(1, 1) })
+	mote.Lifetime = NumberRange.new(0.5, 0.9)
+	mote.Rate = 40
+	mote.Speed = NumberRange.new(2, 6)
+	mote.Parent = att
+	sq.Parent = ensureCatchFx()
+	return sq
+end
+
+-- Slow-mo intensity for the active catch beat (Fable §A envelope).
+local function catchEnv()
+	if not catch then return 0 end
+	local ei = RES.slowmoEaseIn or 0.11
+	local contactEnd = catch.airtime + (RES.hitStopFrames or 3) / 60
+	local sb = RES.slowmoSnapBack or 0.20
+	local t = catch.t
+	if t < ei then
+		local x = t / ei; return 1 - (1 - x) * (1 - x)
+	elseif t <= contactEnd then
+		return 1
+	elseif t <= contactEnd + sb then
+		local x = (t - contactEnd) / sb; return 1 - x * x
+	end
+	return 0
+end
+
+-- BEGIN a catch on `sqModel` (a stranded world squirrel). Fires the authoritative catch to the server
+-- (it removes the world squirrel + scores) and spins up the local presentation beat.
+local function triggerCatch(sqModel, closing)
+	local id = sqModel:GetAttribute("SquirrelId")
+	if type(id) ~= "number" then return end
+	local body = sqModel.PrimaryPart
+	local startPos = body and body.Position or (rootPart.Position + rootPart.CFrame.LookVector * 20)
+	local color = (body and body.Color) or Color3.fromRGB(150, 96, 52)
+
+	catchCount += 1
+	local styleMult = clamp(1 + styleMeter, 1, RES.styleMultMax or 3)
+	local glide = eagleGlide()
+	local tier = ""
+	if closing >= (RES.blazingFrac or 0.9) * glide then tier = "BLAZING"
+	elseif closing >= (RES.swiftFrac or 0.6) * glide then tier = "SWIFT" end
+
+	if catchRemote then catchRemote:FireServer(id, styleMult, tier) end
+
+	local frac = clamp(closing / (glide * 1.2), 0, 1)
+	local airtime = lerpN(RES.arcAirtimeMin or 0.5, RES.arcAirtimeMax or 0.85, frac)
+	catch = {
+		t = 0, airtime = airtime, startPos = startPos,
+		sq = buildPresentationSquirrel(color),
+		styleMult = styleMult, tier = tier, rarity = sqModel:GetAttribute("Rarity"),
+		contactDone = false, converted = false,
+	}
+	styleMeter = 0            -- style is spent on the catch; re-earn a line for the next
+	tellId = nil
+	playHup()
+	playChord()
+	if _G.RescueStamp then _G.RescueStamp("tell") end
+end
+
+-- Advance the active catch beat one frame (arc → contact → hit-stop → rider → snap-back).
+local function stepCatch(dt)
+	if not catch then return end
+	catch.t += dt
+	local contactEnd = catch.airtime + (RES.hitStopFrames or 3) / 60
+	local tp = talonPos()
+
+	if catch.t < catch.airtime then
+		-- LEAP: ballistic arc re-fit to the eagle's predicted talon every frame (relative vel → 0).
+		local u = clamp(catch.t / catch.airtime, 0, 1)
+		local remaining = math.max(0, catch.airtime - catch.t)
+		local predicted = tp + flightEngine.velocity * remaining
+		local cf = RES.arcConvergeFrac or 0.85
+		if u > cf then
+			predicted = predicted:Lerp(tp, clamp((u - cf) / (1 - cf), 0, 1))
+		end
+		local flat = catch.startPos:Lerp(predicted, u)
+		local apex = (RES.arcApexHeight or 10) * 4 * u * (1 - u)
+		local pos = flat + Vector3.new(0, apex, 0)
+		local look = rootPart.Position - pos
+		local ori = (look.Magnitude > 1e-3) and CFrame.lookAt(pos, rootPart.Position) or CFrame.new(pos)
+		if catch.sq and catch.sq.PrimaryPart then catch.sq:PivotTo(ori) end
+		BirdBuilder.PoseSquirrel(catch.sq, "starfish", dt, 0)
+	elseif catch.t < contactEnd then
+		-- CONTACT + HIT-STOP: fire the juice ONCE, then hold frozen at the talon.
+		if not catch.contactDone then
+			catch.contactDone = true
+			burstFeathers(tp, FEATHER_GOLD, 26)
+			goldRing(tp)
+			playPomf()
+			playGotcha()
+			if _G.RescueStamp then _G.RescueStamp("gotcha", catch.tier, catch.rarity, catch.styleMult) end
+			task.delay(contactEnd - catch.airtime + (RES.slowmoSnapBack or 0.2) + (RES.woohooDelay or 0.5), playWoohoo)
+		end
+		if catch.sq and catch.sq.PrimaryPart then catch.sq:PivotTo(CFrame.new(tp)) end  -- frozen
+	else
+		-- become a back-rider, then let the env ride down (snap-back whip).
+		if not catch.converted then
+			catch.converted = true
+			playWhip()
+			riders[#riders + 1] = { model = catch.sq }
+			catch.sq = nil
+		end
+		if catch.t >= contactEnd + (RES.slowmoSnapBack or 0.2) then
+			catch = nil
+		end
+	end
+end
+
+-- Keep the back-riders glued to the eagle's back, posed "ride".
+local function updateRiders(dt)
+	for i, rider in ipairs(riders) do
+		local m = rider.model
+		if m and m.PrimaryPart then
+			m:PivotTo(seatCFrame(i))
+			BirdBuilder.PoseSquirrel(m, "ride", dt, 0)
+		end
+	end
+end
+
+local function releaseRiders()
+	for _, rider in ipairs(riders) do
+		local m = rider.model
+		if m and m.PrimaryPart then
+			burstFeathers(m.PrimaryPart.Position, FEATHER_GOLD, 14)
+			m:Destroy()
+		end
+	end
+	riders = {}
+end
+
+-- Trim the newest riders until the local count matches an authoritative target (self-heals a phantom
+-- rider left by a server-rejected catch). Only ever called when NOT mid-catch.
+local function trimRidersTo(target)
+	while #riders > target do
+		local rider = table.remove(riders)
+		if rider and rider.model then rider.model:Destroy() end
+	end
+end
+
+-- HARD reset of ALL rescue presentation — called on death/respawn/crow-swap (teardownDrive), so a catch
+-- beat interrupted mid-flight can never strand the global slow-mo desaturation, the camera offset, or
+-- orphan presentation models. (red-team BLOCK 1.) Safe to call anytime.
+local function resetRescuePresentation()
+	if catch and catch.sq then pcall(function() catch.sq:Destroy() end) end
+	catch = nil
+	releaseRiders()
+	rescueCam.env = 0
+	slowmoDesat(0)
+	if catchFxFolder then
+		for _, c in ipairs(catchFxFolder:GetChildren()) do c:Destroy() end
+	end
+end
+
+-- Detect the TELL (predicted) + the TRIGGER (sphere entry) against stranded world squirrels.
+local function scanSquirrels(dt)
+	if not squirrelsFolder then return end
+	squirrelPhase += dt * 3
+	local eaglePos = rootPart.Position
+	local vel = flightEngine.velocity
+	local gate = (RES.closingGateFrac or 0.4) * eagleGlide()
+	local haveRoom = (#riders + (catch and 1 or 0)) < (rescueState.capacity or RES.carryCapacity or 3)
+	local canCatch = haveRoom and not catch and rescueState.phase == "active"
+
+	local effRadius = (RES.triggerRadius or 28)
+	if catchCount < (RES.ftueCatches or 3) then effRadius = effRadius * (RES.ftueRadiusMult or 1.5) end
+
+	local bestTellId, bestTellTime = nil, math.huge
+	tellTimer = math.max(0, tellTimer - dt)
+
+	for _, m in ipairs(squirrelsFolder:GetChildren()) do
+		if m:IsA("Model") and m:GetAttribute("State") == "stranded" and m.PrimaryPart then
+			local toVec = m.PrimaryPart.Position - eaglePos
+			local dist = toVec.Magnitude
+			if dist < 260 then
+				local dir = (dist > 1e-3) and toVec.Unit or rootPart.CFrame.LookVector
+				local closing = vel:Dot(dir)
+				if canCatch and dist <= effRadius and closing >= gate then
+					triggerCatch(m, closing)
+					canCatch = false
+				elseif closing >= gate then
+					local toSurface = math.max(0, dist - effRadius)
+					local tte = toSurface / math.max(closing, 1e-3)
+					if tte <= (RES.tellLeadTime or 0.4) and tte < bestTellTime then
+						bestTellTime = tte
+						bestTellId = m:GetAttribute("SquirrelId")
+					end
+				end
+			end
+		end
+	end
+
+	if bestTellId then
+		tellId = bestTellId
+		tellTimer = RES.tellHoldMin or 1.2
+	elseif tellTimer <= 0 then
+		tellId = nil
+	end
+
+	-- Animate every stranded squirrel: wave, or the planted tell.
+	for _, m in ipairs(squirrelsFolder:GetChildren()) do
+		if m:IsA("Model") and m.PrimaryPart then
+			local st = m:GetAttribute("State")
+			local pose = "wave"
+			if st == "expiring" then pose = "ride"
+			elseif m:GetAttribute("SquirrelId") == tellId then pose = "plant" end
+			BirdBuilder.PoseSquirrel(m, pose, dt, squirrelPhase)
+		end
+	end
+end
+
+-- Line-riding STYLE meter (Fable §C) — reuses computeProximity (terrain closeness). Charges when
+-- flying fast + close; decays with a half-life so the line must be flown INTO the catch.
+local function updateStyle(dt)
+	local pd = RES.styleProxDist or 40
+	local minDist = computeProximity(rootPart.Position, pd)
+	local speed = flightEngine.speed
+	if minDist < pd and speed >= (GameConfig.Rescue.minStyleSpeed or 60) then
+		local closeness = clamp((pd - minDist) / math.max(1, pd - (RES.styleSweetSpot or 7)), 0, 1)
+		styleMeter = math.min((RES.styleMultMax or 3) - 1, styleMeter + closeness * (RES.styleChargeRate or 0.9) * dt)
+	else
+		styleMeter = styleMeter * (0.5 ^ (dt / (RES.styleDecayHalf or 2.0)))
+	end
+end
+
+-- Deliver a cargo when riding into the safe zone above the waterfall.
+local function updateDeliver(dt)
+	deliverCooldown = math.max(0, deliverCooldown - dt)
+	if #riders <= 0 or deliverCooldown > 0 or catch then return end
+	local d = RES.deliverPos
+	local flat = Vector3.new(rootPart.Position.X - d.X, 0, rootPart.Position.Z - d.Z).Magnitude
+	if flat < (RES.deliverRadius or 70) and rootPart.Position.Y > (RES.deliverPadY or 250) - 50 then
+		if deliverRemote then deliverRemote:FireServer() end
+		local n = #riders
+		releaseRiders()
+		deliverCooldown = 1.5
+		if _G.RescueStamp then _G.RescueStamp("deliver", nil, nil, nil, n) end
+		playChord()
+	end
+end
+
+-- MASTER rescue update, called once per flight frame from onFlightStep.
+local function updateRescue(dt)
+	if not (RES and RES.enabled) then return end
+	if not (rootPart and rootPart.Parent and isAlive and flightEngine) then
+		-- flying nothing (dead / between lives): tear the beat down cleanly.
+		if catch and catch.sq then catch.sq:Destroy() end
+		catch = nil
+		if #riders > 0 then releaseRiders() end
+		rescueCam.env = 0
+		slowmoDesat(0)
+		return
+	end
+	updateStyle(dt)
+	scanSquirrels(dt)
+	if catch then stepCatch(dt) end
+	updateRiders(dt)
+	updateDeliver(dt)
+	-- Reconcile local riders to the server's authoritative carry when idle (heals a rejected-catch phantom).
+	if not catch and type(rescueState.carry) == "number" and #riders > rescueState.carry then
+		trimRidersTo(rescueState.carry)
+	end
+
+	local env = catchEnv()
+	rescueCam.env = env
+	slowmoDesat(env)
+	-- dilate the leaping squirrel's mote trail so the FX read slow while the sim runs on.
+	if catch and catch.sq and catch.sq.PrimaryPart then
+		local mote = catch.sq.PrimaryPart:FindFirstChildOfClass("Attachment")
+		mote = mote and mote:FindFirstChildOfClass("ParticleEmitter")
+		if mote then mote.TimeScale = lerpN(1, RES.slowmoScale or 0.25, env) end
+	end
+end
+
+-- Expose the current HUD-facing rescue snapshot for GameUI/the rescue HUD.
+_G.RescueSnapshot = function()
+	return {
+		phase = rescueState.phase, timeLeft = rescueState.timeLeft,
+		score = rescueState.score, delivered = rescueState.delivered, rescued = rescueState.rescued,
+		carry = #riders, capacity = rescueState.capacity or (RES and RES.carryCapacity) or 3,
+		style = styleMeter,
+	}
+end
 
 --------------------------------------------------------------------------------
 -- INPUT HELPERS — keyboard tap->ramp smoothing + the mouse-aim autopilot.
@@ -1567,19 +2176,33 @@ local function onFlightStep(dt)
 	-- bird along the surface locally for zero-latency feel; a lethal head-on impact we do NOT
 	-- clamp — the server's authoritative crash sweep (processCrashes) reads our clean position
 	-- delta and kills us, so client and server never disagree on death.
+	local crashedThisFrame = false
 	local cparams = getCollisionParams()
 	if cparams then
 		local r = (currentProfile and currentProfile.bodyRadius) or 2.5
 		local target = flightEngine.orientation.Position
+		-- P3 non-lethal terrain (rescue): a huge effective crash speed makes every impact a graze-SLIDE
+		-- (bounce), never a crash — so the eagle never dies on the forest. Stored CRASH_SPEED is untouched
+		-- (combat byte-identical if un-shelved); the server mirrors this gate in processCrashes.
+		local crashSpd = (GameConfig.Rescue and GameConfig.Rescue.enabled and GameConfig.Rescue.nonLethalTerrain)
+			and 1e9 or GameConfig.Flight.CRASH_SPEED
 		local newPos, newVel, crashed = BirdCollision.resolve(
-			rootPart.Position, target, flightEngine.velocity, r, cparams, GameConfig.Flight.CRASH_SPEED
+			rootPart.Position, target, flightEngine.velocity, r, cparams, crashSpd
 		)
+		crashedThisFrame = crashed
 		if (not crashed) and (newPos - target).Magnitude > 1e-3 then
 			local cf = flightEngine.orientation
 			flightEngine.orientation = (cf - cf.Position) + newPos
 			flightEngine.velocity = newVel
 		end
 	end
+
+	-- UPDRAFT line-riding score (legacy; disabled via config — SUPERSEDED by the rescue style meter).
+	updateUpdraft(dt, crashedThisFrame)
+
+	-- EAGLES TO THE RESCUE (S32): the catch loop + carry + deliver + style meter (all layered ON the
+	-- flown path — never touches the kernel). Detection + slow-mo presentation live in updateRescue.
+	updateRescue(dt)
 
 	-- 3. Drive the character body from the engine state.
 	rootPart.CFrame = flightEngine.orientation
@@ -1639,6 +2262,9 @@ end
 
 local function teardownDrive()
 	isAlive = false
+	-- Kill any in-flight rescue catch beat so death/respawn/swap can't strand the global slow-mo
+	-- desaturation, the camera offset, or orphan presentation squirrels (red-team BLOCK 1).
+	resetRescuePresentation()
 	flightEngine = nil
 	birdModel = nil
 	rootPart = nil

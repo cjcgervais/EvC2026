@@ -521,4 +521,195 @@ function BirdBuilder.AnimateWings(model, isFlapping, isDiving, flapPhase, dt)
 	drive("RightWingJoint")
 end
 
+--------------------------------------------------------------------------------
+-- BuildSquirrel  (EAGLES TO THE RESCUE — the rescuable critter, gray-box)
+--------------------------------------------------------------------------------
+-- A charming bean-with-eyes squirrel. Cosmetic only (the world/rescue systems drive it):
+--   Model
+--   ├─ Body    (PrimaryPart; server anchors it as a world prop; no-collide/no-query so the
+--   │           eagle flies THROUGH the trigger sphere and the flight spherecast ignores it)
+--   ├─ Head + 2 Eyes(+pupils) + 2 Ears + Snout   (welded, cosmetic)
+--   ├─ Tail    (the iconic big fluffy curl over the back — welded)
+--   ├─ LeftArm/RightArm   (Motor6D "LeftArmJoint"/"RightArmJoint", hang down at rest)
+--   └─ LeftLeg/RightLeg   (Motor6D "LeftLegJoint"/"RightLegJoint")
+-- Pose it with BirdBuilder.PoseSquirrel(model, pose, dt, phase) — poses: idle/wave/plant/starfish/ride.
+-- `palette` (optional) tints for rarity: { body, belly, eye }. Defaults to warm brown.
+function BirdBuilder.BuildSquirrel(scale, palette)
+	local s = tonumber(scale) or 2.2
+	palette = palette or {}
+	local bodyColor  = palette.body  or Color3.fromRGB(150, 96, 52)   -- warm brown
+	local bellyColor = palette.belly or Color3.fromRGB(226, 198, 158)  -- cream belly/chest
+	local irisColor  = palette.eye   or Color3.fromRGB(28, 22, 18)     -- big dark friendly eyes
+
+	local model = Instance.new("Model")
+	model.Name = "Squirrel"
+
+	-- BODY: a plump upright bean. PrimaryPart, but purely cosmetic in the world (no collide/query).
+	local body = makePart("Body", Vector3.new(s * 0.9, s * 1.15, s * 0.85), bodyColor)
+	body.Shape = Enum.PartType.Ball
+	body.Massless = false
+	body.CanCollide = false
+	body.CanQuery = false
+	body.CanTouch = false
+	body.CastShadow = true
+	body.CFrame = CFrame.new(0, 0, 0)
+	body.Parent = model
+	model.PrimaryPart = body
+
+	-- BELLY: a lighter front so it reads as a critter, not a blob.
+	local belly = makePart("Belly", Vector3.new(s * 0.72, s * 0.9, s * 0.55), bellyColor)
+	belly.Shape = Enum.PartType.Ball
+	belly.CFrame = body.CFrame * CFrame.new(0, -s * 0.05, -s * 0.34)
+	belly.Parent = model
+	weldTo(body, belly)
+
+	-- HEAD: big relative to body (cuteness = large head). Slightly up and forward (-Z = forward).
+	local head = makePart("Head", Vector3.new(s * 0.82, s * 0.82, s * 0.82), bodyColor)
+	head.Shape = Enum.PartType.Ball
+	head.CFrame = body.CFrame * CFrame.new(0, s * 0.72, -s * 0.12)
+	head.Parent = model
+	weldTo(body, head)
+
+	-- SNOUT + tiny nose.
+	local snout = makePart("Snout", Vector3.new(s * 0.34, s * 0.3, s * 0.34), bellyColor)
+	snout.Shape = Enum.PartType.Ball
+	snout.CFrame = head.CFrame * CFrame.new(0, -s * 0.08, -s * 0.42)
+	snout.Parent = model
+	weldTo(body, snout)
+	local nose = makePart("Nose", Vector3.new(s * 0.14, s * 0.12, s * 0.12), Color3.fromRGB(60, 40, 40))
+	nose.Shape = Enum.PartType.Ball
+	nose.CFrame = snout.CFrame * CFrame.new(0, 0, -s * 0.18)
+	nose.Parent = model
+	weldTo(body, nose)
+
+	-- EARS: two round ears up top (squirrel silhouette).
+	for _, side in ipairs({ -1, 1 }) do
+		local ear = makePart("Ear", Vector3.new(s * 0.28, s * 0.34, s * 0.16), bodyColor)
+		ear.Shape = Enum.PartType.Ball
+		ear.CFrame = head.CFrame * CFrame.new(side * s * 0.34, s * 0.44, s * 0.04)
+		ear.Parent = model
+		weldTo(body, ear)
+	end
+
+	-- EYES: BIG friendly eyes with bright catchlight pupils (this is where the charm lives).
+	for _, side in ipairs({ -1, 1 }) do
+		local eye = makePart("Eye", Vector3.new(s * 0.3, s * 0.34, s * 0.24), Color3.fromRGB(245, 245, 245))
+		eye.Shape = Enum.PartType.Ball
+		eye.CFrame = head.CFrame * CFrame.new(side * s * 0.26, s * 0.06, -s * 0.34)
+		eye.Parent = model
+		weldTo(body, eye)
+		local pupil = makePart("Pupil", Vector3.new(s * 0.16, s * 0.2, s * 0.14), irisColor)
+		pupil.Shape = Enum.PartType.Ball
+		pupil.CFrame = eye.CFrame * CFrame.new(0, 0, -s * 0.12)
+		pupil.Parent = model
+		weldTo(body, pupil)
+		local glint = makePart("Glint", Vector3.new(s * 0.06, s * 0.07, s * 0.05), Color3.fromRGB(255, 255, 255))
+		glint.Shape = Enum.PartType.Ball
+		glint.Material = Enum.Material.Neon
+		glint.CFrame = pupil.CFrame * CFrame.new(-side * s * 0.04, s * 0.04, -s * 0.08)
+		glint.Parent = model
+		weldTo(body, glint)
+	end
+
+	-- TAIL: the big fluffy curl arcing up over the back — three stacked balls sweeping up and forward.
+	local tailColor = palette.tail or Color3.fromRGB(168, 112, 64)
+	local tailSteps = {
+		{ off = Vector3.new(0, s * 0.35, s * 0.35), sz = 0.62 },
+		{ off = Vector3.new(0, s * 0.8,  s * 0.2),  sz = 0.72 },
+		{ off = Vector3.new(0, s * 1.15, -s * 0.1), sz = 0.6 },
+	}
+	for _, step in ipairs(tailSteps) do
+		local seg = makePart("TailSeg", Vector3.new(s * step.sz, s * step.sz, s * step.sz * 0.8), tailColor)
+		seg.Shape = Enum.PartType.Ball
+		seg.CFrame = body.CFrame * CFrame.new(step.off)
+		seg.Parent = model
+		weldTo(body, seg)
+	end
+
+	-- LIMBS via Motor6D so poses (wave/plant/starfish/ride) can animate them. Each limb part points
+	-- DOWN (-Y) from its socket at rest; the Motor6D C0 sits at the socket pivot. PoseSquirrel rotates
+	-- the joint Transform. Mirror sign stamped as "Side" (+1 right / -1 left).
+	local function buildLimb(name, socket, length, thick, color, side)
+		local limb = makePart(name, Vector3.new(thick, length, thick), color)
+		limb.Shape = Enum.PartType.Ball
+		-- position the limb hanging straight down from the socket (centre one half-length below it)
+		limb.CFrame = body.CFrame * CFrame.new(socket) * CFrame.new(0, -length * 0.5, 0)
+		limb.Parent = model
+		local motor = Instance.new("Motor6D")
+		motor.Name = name .. "Joint"
+		motor.Part0 = body
+		motor.Part1 = limb
+		local pivot = body.CFrame * CFrame.new(socket)        -- world pivot at the socket
+		motor.C0 = body.CFrame:ToObjectSpace(pivot)           -- body-space socket frame
+		motor.C1 = limb.CFrame:ToObjectSpace(pivot)           -- limb-space socket frame (rest → Transform = I)
+		motor.Transform = CFrame.new()
+		motor:SetAttribute("Side", side)
+		motor.Parent = body
+		return motor
+	end
+	buildLimb("LeftArm",  Vector3.new(-s * 0.42, s * 0.2, -s * 0.16), s * 0.62, s * 0.24, bellyColor, -1)
+	buildLimb("RightArm", Vector3.new( s * 0.42, s * 0.2, -s * 0.16), s * 0.62, s * 0.24, bellyColor,  1)
+	buildLimb("LeftLeg",  Vector3.new(-s * 0.36, -s * 0.5, 0), s * 0.66, s * 0.3, bodyColor, -1)
+	buildLimb("RightLeg", Vector3.new( s * 0.36, -s * 0.5, 0), s * 0.66, s * 0.3, bodyColor,  1)
+
+	model:SetAttribute("SquirrelScale", s)
+	return model
+end
+
+--------------------------------------------------------------------------------
+-- PoseSquirrel(model, pose, dt, phase)
+--   Eases the four limb Motor6Ds toward a named pose. Cosmetic; safe on missing joints.
+--   poses: "idle" (limbs relaxed) · "wave" (both arms up, waving via phase) · "plant" (determined
+--   brace — the tell) · "starfish" (all four spread — the apex "I'M FLYING") · "ride" (gripping seat).
+--   phase drives the wave oscillation (radians). dt eases the transition.
+--------------------------------------------------------------------------------
+local SQUIRREL_SMOOTH = 12
+function BirdBuilder.PoseSquirrel(model, pose, dt, phase)
+	if not model then return end
+	dt = tonumber(dt) or (1 / 60)
+	phase = tonumber(phase) or 0
+	local body = model.PrimaryPart or model:FindFirstChild("Body")
+	if not body then return end
+	local alpha = math.clamp(dt * SQUIRREL_SMOOTH, 0, 1)
+
+	-- target rotation (about the socket) per joint, per pose. Sign mirrors L/R via the "Side" attr.
+	-- Arms rotate mostly about X (raise fore/up) and Z (spread out); legs about X (kick down/out).
+	local function target(jointName, isArm, side)
+		if pose == "wave" then
+			if isArm then
+				local sway = math.sin(phase + (side > 0 and 0 or math.pi)) * math.rad(18)
+				return CFrame.Angles(math.rad(155), 0, side * (math.rad(22) + sway)) -- both arms up, waving
+			else
+				return CFrame.Angles(math.rad(8), 0, 0)                              -- legs planted
+			end
+		elseif pose == "plant" then
+			-- braced, determined: arms pulled down/back a touch, legs set wide & bent (coiled to leap).
+			if isArm then return CFrame.Angles(math.rad(-14), 0, side * math.rad(10)) end
+			return CFrame.Angles(math.rad(20), 0, side * math.rad(20))
+		elseif pose == "starfish" then
+			-- the apex "I'M FLYING" spread — all four limbs flung wide.
+			if isArm then return CFrame.Angles(math.rad(70), 0, side * math.rad(95)) end
+			return CFrame.Angles(math.rad(-20), 0, side * math.rad(70))
+		elseif pose == "ride" then
+			-- sitting on the back, arms up gripping.
+			if isArm then return CFrame.Angles(math.rad(120), 0, side * math.rad(28)) end
+			return CFrame.Angles(math.rad(55), 0, side * math.rad(24))
+		else -- idle
+			if isArm then return CFrame.Angles(math.rad(6), 0, side * math.rad(8)) end
+			return CFrame.Angles(0, 0, side * math.rad(6))
+		end
+	end
+
+	local function drive(jointName, isArm)
+		local motor = body:FindFirstChild(jointName)
+		if not motor or not motor:IsA("Motor6D") then return end
+		local side = motor:GetAttribute("Side") or 1
+		motor.Transform = approachCFrame(motor.Transform, target(jointName, isArm, side), alpha)
+	end
+	drive("LeftArmJoint", true)
+	drive("RightArmJoint", true)
+	drive("LeftLegJoint", false)
+	drive("RightLegJoint", false)
+end
+
 return BirdBuilder
