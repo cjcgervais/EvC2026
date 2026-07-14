@@ -10,7 +10,23 @@ Read this first. It tells the next agent exactly where the project stands, the o
 
 **One line:** dive a hero eagle under a burning forest; terrified squirrels LEAP for your talons in slow-motion (always caught — skill is the APPROACH, never the grab); carry them on your back UP the waterfall updraft to safety. Non-lethal, cute, ages 5-20. Built entirely AROUND the LOCKED flight kernel/camera.
 
-**▶ IMMEDIATE NEXT = CHAD PLAYTESTS THE SLICE.** Serve `updraft` (`.\serve.ps1`), Play SOLO (you spawn as the eagle, no crows). Fly the **Packet-02 §A checklist** (`docs/rescue-consults/PACKET-02-phase0-review.md`) to answer the gate: *"did you grin at the 3rd catch, and push your luck for one more before the waterfall?"* Capture the **§E report-back**. Likely first tunes (all in `GameConfig.Rescue`): `slowmoScale` 0.25→0.45 (if slow-mo costs control), `tellLeadTime` 0.40→0.60 (if you never SEE the squirrel notice you), cluster squirrels into groves. Then Fable Packet 03.
+**✅ CHAD PLAYTESTED THE SLICE (S32, 2026-07-13/14) — the direction WORKS.** Verbatim: *"okay its good I like the little chime, its a little hard to snatch the squirrels, a bigger map and bigger catch trigger would be good, of course the squirrels can jump into the eagles talons. And we can animate them crawling up to his back lets say he can carry 10 squirrels that latch onto him for a later phase."* So: the catch chord + the jump-into-talons LAND. Applied his two asks (see queue #0). His carry-10 + crawl-up-and-latch idea = a LATER PHASE item (#9).
+
+**▶ STANDING LOOP ORDER (Chad-directed S32): RUN THIS AS A LOOP — do not wait for instruction.** Invoke **`/evc-loop`** and work the RESCUE QUEUE below ONE item at a time (propose → LOCKED-spec gate → red-team → build → `verify.ps1` green → log the ledger → checkpoint commit-ready), **looping until the queue is exhausted or Chad returns.** Everything except FUN can be built/tuned autonomously; **FUN needs Chad's Play** (the gate). Do NOT drift back to combat. Build AROUND the LOCKED kernel/camera always. A Fable consult packet per turn (`docs/rescue-consults/`) is the standing method.
+
+### ▶ RESCUE PHASE-0 QUEUE (work top-down in the loop)
+- **#0 [DONE S32]** bigger trigger (`triggerRadius` 28→42) + easier snatch (`closingGateFrac` 0.40→0.30) + bigger map (`valleyRadius` 1000→1600, `treeCount`→68, `squirrelCount`→15). *(Chad's two asks — applied; he re-plays to confirm.)*
+- **#1 GROVES** (Fable Packet-02 §B5): cluster squirrels into 3-4 groves of 2-4 instead of uniform scatter — kills dead travel on the bigger map + enables catch CHAINS + style continuity. (`RescueServer` perch generation.)
+- **#2 LIVING BACK-RIDERS** (Fable §C, the highest-leverage juice): per-rider idle sway (off flapPhase) + tail-flick + look-around; a hop-and-settle when a new one lands; all riders throw starfish arms in a dive. (`BirdController` `updateRiders` + `PoseSquirrel`.) *Prereq for #9.*
+- **#3 SLOW-MO FEEL** (Fable §B1/B2): if it reads as costing control, `slowmoScale` 0.25→0.45; make the arc FIT-ONCE-then-converge (not re-fit every frame) so the leap can't look like homing; hide the final snap inside the feather burst.
+- **#4 TELL VISIBILITY** (Fable §B3): `tellLeadTime` 0.40→0.60 + make the plant pose LOUD (crouch + beacon flare) so the anticipation beat is seen before the catch.
+- **#5 BLAZING ESCALATION** (Fable §D): high-style / high-speed catches get a visibly bigger beat (deeper slow-mo, bigger burst, gold GOTCHA) — same guaranteed catch, escalating spectacle = the 15-yo's ceiling.
+- **#6 STAMP SEQUENCING** (Fable §B4): strict gaps, never 3 stamps at once (GOTCHA → style +0.4s only if >×1.5 → woohoo 0.5s after snap-back).
+- **#7 FTUE SOFT-FAIL** (Fable §D): a slow flyby that enters the sphere but fails the gate → the squirrel waves "come back faster!" (no fail sound, no silence) so a 5-yo's failure has a face.
+- **#8 WAYFINDING** (Fable §D): when carrying ≥1, a faint gold streamer arcs from the eagle toward the waterfall (diegetic compass, zero UI).
+- **#9 [LATER PHASE — Chad-directed] CARRY-10 + CRAWL-AND-LATCH:** raise `carryCapacity` to 10; rescued squirrels animate CRAWLING UP the eagle and LATCHING onto his back (climb-on animation + a cling pose + more back seats). Deferred — build the living-rider system (#2) first. Chad: *"lets say he can carry 10 squirrels that latch onto him for a later phase."*
+- **#10 PHASE-1 WORLD:** real trunk/canopy collision + a dedicated valley that skips the combat `BuildMap` (currently kept as floor+backdrop); then line-riding style measures the canopy the player threads.
+- **#GATE [needs Chad's Play — NOT loopable]:** fly the Packet-02 §A checklist → *"grin at the 3rd catch + push your luck for one more before the waterfall?"* + capture the §E report-back → Fable Packet 03. This is the only step the loop cannot self-certify.
 
 **What's built (branch `updraft`, UNCOMMITTED — build PASS, luau-lsp clean vs the documented baseline, red-teamed):**
 - `GameConfig.Rescue` (all Fable numbers) · `Debug.aiCrowOpponents=false` (no combat crows) · `Updraft.enabled=false` (its line-riding scorer is now the rescue STYLE meter).
@@ -25,7 +41,7 @@ Read this first. It tells the next agent exactly where the project stands, the o
 
 **LOCKED-spec integrity:** CS-1..CS-9 untouched. The camera decoration is a pure beat-time post-transform on the chase OUTPUT, verified byte-identical when `rescueCam.env=0`; it never reads input or feeds the aim/control frame. No kernel/aim-law edit.
 
-**Git:** everything is on `updraft`, UNCOMMITTED. Commit is git-gated (ASK) → PREPARED and ready; Chad approves it (or I commit on his return). Ledger/session log: `.loop/rescue-phase0/state.md`.
+**Git:** on `updraft`. The slice is committed (`b35ce43`); the S32 playtest tweaks (#0) + the standing loop-order handoff are a second commit. NOT pushed (Chad's call — push is remote-facing). Ledger/session log: `.loop/rescue-phase0/state.md`. **Loop discipline:** each queue item lands as its own commit-ready checkpoint (git commit stays ASK-gated).
 
 *(Everything below is prior history — UPDRAFT and combat — SUPERSEDED by the rescue direction above, retained for the record. The flight-kernel detail remains authoritative.)*
 

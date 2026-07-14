@@ -16,23 +16,28 @@ $branch = (git rev-parse --abbrev-ref HEAD) 2>$null
 $head   = (git log -1 --pretty=format:'%h %s') 2>$null
 
 Write-Output @"
-[ EAGLES vs CROWS ] session start. This project is GOVERNED by the evc-loop harness.
+[ EAGLES TO THE RESCUE ] session start. This project is GOVERNED by the evc-loop harness.
 
->> Run  /evc-loop  to work under the governing loop (SOP-tuned iterate -> verify ->
-   red-team -> memory -> handoff -> approved commit). It enforces the rules below.
+>> STANDING ORDER (Chad, S32): the game is EAGLES TO THE RESCUE (combat SHELVED). The Phase-0
+   slice is BUILT. Immediately run  /evc-loop  and work the RESCUE Phase-0 QUEUE in the
+   docs/HANDOFF.md COLD START box AS A LOOP - one item at a time (propose -> red-team ->
+   build -> verify green -> log), looping until the queue is exhausted or Chad returns to
+   playtest. Do NOT wait for further instruction; do NOT drift back to combat. FUN is the
+   only thing that needs Chad's Play - build/tune everything else autonomously in the loop.
 
 ORIENT FIRST (read in order):
-  1. docs/HANDOFF.md - the COLD START box + newest SESSION block = current state + roadmap.
+  1. docs/HANDOFF.md - the COLD START box (rescue queue + standing loop order) = current state.
   2. The LOCKED CONTROL SPECS registry (CS-1..CS-9) in docs/HANDOFF.md.
-  3. CLAUDE.md (architecture + contracts) | project MEMORY.md (index).
+  3. CLAUDE.md (architecture + contracts) | project MEMORY.md (index) | docs/EAGLES-TO-THE-RESCUE-plan.md.
 
 INVARIANT GUARDRAILS (do not violate - full text in the skill):
-  - Eagle flight/control/camera feel is SIGNED OFF. Frontier = crow AI + 1-v-4 + combat.
+  - Eagle flight/control/camera feel + the flight KERNEL are SIGNED OFF + LOCKED. Rescue is built
+    AROUND them (triggers + presentation + world + meta) - NEVER in the kernel/camera/aim law.
   - LOCKED specs are protected - grep the CS registry before ANY control/kernel edit;
     never change a locked behavior collaterally. ASK, don't guess on control feel.
   - ONE change at a time; checkpoint before kernel edits; keep the build green.
-  - Ground truth is Chad's Studio Play - build.ps1 does NOT run or syntax-check Luau.
-  - flight == balance: reason about the whole 1-eagle-vs-4-crow fight on every number.
+  - Ground truth is Chad's Studio Play - build.ps1 does NOT run or syntax-check Luau (verify.ps1 does static analysis).
+  - Every rescue step: kid-FLOOR (a 5-yo succeeds) AND skill-CEILING (a 15-yo shines) in the SAME mechanic. Non-lethal always (P3).
   - git commit/push are gated to ASK for Chad's approval.
 
 Branch: $branch    HEAD: $head

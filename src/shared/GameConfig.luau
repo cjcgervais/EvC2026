@@ -748,10 +748,11 @@ GameConfig.Rescue = {
 	nonLethalTerrain = true,
 
 	-- THE CATCH TRIGGER (Fable §A). Any fast flyby through the sphere fires — no aiming, guaranteed.
-	triggerRadius    = 28,     -- studs; flyby sphere around the squirrel. Bigger = more forgiving.
+	-- S32 Chad playtest: "a little hard to snatch the squirrels" → BIGGER trigger + easier gate.
+	triggerRadius    = 42,     -- studs; flyby sphere around the squirrel (was 28). Bigger = easier to snatch.
 	ftueRadiusMult   = 1.5,    -- first `ftueCatches` catches use a 1.5× sphere so the "aww" fires unearned.
 	ftueCatches      = 3,
-	closingGateFrac  = 0.40,   -- must be closing on the squirrel at ≥ this × eagle glideSpeed (forbids hover-camping).
+	closingGateFrac  = 0.30,   -- must be closing at ≥ this × eagle glideSpeed (was 0.40; lowered so snatching is easier).
 	tellLeadTime     = 0.40,   -- s; the "determined survivor" tell fires this far ahead (predicted from closing speed).
 	tellHoldMin      = 1.2,    -- s; once planted the tell LATCHES at least this long (a flickering tell kills the beat).
 	carryCapacity    = 3,      -- squirrels ridable on your back before you must deliver.
@@ -792,7 +793,7 @@ GameConfig.Rescue = {
 	roundLength      = 120,    -- s; a 2-minute round.
 	intermission     = 6,      -- s between rounds.
 	triageAt         = 60,     -- s remaining when the scripted beacon-expiry (fake fire triage) begins.
-	squirrelCount    = 11,     -- squirrels live on the field at once.
+	squirrelCount    = 15,     -- squirrels live on the field at once (was 11; more, to populate the bigger map).
 	respawnDelay     = 5,      -- s before a caught/expired squirrel re-appears at a fresh perch.
 
 	-- DELIVERY (the waterfall safe zone). Shared world constants (server builds it, client rides the
@@ -806,8 +807,9 @@ GameConfig.Rescue = {
 	updraftStrength  = 210,    -- upward accel (studs/s²) at the column centre (composes w/ Thermals).
 
 	-- WORLD placement (server-side gray-box valley). Squirrels + trees live in this XZ box.
-	valleyRadius     = 1000,   -- squirrels/trees scatter within this radius of origin.
-	treeCount        = 46,     -- gray-box trees (bounded for perf).
+	-- S32 Chad playtest: "a bigger map would be good" → wider valley + more trees/squirrels to fill it.
+	valleyRadius     = 1600,   -- squirrels/trees scatter within this radius of origin (was 1000).
+	treeCount        = 68,     -- gray-box trees, bounded for perf (was 46; scaled up with the bigger valley).
 	canopyY          = 110,    -- treetop crown height; under-canopy squirrels sit below this.
 }
 
