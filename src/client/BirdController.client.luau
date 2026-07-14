@@ -1267,11 +1267,18 @@ local function talonPos()
 	return rootPart.CFrame * Vector3.new(0, -2.4, 0.3)
 end
 
+-- Grid-packed seats on the back so up to `carryCapacity` (10) riders fit as a little pile of clinging
+-- critters: SEAT_COLS across the spine, the rest stacking toward the tail (each back row sits a touch
+-- higher). Rider `i` always maps to the same seat, so the climb path is stable per rider.
+local SEAT_COLS = 4
 -- Local (eagle-frame) seat position for rider `i` (1-based); the world seat = rootPart.CFrame * this.
 local function seatLocalPos(i)
 	local r = (currentProfile and currentProfile.bodyRadius) or 4.5
-	local lane = ((i - 1) - ((RES.carryCapacity or 3) - 1) * 0.5)
-	return Vector3.new(lane * (r * 0.5), r * 0.7, r * 0.2)
+	local idx = math.max(0, i - 1)
+	local col = idx % SEAT_COLS
+	local row = math.floor(idx / SEAT_COLS)
+	local colOff = col - (SEAT_COLS - 1) * 0.5            -- centre the columns across the spine
+	return Vector3.new(colOff * (r * 0.5), r * 0.7 + row * (r * 0.12), r * 0.2 + row * (r * 0.5))
 end
 
 -- Where rider `i` (1-based) sits on the back.
