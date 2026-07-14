@@ -2545,15 +2545,32 @@ local function acquire()
 	isAlive = true
 end
 
+local acquiring = false
+-- (Re)acquire in its own thread. Wrapped so we can (a) surface any error instead of leaving the flight
+-- loop silently dead, and (b) expose an `acquiring` flag so the backstop poll never restarts an in-flight
+-- attempt (which would reset acquire()'s NetOwner wait and could livelock a slow hand-off).
 local function reacquire()
-	task.spawn(acquire)
+	task.spawn(function()
+		acquiring = true
+		local ok, err = pcall(acquire)
+		acquiring = false
+		if not ok then warn("[EvC] acquire() error: " .. tostring(err)) end
+	end)
 end
 
--- Watch Possessed flips on every Model we own so swaps / auto-repossess re-acquire.
+-- Watch ownership/possession flips on EVERY bird Model (not just ones we already own) so crow-swaps,
+-- auto-repossess, AND the very first possession re-acquire. Attributes replicate SEPARATELY from the
+-- Model, so OwnerUserId/Possessed can land AFTER ChildAdded / folder wire-up — the old code gated the
+-- watcher on OwnerUserId being ours ALREADY, so a late attribute set triggered nothing and we could
+-- get stuck never acquiring (default camera + free mouse + server-driven waver). acquire() no-ops when
+-- we're already flying the right bird, so watching broadly is cheap and idempotent.
 local function trackModel(model)
 	if not model:IsA("Model") or attrConns[model] then return end
-	if model:GetAttribute("OwnerUserId") ~= player.UserId then return end
-	attrConns[model] = model:GetAttributeChangedSignal("Possessed"):Connect(reacquire)
+	attrConns[model] = model.AttributeChanged:Connect(function(attr)
+		if attr == "Possessed" or attr == "OwnerUserId" or attr == "NetOwner" then
+			reacquire()
+		end
+	end)
 end
 
 -- TeamAssigned carries our profile (Eagle/Crow). Connected SYNCHRONOUSLY (before any
@@ -2645,4 +2662,17 @@ task.spawn(function()
 
 	-- Acquire now in case TeamAssigned already fired and our birds already exist.
 	reacquire()
+
+	-- BACKSTOP: if an attribute-timing race ever leaves us NOT flying despite our bird existing and
+	-- being possessed, poll a reacquire until we're driving. No-ops the instant we hold the right bird
+	-- (acquire early-returns), stays quiet when there's legitimately nothing to fly (dead / between
+	-- rounds → findMyPossessedBird returns nil), and skips while an acquire is already in flight.
+	task.spawn(function()
+		while true do
+			task.wait(0.5)
+			if currentProfile and not isAlive and not acquiring and findMyPossessedBird() then
+				reacquire()
+			end
+		end
+	end)
 end)

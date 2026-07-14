@@ -56,6 +56,21 @@ up the eagle's flank over ~0.5s (`Rescue.climbDur`) before latching in as a livi
   (`slowmoScale`→0.45, `climbDur`, `arcConvergeFrac`→0.75…) on his Play, then #10 Phase-1 world. Then the
   #GATE play (grin at the 3rd catch? push-your-luck? → capture §E → Fable Packet 03).
 
+### ▶ S34 (cont.): 🐞 ACQUISITION RACE FIX — intermittent "unplayable on replay" (build-green, UNPLAYTESTED)
+Chad hit an INTERMITTENT bug: *"good the first try then the next two… moves all around, eagle wavers, cant
+control the mouse aimer, unplayable."* Root cause = the client sometimes never ACQUIRED/possessed its eagle,
+so `onFlightStep` early-returned (`:2110`) → no mouse-lock, no camera, no flight loop → default camera spins
++ free mouse + server-driven waver. The hole was in `trackModel`: it attached the possession watcher only if
+`OwnerUserId` was ALREADY ours and only watched `Possessed` — but attributes replicate separately from the
+Model, so a late `OwnerUserId`/`Possessed` set attached no watcher and never re-triggered acquire. This is
+the known-fragile acquisition path (integration task #1), NOT the S34 rescue-presentation edits.
+**Fix (client lifecycle only — no control/kernel/aim/camera-LAW / CS touch):** `trackModel` watches
+`AttributeChanged` unconditionally on every bird, re-acquiring on `Possessed`/`OwnerUserId`/`NetOwner`;
+`reacquire` wrapped in `pcall` (+ `warn("[EvC] acquire() error…")`) with an `acquiring` flag; a 0.5s BACKSTOP
+poll self-heals any residual race (gated on `not acquiring` so it can't restart an in-flight NetOwner wait).
+Build-green, luau-lsp baseline-only. **▶ Chad: fly 3-4 times (Stop between) — it should acquire EVERY time.
+If it ever recurs, check Output for `[EvC] acquire() error`.**
+
 ### ▶ RESCUE PHASE-0 QUEUE (work top-down in the loop)
 - **#0 [DONE S32]** bigger trigger (`triggerRadius` 28→42) + easier snatch (`closingGateFrac` 0.40→0.30) + bigger map (`valleyRadius` 1000→1600, `treeCount`→68, `squirrelCount`→15). *(Chad's two asks — applied; he re-plays to confirm.)*
 - **#1 [DONE S33] GROVES** (Fable §B5): `RescueServer.buildWorld` clusters perch-trees into `groveCount=4` groves (`grovePerchCount=5`, `groveRadius=130`, `groveMinGap=520`) + backdrop scatter; squirrels spawn ONLY on the 20 grove perches → catch chains + style continuity.
