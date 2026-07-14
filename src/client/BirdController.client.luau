@@ -1252,6 +1252,8 @@ local catchCount = 0            -- lifetime catches (FTUE generosity for the fir
 local squirrelPhase = 0         -- drives the wave animation
 local tellId = nil              -- the squirrel currently showing the "determined survivor" tell
 local tellTimer = 0             -- latch countdown (Fable: hold the tell ≥ tellHoldMin)
+local softFailId = nil          -- a squirrel you flew INTO but too slow to catch (FTUE soft-fail wave)
+local softFailTimer = 0         -- latch countdown for the "come back!" reaction
 local catch = nil               -- the active catch beat (a table) or nil
 local riders = {}               -- back-riders: array of { model = Model }
 local deliverCooldown = 0
@@ -1272,10 +1274,20 @@ local function seatCFrame(i)
 	return rootPart.CFrame * CFrame.new(lane * (r * 0.5), r * 0.7, r * 0.2)
 end
 
+-- LIVING BACK-RIDERS (Fable §C) — cosmetic per-rider life applied on TOP of the seat CFrame + ride pose.
+-- Pure client presentation (client-only models in CatchFx); never touches control/camera/kernel.
+local RIDER_BOB_AMP  = 0.35             -- studs; breathing bob amplitude (off the eagle's wingbeat)
+local RIDER_LEAN     = math.rad(5)      -- rad; gentle body lean that breathes with the bob
+local RIDER_LOOK     = math.rad(22)     -- rad; slow independent look-around yaw amplitude
+local RIDER_HOP_DUR  = 0.42             -- s; hop-and-settle duration when a rider first lands
+local RIDER_HOP_AMP  = 1.1             -- studs; peak of the landing hop
+
 local FEATHER_GOLD = Color3.fromRGB(255, 210, 90)
 
--- A quick expanding gold ring at the catch (pooled-free; self-destructs).
-local function goldRing(pos)
+-- A quick expanding gold ring at the catch (pooled-free; self-destructs). `scale` swells it for a
+-- bigger beat on high-style / high-speed catches (Fable #5).
+local function goldRing(pos, scale)
+	scale = scale or 1
 	local ring = Instance.new("Part")
 	ring.Shape = Enum.PartType.Cylinder
 	ring.Size = Vector3.new(0.6, 4, 4)
@@ -1290,7 +1302,7 @@ local function goldRing(pos)
 	task.spawn(function()
 		for i = 1, 12 do
 			if not ring.Parent then return end
-			local sc = 1 + i * 2.2
+			local sc = (1 + i * 2.2) * scale
 			ring.Size = Vector3.new(0.6, 4 * sc, 4 * sc)
 			ring.Transparency = 0.1 + 0.9 * (i / 12)
 			task.wait(0.02)
@@ -1360,9 +1372,19 @@ local function triggerCatch(sqModel, closing)
 
 	local frac = clamp(closing / (glide * 1.2), 0, 1)
 	local airtime = lerpN(RES.arcAirtimeMin or 0.5, RES.arcAirtimeMax or 0.85, frac)
+	-- FIT-ONCE intercept (Fable §B2): predict where the talon WILL be at the end of the airtime and
+	-- lock that as the leap's target NOW. The arc flies to this fixed point (a real ballistic jump),
+	-- and only inside the converge window does it correct to the live talon — so the leap never
+	-- looks like frame-by-frame homing (which reads fake and kills "the squirrel jumped to me").
+	local aimPoint = talonPos() + flightEngine.velocity * airtime
+	-- "Bigness" 0..1 (Fable #5): BLAZING/high-style catches earn a visibly bigger beat (deeper slow-mo,
+	-- bigger burst, gold GOTCHA) — same guaranteed catch, escalating spectacle = the skill ceiling.
+	local tierBig  = (tier == "BLAZING") and 1 or (tier == "SWIFT") and 0.5 or 0
+	local styleBig = clamp((styleMult - 1) / math.max(1e-3, (RES.styleMultMax or 3) - 1), 0, 1)
+	local big = clamp(math.max(tierBig, styleBig * 0.85), 0, 1)
 	catch = {
-		t = 0, airtime = airtime, startPos = startPos,
-		sq = buildPresentationSquirrel(color),
+		t = 0, airtime = airtime, startPos = startPos, aimPoint = aimPoint,
+		sq = buildPresentationSquirrel(color), big = big,
 		styleMult = styleMult, tier = tier, rarity = sqModel:GetAttribute("Rarity"),
 		contactDone = false, converted = false,
 	}
@@ -1381,15 +1403,16 @@ local function stepCatch(dt)
 	local tp = talonPos()
 
 	if catch.t < catch.airtime then
-		-- LEAP: ballistic arc re-fit to the eagle's predicted talon every frame (relative vel → 0).
+		-- LEAP: fly the FIXED fit-once intercept (set at launch). Only in the converge window blend to
+		-- the LIVE talon so the catch still lands exactly on the moving eagle (that snap hides in the
+		-- feather burst). No per-frame re-fit ⇒ reads as a real jump, not homing (Fable §B2).
 		local u = clamp(catch.t / catch.airtime, 0, 1)
-		local remaining = math.max(0, catch.airtime - catch.t)
-		local predicted = tp + flightEngine.velocity * remaining
 		local cf = RES.arcConvergeFrac or 0.85
+		local target = catch.aimPoint or tp
 		if u > cf then
-			predicted = predicted:Lerp(tp, clamp((u - cf) / (1 - cf), 0, 1))
+			target = target:Lerp(tp, clamp((u - cf) / (1 - cf), 0, 1))
 		end
-		local flat = catch.startPos:Lerp(predicted, u)
+		local flat = catch.startPos:Lerp(target, u)
 		local apex = (RES.arcApexHeight or 10) * 4 * u * (1 - u)
 		local pos = flat + Vector3.new(0, apex, 0)
 		local look = rootPart.Position - pos
@@ -1400,11 +1423,12 @@ local function stepCatch(dt)
 		-- CONTACT + HIT-STOP: fire the juice ONCE, then hold frozen at the talon.
 		if not catch.contactDone then
 			catch.contactDone = true
-			burstFeathers(tp, FEATHER_GOLD, 26)
-			goldRing(tp)
+			local big = catch.big or 0
+			burstFeathers(tp, FEATHER_GOLD, 26 + math.floor(big * 34))     -- up to ~60 for a max catch
+			goldRing(tp, 1 + big * 0.9)
 			playPomf()
 			playGotcha()
-			if _G.RescueStamp then _G.RescueStamp("gotcha", catch.tier, catch.rarity, catch.styleMult) end
+			if _G.RescueStamp then _G.RescueStamp("gotcha", catch.tier, catch.rarity, catch.styleMult, nil, big) end
 			task.delay(contactEnd - catch.airtime + (RES.slowmoSnapBack or 0.2) + (RES.woohooDelay or 0.5), playWoohoo)
 		end
 		if catch.sq and catch.sq.PrimaryPart then catch.sq:PivotTo(CFrame.new(tp)) end  -- frozen
@@ -1413,7 +1437,15 @@ local function stepCatch(dt)
 		if not catch.converted then
 			catch.converted = true
 			playWhip()
-			riders[#riders + 1] = { model = catch.sq }
+			-- Seed this rider's cosmetic life: a random phase/look offset so riders never move in
+			-- lockstep, and a settle timer that plays the hop-and-settle as it lands on the back.
+			riders[#riders + 1] = {
+				model  = catch.sq,
+				phase  = math.random() * math.pi * 2,
+				look   = math.random() * math.pi * 2,
+				t      = 0,
+				settle = RIDER_HOP_DUR,
+			}
 			catch.sq = nil
 		end
 		if catch.t >= contactEnd + (RES.slowmoSnapBack or 0.2) then
@@ -1422,13 +1454,33 @@ local function stepCatch(dt)
 	end
 end
 
--- Keep the back-riders glued to the eagle's back, posed "ride".
+-- Keep the back-riders glued to the eagle's back and ALIVE (Fable §C): each breathes with the
+-- wingbeat, looks around on its own clock, hops-and-settles as it lands, and flings its arms in a
+-- dive. Cosmetic only — modulates the seat CFrame + ride pose; no control/camera/kernel effect.
 local function updateRiders(dt)
+	local fp = (flightEngine and flightEngine.flapPhase) or 0
+	local diving = flightEngine and flightEngine.isDiving
 	for i, rider in ipairs(riders) do
 		local m = rider.model
 		if m and m.PrimaryPart then
-			m:PivotTo(seatCFrame(i))
-			BirdBuilder.PoseSquirrel(m, "ride", dt, 0)
+			rider.t = (rider.t or 0) + dt
+			-- breathing bob + lean, staggered per rider off the eagle's wingbeat.
+			local br  = math.sin(fp + (rider.phase or 0))
+			local bob = br * RIDER_BOB_AMP
+			-- slow independent look-around.
+			local look = math.sin(rider.t * 0.7 + (rider.look or 0)) * RIDER_LOOK
+			-- hop-and-settle on first landing (a single up-and-back-down arc).
+			local hop = 0
+			if (rider.settle or 0) > 0 then
+				local p = 1 - (rider.settle / RIDER_HOP_DUR)      -- 0 → 1 across the hop
+				hop = math.sin(p * math.pi) * RIDER_HOP_AMP
+				rider.settle = math.max(0, rider.settle - dt)
+			end
+			local seat = seatCFrame(i)
+				* CFrame.new(0, bob + hop, 0)
+				* CFrame.Angles(br * RIDER_LEAN, look, br * RIDER_LEAN * 0.5)
+			m:PivotTo(seat)
+			BirdBuilder.PoseSquirrel(m, diving and "ridedive" or "ride", dt, fp + (rider.phase or 0))
 		end
 	end
 end
@@ -1467,21 +1519,80 @@ local function resetRescuePresentation()
 	end
 end
 
+-- WAYFINDING (Fable §D): while carrying ≥1, a faint gold streamer points from the eagle toward the
+-- waterfall safe zone — a diegetic compass, ZERO UI. Client-only; two attachments on one anchored
+-- CatchFx part so it's independent of the eagle Body's lifecycle (survives possession/respawn/teardown).
+local wayfind   -- { part, a0, a1, beam } or nil
+local function ensureWayfinder()
+	if wayfind and wayfind.part.Parent then return wayfind end
+	local part = Instance.new("Part")
+	part.Name = "RescueWayfinder"
+	part.Size = Vector3.new(0.2, 0.2, 0.2)
+	part.Transparency = 1
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanQuery = false
+	part.CanTouch = false
+	part.CastShadow = false
+	part.Parent = ensureCatchFx()
+	local a0 = Instance.new("Attachment"); a0.Parent = part
+	local a1 = Instance.new("Attachment"); a1.Parent = part
+	local beam = Instance.new("Beam")
+	beam.Attachment0 = a0
+	beam.Attachment1 = a1
+	beam.Color = ColorSequence.new(FEATHER_GOLD)
+	beam.LightEmission = 0.9
+	beam.FaceCamera = true
+	beam.Width0 = 3.0
+	beam.Width1 = 0.4
+	beam.Segments = 12
+	beam.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.55),   -- faint at the eagle…
+		NumberSequenceKeypoint.new(1, 1),      -- …fades out at the tip (a pointer, not a full line)
+	})
+	beam.Enabled = false
+	beam.Parent = part
+	wayfind = { part = part, a0 = a0, a1 = a1, beam = beam }
+	return wayfind
+end
+
+local function updateWayfinder()
+	local carrying = (#riders > 0) and (rescueState.phase == "active")
+	if not carrying then
+		if wayfind and wayfind.part.Parent then wayfind.beam.Enabled = false end
+		return
+	end
+	local wf = ensureWayfinder()
+	local eaglePos = rootPart.Position
+	local toWF = (RES.deliverPos or Vector3.new(0, 250, 0)) - eaglePos
+	local horiz = Vector3.new(toWF.X, 0, toWF.Z)
+	local dist = horiz.Magnitude
+	local dir = (dist > 1e-3) and horiz.Unit or rootPart.CFrame.LookVector
+	local length = math.clamp(dist * 0.5, 40, 130)
+	wf.a0.WorldPosition = eaglePos + Vector3.new(0, -1.5, 0)
+	wf.a1.WorldPosition = eaglePos + dir * length + Vector3.new(0, 12, 0)   -- lift the tip → arcs up toward the mesa
+	wf.beam.Enabled = true
+end
+
 -- Detect the TELL (predicted) + the TRIGGER (sphere entry) against stranded world squirrels.
 local function scanSquirrels(dt)
 	if not squirrelsFolder then return end
 	squirrelPhase += dt * 3
 	local eaglePos = rootPart.Position
 	local vel = flightEngine.velocity
-	local gate = (RES.closingGateFrac or 0.4) * eagleGlide()
+	-- FTUE eases the closing gate (Fable §D) so a slow/wobbly beginner still catches.
+	local isFtue = catchCount < (RES.ftueCatches or 3)
+	local gateFrac = isFtue and (RES.ftueGateFrac or RES.closingGateFrac or 0.3) or (RES.closingGateFrac or 0.3)
+	local gate = gateFrac * eagleGlide()
 	local haveRoom = (#riders + (catch and 1 or 0)) < (rescueState.capacity or RES.carryCapacity or 3)
 	local canCatch = haveRoom and not catch and rescueState.phase == "active"
 
 	local effRadius = (RES.triggerRadius or 28)
-	if catchCount < (RES.ftueCatches or 3) then effRadius = effRadius * (RES.ftueRadiusMult or 1.5) end
+	if isFtue then effRadius = effRadius * (RES.ftueRadiusMult or 1.5) end
 
 	local bestTellId, bestTellTime = nil, math.huge
 	tellTimer = math.max(0, tellTimer - dt)
+	softFailTimer = math.max(0, softFailTimer - dt)
 
 	for _, m in ipairs(squirrelsFolder:GetChildren()) do
 		if m:IsA("Model") and m:GetAttribute("State") == "stranded" and m.PrimaryPart then
@@ -1493,6 +1604,11 @@ local function scanSquirrels(dt)
 				if canCatch and dist <= effRadius and closing >= gate then
 					triggerCatch(m, closing)
 					canCatch = false
+				elseif canCatch and dist <= effRadius and closing < gate then
+					-- SOFT-FAIL (Fable §D): you flew right through the sphere but weren't closing fast
+					-- enough — the squirrel waves "come back!" so the miss has a face, never silence.
+					softFailId = m:GetAttribute("SquirrelId")
+					softFailTimer = 1.3
 				elseif closing >= gate then
 					local toSurface = math.max(0, dist - effRadius)
 					local tte = toSurface / math.max(closing, 1e-3)
@@ -1504,6 +1620,7 @@ local function scanSquirrels(dt)
 			end
 		end
 	end
+	if softFailTimer <= 0 then softFailId = nil end
 
 	if bestTellId then
 		tellId = bestTellId
@@ -1512,14 +1629,34 @@ local function scanSquirrels(dt)
 		tellId = nil
 	end
 
-	-- Animate every stranded squirrel: wave, or the planted tell.
+	-- Animate every stranded squirrel: wave, or the planted tell. The active tell also FLARES its
+	-- beacon (Fable #4) — the plant pose is tiny at ~78 studs, so the beacon is the signal that
+	-- actually reads from the cockpit; brighten + swell it so the anticipation beat is seen.
+	local flarePulse = 0.5 + 0.5 * math.sin(squirrelPhase * 2.2)   -- 0..1
 	for _, m in ipairs(squirrelsFolder:GetChildren()) do
 		if m:IsA("Model") and m.PrimaryPart then
 			local st = m:GetAttribute("State")
+			local sid = m:GetAttribute("SquirrelId")
+			local isTell = (st == "stranded") and (sid == tellId)
+			local isSoftFail = (st == "stranded") and (softFailTimer > 0) and (sid == softFailId)
 			local pose = "wave"
+			local phase = squirrelPhase
 			if st == "expiring" then pose = "ride"
-			elseif m:GetAttribute("SquirrelId") == tellId then pose = "plant" end
-			BirdBuilder.PoseSquirrel(m, pose, dt, squirrelPhase)
+			elseif isTell then pose = "plant"
+			elseif isSoftFail then pose = "waveBig"; phase = squirrelPhase * 2.4 end   -- fast excited wave
+			BirdBuilder.PoseSquirrel(m, pose, dt, phase)
+			-- Local cosmetic flare (client-only property writes; the server never re-touches these).
+			local beacon = m:FindFirstChild("Beacon")
+			if beacon then
+				if isTell then
+					beacon.Transparency = 0.05 + 0.15 * (1 - flarePulse)
+					local w = 2.2 * (1.7 + 0.5 * flarePulse)
+					beacon.Size = Vector3.new(w, 54, w)
+				else
+					beacon.Transparency = 0.55
+					beacon.Size = Vector3.new(2.2, 44, 2.2)
+				end
+			end
 		end
 	end
 end
@@ -1571,19 +1708,27 @@ local function updateRescue(dt)
 	if catch then stepCatch(dt) end
 	updateRiders(dt)
 	updateDeliver(dt)
+	updateWayfinder()
 	-- Reconcile local riders to the server's authoritative carry when idle (heals a rejected-catch phantom).
 	if not catch and type(rescueState.carry) == "number" and #riders > rescueState.carry then
 		trimRidersTo(rescueState.carry)
 	end
 
 	local env = catchEnv()
-	rescueCam.env = env
-	slowmoDesat(env)
-	-- dilate the leaping squirrel's mote trail so the FX read slow while the sim runs on.
+	-- Deeper beat for a bigger catch (Fable #5): scale the (env-gated, identity-at-0) desat + rescue
+	-- camera envelope up a little. FOV is clamped and saturation stays legal at this reach, so a big
+	-- catch just reads slower/richer. The envelope still returns to identity as the beat ends.
+	local beatMul = 1 + (catch and catch.big or 0) * 0.4
+	local envBig = env * beatMul
+	rescueCam.env = envBig
+	slowmoDesat(envBig)
+	-- dilate the leaping squirrel's mote trail so the FX read slow while the sim runs on — deeper for a
+	-- big catch (effective slow-mo scale drops toward 0.6× of the base).
 	if catch and catch.sq and catch.sq.PrimaryPart then
+		local effScale = (RES.slowmoScale or 0.25) * (1 - (catch.big or 0) * 0.4)
 		local mote = catch.sq.PrimaryPart:FindFirstChildOfClass("Attachment")
 		mote = mote and mote:FindFirstChildOfClass("ParticleEmitter")
-		if mote then mote.TimeScale = lerpN(1, RES.slowmoScale or 0.25, env) end
+		if mote then mote.TimeScale = lerpN(1, effScale, env) end
 	end
 end
 

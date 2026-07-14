@@ -14,19 +14,38 @@ Read this first. It tells the next agent exactly where the project stands, the o
 
 **▶ STANDING LOOP ORDER (Chad-directed S32): RUN THIS AS A LOOP — do not wait for instruction.** Invoke **`/evc-loop`** and work the RESCUE QUEUE below ONE item at a time (propose → LOCKED-spec gate → red-team → build → `verify.ps1` green → log the ledger → checkpoint commit-ready), **looping until the queue is exhausted or Chad returns.** Everything except FUN can be built/tuned autonomously; **FUN needs Chad's Play** (the gate). Do NOT drift back to combat. Build AROUND the LOCKED kernel/camera always. A Fable consult packet per turn (`docs/rescue-consults/`) is the standing method.
 
+### ▶ S33 (2026-07-14): QUEUE #1-#8 BUILT + CHAD PLAYTESTED — committed. NEXT = the catch/latch animation.
+A cleared-context agent ran `/evc-loop`, built queue **#1-#8** (each a verified checkpoint), Chad played
+it, one fix landed, and it's **committed on `updraft`** (two commits per the red-team split). Detail per
+item in `.loop/rescue-phase0/state.md` (Session S33). luau-lsp = documented baseline ONLY (0 new) across
+the batch; CS-1..9 untouched (only client presentation + `RescueServer` world-gen + Rescue config).
+
+**✅ CHAD PLAYTESTED S33 (2026-07-14):** *"its good! I like the squirrels, they need some work but so far
+so good… It zooms in too much when you catch a squirrel, we need it to not do that… we can have an
+animation later where the squirrel jumps to you if you fly close enough, then eagle catches with talon
+then squirrel scrambles up to the eagle's back… The waterfall mechanism worked."*
+- ✅ waterfall/deliver works; squirrels liked (gray-box polish deferred).
+- 🔧 **FIXED the catch zoom:** `camPullIn` 0.15→0 + `camFovDelta` -5→0 (both read as zoom); slow-mo now =
+  desat + cant + hit-stop, no zoom. Committed.
+- **▶ NEXT (Chad's stated vision — the headline next task):** the CATCH/LATCH ANIMATION — squirrel jumps
+  to you when close → eagle catches with TALON → squirrel SCRAMBLES UP to the eagle's back. This is a
+  catch-beat presentation upgrade + exactly queue **#9 (crawl-and-latch)**; the #2 living-rider system is
+  the built substrate. Plus general **squirrel-model polish**. Then the remaining feel-knob values + #10.
+- Note the #GATE report-back (§E) is still worth capturing on the next play (saves/round, tell seen, etc.).
+
 ### ▶ RESCUE PHASE-0 QUEUE (work top-down in the loop)
 - **#0 [DONE S32]** bigger trigger (`triggerRadius` 28→42) + easier snatch (`closingGateFrac` 0.40→0.30) + bigger map (`valleyRadius` 1000→1600, `treeCount`→68, `squirrelCount`→15). *(Chad's two asks — applied; he re-plays to confirm.)*
-- **#1 GROVES** (Fable Packet-02 §B5): cluster squirrels into 3-4 groves of 2-4 instead of uniform scatter — kills dead travel on the bigger map + enables catch CHAINS + style continuity. (`RescueServer` perch generation.)
-- **#2 LIVING BACK-RIDERS** (Fable §C, the highest-leverage juice): per-rider idle sway (off flapPhase) + tail-flick + look-around; a hop-and-settle when a new one lands; all riders throw starfish arms in a dive. (`BirdController` `updateRiders` + `PoseSquirrel`.) *Prereq for #9.*
-- **#3 SLOW-MO FEEL** (Fable §B1/B2): if it reads as costing control, `slowmoScale` 0.25→0.45; make the arc FIT-ONCE-then-converge (not re-fit every frame) so the leap can't look like homing; hide the final snap inside the feather burst.
-- **#4 TELL VISIBILITY** (Fable §B3): `tellLeadTime` 0.40→0.60 + make the plant pose LOUD (crouch + beacon flare) so the anticipation beat is seen before the catch.
-- **#5 BLAZING ESCALATION** (Fable §D): high-style / high-speed catches get a visibly bigger beat (deeper slow-mo, bigger burst, gold GOTCHA) — same guaranteed catch, escalating spectacle = the 15-yo's ceiling.
-- **#6 STAMP SEQUENCING** (Fable §B4): strict gaps, never 3 stamps at once (GOTCHA → style +0.4s only if >×1.5 → woohoo 0.5s after snap-back).
-- **#7 FTUE SOFT-FAIL** (Fable §D): a slow flyby that enters the sphere but fails the gate → the squirrel waves "come back faster!" (no fail sound, no silence) so a 5-yo's failure has a face.
-- **#8 WAYFINDING** (Fable §D): when carrying ≥1, a faint gold streamer arcs from the eagle toward the waterfall (diegetic compass, zero UI).
-- **#9 [LATER PHASE — Chad-directed] CARRY-10 + CRAWL-AND-LATCH:** raise `carryCapacity` to 10; rescued squirrels animate CRAWLING UP the eagle and LATCHING onto his back (climb-on animation + a cling pose + more back seats). Deferred — build the living-rider system (#2) first. Chad: *"lets say he can carry 10 squirrels that latch onto him for a later phase."*
+- **#1 [DONE S33] GROVES** (Fable §B5): `RescueServer.buildWorld` clusters perch-trees into `groveCount=4` groves (`grovePerchCount=5`, `groveRadius=130`, `groveMinGap=520`) + backdrop scatter; squirrels spawn ONLY on the 20 grove perches → catch chains + style continuity.
+- **#2 [DONE S33] LIVING BACK-RIDERS** (Fable §C): per-rider breathing bob (off `flapPhase`) + lean + independent look-around + hop-and-settle on landing + a `ridedive` starfish-arms pose + `ride`-arm sway. Cosmetic, no rig change. *(Tail-flick/head-look via joints DEFERRED = a rig change → own item.)* #9's prereq now in place.
+- **#3 [DONE S33 — structural half] SLOW-MO FEEL** (Fable §B2): the leap arc is FIT-ONCE at launch, correcting to the live talon only inside the converge window (snap hidden in the burst) → no per-frame homing. ⚠️ `slowmoScale` 0.25→0.45 is a Chad-gated feel knob, LEFT at 0.25 pending his Play.
+- **#4 [DONE S33] TELL VISIBILITY** (Fable §A3): `tellLeadTime` 0.40→0.60 (≈78 studs warning) + a LOUD plant pose (arms cocked, deep crouch) + a beacon FLARE on the active tell.
+- **#5 [DONE S33] BLAZING ESCALATION** (Fable §D): a per-catch "bigness" (tier+style) drives a bigger feather burst + bigger gold ring + GOLD/bigger GOTCHA + DEEPER slow-mo (env-scaled desat/camera, FOV-clamped).
+- **#6 [DONE S33] STAMP SEQUENCING** (Fable §B4): GOTCHA(0) → tier+STYLE sub-stamp at +0.4s (STYLE only when >×1.5) → woohoo audio 0.5s post-snap-back. ≤2 visual stamps, always staggered.
+- **#7 [DONE S33] FTUE SOFT-FAIL** (Fable §D): easier `ftueGateFrac=0.15` during the first catches + a "come back!" `waveBig` reaction when you enter the sphere too slow (no fail sound, never silence).
+- **#8 [DONE S33] WAYFINDING** (Fable §D): while carrying ≥1, a faint gold `Beam` streamer arcs from the eagle toward the waterfall (diegetic compass, zero UI).
+- **#9 [LATER PHASE — Chad-directed] CARRY-10 + CRAWL-AND-LATCH:** raise `carryCapacity` to 10; rescued squirrels animate CRAWLING UP the eagle and LATCHING onto his back (climb-on animation + a cling pose + more back seats). #2's living-rider system is now the built prereq. Chad: *"lets say he can carry 10 squirrels that latch onto him for a later phase."*
 - **#10 PHASE-1 WORLD:** real trunk/canopy collision + a dedicated valley that skips the combat `BuildMap` (currently kept as floor+backdrop); then line-riding style measures the canopy the player threads.
-- **#GATE [needs Chad's Play — NOT loopable]:** fly the Packet-02 §A checklist → *"grin at the 3rd catch + push your luck for one more before the waterfall?"* + capture the §E report-back → Fable Packet 03. This is the only step the loop cannot self-certify.
+- **#GATE [needs Chad's Play — NOT loopable, DO THIS NEXT]:** fly the Packet-02 §A checklist → *"grin at the 3rd catch + push your luck for one more before the waterfall?"* + capture the §E report-back → Fable Packet 03. Also report which gray-box sound ids resolved (Packet 01 §E). This is the only step the loop cannot self-certify.
 
 **What's built (branch `updraft`, UNCOMMITTED — build PASS, luau-lsp clean vs the documented baseline, red-teamed):**
 - `GameConfig.Rescue` (all Fable numbers) · `Debug.aiCrowOpponents=false` (no combat crows) · `Updraft.enabled=false` (its line-riding scorer is now the rescue STYLE meter).

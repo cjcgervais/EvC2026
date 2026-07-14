@@ -682,17 +682,33 @@ function BirdBuilder.PoseSquirrel(model, pose, dt, phase)
 			else
 				return CFrame.Angles(math.rad(8), 0, 0)                              -- legs planted
 			end
+		elseif pose == "waveBig" then
+			-- EXCITED "come back!" (the FTUE soft-fail face, Fable §D): both arms flung high overhead
+			-- with a big fast sway so a young player's too-slow pass gets a reaction, never silence.
+			if isArm then
+				local sway = math.sin(phase + (side > 0 and 0 or math.pi)) * math.rad(34)
+				return CFrame.Angles(math.rad(170), 0, side * (math.rad(30) + sway))
+			else
+				return CFrame.Angles(math.rad(8), 0, 0)
+			end
 		elseif pose == "plant" then
-			-- braced, determined: arms pulled down/back a touch, legs set wide & bent (coiled to leap).
-			if isArm then return CFrame.Angles(math.rad(-14), 0, side * math.rad(10)) end
-			return CFrame.Angles(math.rad(20), 0, side * math.rad(20))
+			-- braced, determined, LOUD (Fable #4): arms cocked back hard, legs set wide & deeply bent —
+			-- an unmistakable "coiled to spring" read so the anticipation beat lands even at a glance.
+			if isArm then return CFrame.Angles(math.rad(-40), 0, side * math.rad(16)) end
+			return CFrame.Angles(math.rad(34), 0, side * math.rad(30))
 		elseif pose == "starfish" then
 			-- the apex "I'M FLYING" spread — all four limbs flung wide.
 			if isArm then return CFrame.Angles(math.rad(70), 0, side * math.rad(95)) end
 			return CFrame.Angles(math.rad(-20), 0, side * math.rad(70))
 		elseif pose == "ride" then
-			-- sitting on the back, arms up gripping.
-			if isArm then return CFrame.Angles(math.rad(120), 0, side * math.rad(28)) end
+			-- sitting on the back, arms up gripping — with a subtle phase-driven breathing sway so a
+			-- carried rider never looks frozen (BirdController passes a live per-rider phase).
+			local sway = math.sin(phase) * math.rad(6)
+			if isArm then return CFrame.Angles(math.rad(120), 0, side * (math.rad(28) + sway)) end
+			return CFrame.Angles(math.rad(55), 0, side * math.rad(24))
+		elseif pose == "ridedive" then
+			-- riding through a DIVE: arms flung wide overhead ("wheee!"), legs still bracing the seat.
+			if isArm then return CFrame.Angles(math.rad(150), 0, side * math.rad(78)) end
 			return CFrame.Angles(math.rad(55), 0, side * math.rad(24))
 		else -- idle
 			if isArm then return CFrame.Angles(math.rad(6), 0, side * math.rad(8)) end

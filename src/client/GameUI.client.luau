@@ -960,25 +960,31 @@ if RESCUE_ON then
 		Brown = Color3.fromRGB(255, 230, 140), Silver = Color3.fromRGB(220, 232, 245),
 		Gold = Color3.fromRGB(255, 205, 80), Rainbow = Color3.fromRGB(255, 140, 210),
 	}
-	function _G.RescueStamp(kind, tier, rarity, mult, n)
+	function _G.RescueStamp(kind, tier, rarity, mult, n, big)
 		if kind == "gotcha" then
+			big = math.clamp(tonumber(big) or 0, 0, 1)
 			stampToken += 1
 			local myTok = stampToken
 			local prefix = (rarity and rarity ~= "Brown") and (string.upper(rarity) .. " ") or ""
 			stamp.Text = prefix .. "GOTCHA!"
-			stamp.TextColor3 = RARITY_COLOR[rarity] or Color3.fromRGB(255, 230, 140)
+			-- Big (BLAZING / high-style) catches land GOLD and BIGGER — escalating spectacle (Fable #5).
+			stamp.TextColor3 = (big >= 0.6) and Color3.fromRGB(255, 205, 80)
+				or (RARITY_COLOR[rarity] or Color3.fromRGB(255, 230, 140))
 			stamp.TextTransparency = 0
-			stamp.Size = UDim2.new(0, 560, 0, 110)
+			local w0, h0 = 560 + big * 140, 110 + big * 30
+			stamp.Size = UDim2.new(0, w0, 0, h0)
 			TweenService:Create(stamp, TweenInfo.new(0.18, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
-				{ Size = UDim2.new(0, 660, 0, 128) }):Play()
+				{ Size = UDim2.new(0, w0 + 100 + big * 80, 0, h0 + 18 + big * 20) }):Play()
 			TweenService:Create(stamp, TweenInfo.new(0.9, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
 				{ TextTransparency = 1 }):Play()
-			-- style/speed sub-stamp lands a beat later (Fable §C: never diminish the base catch)
+			-- Sub-stamp lands a beat LATER with a strict gap so stamps never pile up (Fable #6): the
+			-- speed tier + STYLE (only when it actually popped, >×1.5) share ONE line at +0.4s; the
+			-- "…woohoo!" is a sound 0.5s after snap-back (BirdController) so nothing ever triples up.
 			local bits = {}
 			if tier and tier ~= "" then bits[#bits + 1] = tier .. "!" end
-			if mult and mult > 1.05 then bits[#bits + 1] = string.format("STYLE ×%.1f", mult) end
+			if mult and mult > 1.5 then bits[#bits + 1] = string.format("STYLE ×%.1f", mult) end
 			if #bits > 0 then
-				task.delay(0.3, function()
+				task.delay(0.4, function()
 					if myTok ~= stampToken then return end
 					substamp.Text = table.concat(bits, "   ")
 					substamp.TextTransparency = 0
