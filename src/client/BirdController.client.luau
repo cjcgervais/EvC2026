@@ -1254,7 +1254,10 @@ local tellId = nil              -- the squirrel currently showing the "determine
 local tellTimer = 0             -- latch countdown (Fable: hold the tell ≥ tellHoldMin)
 local softFailId = nil          -- a squirrel you flew INTO but too slow to catch (FTUE soft-fail wave)
 local softFailTimer = 0         -- latch countdown for the "come back!" reaction
-local catch = nil               -- the active catch beat (a table) or nil
+local catch = nil               -- the SACRED talon catch beat (single; slow-mo) or nil
+local crewCatches = {}          -- CREW CATCHES (Crew Catch v1): overlapping LIGHT catches that fire while
+                                -- the sacred `catch` is busy, so a fast chain never drops (no slow-mo). Each
+                                -- = { sq, t, airtime, startPos, contactDone }; converts to a rider on contact.
 local riders = {}               -- back-riders: array of { model = Model }
 local deliverCooldown = 0
 
@@ -1515,6 +1518,72 @@ local function stepCatch(dt)
 	end
 end
 
+-- CREW CATCH (Crew Catch v1): a squirrel that triggers WHILE the sacred `catch` is busy is NOT dropped —
+-- the crew already on your back catches it. A quick LIGHT beat (no slow-mo, no camera env): a fast arc to
+-- the talon, then it settles onto the back as a rider. This is what lets a fast chain build a combo. Fires
+-- the same authoritative catch to the server, so it scores + increments the combo just like a talon catch.
+local function triggerCrewCatch(sqModel, closing)
+	local id = sqModel:GetAttribute("SquirrelId")
+	if type(id) ~= "number" then return end
+	local body = sqModel.PrimaryPart
+	local startPos = body and body.Position or (rootPart.Position + rootPart.CFrame.LookVector * 20)
+	local color = (body and body.Color) or Color3.fromRGB(150, 96, 52)
+
+	catchCount += 1
+	local styleMult = clamp(1 + styleMeter, 1, RES.styleMultMax or 3)
+	local glide = eagleGlide()
+	local tier = ""
+	if closing >= (RES.blazingFrac or 0.9) * glide then tier = "BLAZING"
+	elseif closing >= (RES.swiftFrac or 0.6) * glide then tier = "SWIFT" end
+	if catchRemote then catchRemote:FireServer(id, styleMult, tier) end
+	styleMeter = 0
+	tellId = nil
+	crewCatches[#crewCatches + 1] = {
+		sq = buildPresentationSquirrel(color), t = 0,
+		airtime = RES.crewAirtime or 0.42, startPos = startPos, contactDone = false,
+	}
+	playHup()
+end
+
+-- Advance every in-flight crew catch: a quick arc to the talon → light contact juice → becomes a rider.
+local function stepCrewCatches(dt)
+	local tp = talonPos()
+	for i = #crewCatches, 1, -1 do
+		local cc = crewCatches[i]
+		cc.t += dt
+		if cc.t < cc.airtime and cc.sq and cc.sq.PrimaryPart then
+			local u = clamp(cc.t / cc.airtime, 0, 1)
+			local flat = cc.startPos:Lerp(tp, u)
+			local apex = (RES.arcApexHeight or 10) * 2.4 * u * (1 - u)   -- lower, snappier than the sacred leap
+			local pos = flat + Vector3.new(0, apex, 0)
+			local look = rootPart.Position - pos
+			cc.sq:PivotTo((look.Magnitude > 1e-3) and CFrame.lookAt(pos, rootPart.Position) or CFrame.new(pos))
+			BirdBuilder.PoseSquirrel(cc.sq, "starfish", dt, 0)
+		elseif cc.t >= cc.airtime then
+			-- contact → light poof + pomf, then settle onto the back (the crew hauled it aboard).
+			if not cc.contactDone then
+				cc.contactDone = true
+				burstFeathers(tp, FEATHER_GOLD, 16)
+				playPomf()
+				riders[#riders + 1] = {
+					model = cc.sq, phase = math.random() * math.pi * 2,
+					look = math.random() * math.pi * 2, t = 0, settle = RIDER_HOP_DUR,
+				}
+				cc.sq = nil
+			end
+			table.remove(crewCatches, i)
+		end
+	end
+end
+
+-- Destroy every in-flight crew-catch presentation squirrel + clear the list (teardown / reconcile).
+local function clearCrewCatches()
+	for _, cc in ipairs(crewCatches) do
+		if cc.sq then pcall(function() cc.sq:Destroy() end) end
+	end
+	crewCatches = {}
+end
+
 -- Keep the back-riders glued to the eagle's back and ALIVE (Fable §C): each breathes with the
 -- wingbeat, looks around on its own clock, hops-and-settles as it lands, and flings its arms in a
 -- dive. Cosmetic only — modulates the seat CFrame + ride pose; no control/camera/kernel effect.
@@ -1572,6 +1641,7 @@ end
 local function resetRescuePresentation()
 	if catch and catch.sq then pcall(function() catch.sq:Destroy() end) end
 	catch = nil
+	clearCrewCatches()
 	releaseRiders()
 	rescueCam.env = 0
 	slowmoDesat(0)
@@ -1645,8 +1715,12 @@ local function scanSquirrels(dt)
 	local isFtue = catchCount < (RES.ftueCatches or 3)
 	local gateFrac = isFtue and (RES.ftueGateFrac or RES.closingGateFrac or 0.3) or (RES.closingGateFrac or 0.3)
 	local gate = gateFrac * eagleGlide()
-	local haveRoom = (#riders + (catch and 1 or 0)) < (rescueState.capacity or RES.carryCapacity or 3)
-	local canCatch = haveRoom and not catch and rescueState.phase == "active"
+	-- CREW CATCH v1: catches now OVERLAP — a trigger while the sacred `catch` is busy becomes a CREW catch
+	-- (the single-slot lock that silently dropped chained catches is gone). haveRoom counts the sacred catch
+	-- + every in-flight crew catch + the riders, so we never exceed carry capacity.
+	local inFlight = (catch and 1 or 0) + #crewCatches
+	local haveRoom = (#riders + inFlight) < (rescueState.capacity or RES.carryCapacity or 3)
+	local canCatch = haveRoom and rescueState.phase == "active"
 
 	local effRadius = (RES.triggerRadius or 28)
 	if isFtue then effRadius = effRadius * (RES.ftueRadiusMult or 1.5) end
@@ -1667,7 +1741,7 @@ local function scanSquirrels(dt)
 				local dir = (dist > 1e-3) and toVec.Unit or rootPart.CFrame.LookVector
 				local closing = vel:Dot(dir)
 				if canCatch and dist <= effRadius and closing >= gate then
-					triggerCatch(m, closing)
+					if catch then triggerCrewCatch(m, closing) else triggerCatch(m, closing) end
 					canCatch = false
 				elseif canCatch and dist <= effRadius and closing < gate then
 					-- SOFT-FAIL (Fable §D): you flew right through the sphere but weren't closing fast
@@ -1743,7 +1817,9 @@ end
 -- Deliver a cargo when riding into the safe zone above the waterfall.
 local function updateDeliver(dt)
 	deliverCooldown = math.max(0, deliverCooldown - dt)
-	if #riders <= 0 or deliverCooldown > 0 or catch then return end
+	-- Don't deliver mid-catch (sacred OR crew) — a crew catch still in flight would add a phantom rider
+	-- right after releaseRiders() clears the back.
+	if #riders <= 0 or deliverCooldown > 0 or catch or #crewCatches > 0 then return end
 	local d = RES.deliverPos
 	local flat = Vector3.new(rootPart.Position.X - d.X, 0, rootPart.Position.Z - d.Z).Magnitude
 	if flat < (RES.deliverRadius or 70) and rootPart.Position.Y > (RES.deliverPadY or 250) - 50 then
@@ -1763,6 +1839,7 @@ local function updateRescue(dt)
 		-- flying nothing (dead / between lives): tear the beat down cleanly.
 		if catch and catch.sq then catch.sq:Destroy() end
 		catch = nil
+		clearCrewCatches()
 		if #riders > 0 then releaseRiders() end
 		rescueCam.env = 0
 		slowmoDesat(0)
@@ -1771,11 +1848,13 @@ local function updateRescue(dt)
 	updateStyle(dt)
 	scanSquirrels(dt)
 	if catch then stepCatch(dt) end
+	stepCrewCatches(dt)
 	updateRiders(dt)
 	updateDeliver(dt)
 	updateWayfinder()
 	-- Reconcile local riders to the server's authoritative carry when idle (heals a rejected-catch phantom).
-	if not catch and type(rescueState.carry) == "number" and #riders > rescueState.carry then
+	-- Only when NOTHING is in flight (sacred or crew), else we'd trim a rider a crew catch is about to add.
+	if not catch and #crewCatches == 0 and type(rescueState.carry) == "number" and #riders > rescueState.carry then
 		trimRidersTo(rescueState.carry)
 	end
 

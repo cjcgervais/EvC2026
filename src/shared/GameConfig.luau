@@ -776,6 +776,8 @@ GameConfig.Rescue = {
 	                           -- scurry (→1.1 per Chad: "slow down… the climb", "heighten the resolve").
 	squirrelScale    = 4.4,    -- BuildSquirrel scale for BOTH stranded world squirrels and the caught/rider
 	                           -- squirrels (was 2.4 → 4.4 per Chad: "make the squirrels bigger" so the climb reads).
+	crewAirtime      = 0.42,   -- s; a CREW CATCH's quick leap-to-talon (overlaps the sacred catch; no slow-mo).
+	                           -- Crew catches are what let a fast chain build a combo instead of dropping.
 
 	-- CLIENT SLOW-MO PRESENTATION (Fable §B) — dilates anim/FX/audio/camera ONLY; the sim runs real-time.
 	slowmoScale      = 0.25,   -- presentation timescale during the catch window.
