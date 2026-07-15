@@ -485,14 +485,16 @@ Remotes.CatchSquirrel.OnServerEvent:Connect(function(player, squirrelId, styleMu
 	s.state = "caught"
 	ps.carry += 1
 
-	-- Score: base × rarity × style, plus a speed-stamp bonus. Style/speed come from the client
+	-- Score: base × rarity × style × ENERGY. The ENERGY multiplier rewards a high-velocity retrieval —
+	-- a fast catch means you converted altitude into speed (boom-and-zoom), so the dive multiplies the
+	-- rescue (Chad S34: teach energy dynamics). Tiered: BLAZING > SWIFT. Style/speed come from the client
 	-- (Phase-0 feel trust); clamped to sane bounds so a bad packet can't inflate the score.
 	local mult = math.clamp(tonumber(styleMult) or 1, 1, R.styleMultMax or 3)
 	local rarityMult = s.rarity.mult or 1
-	local pts = math.floor((R.basePoints or 100) * rarityMult * mult + 0.5)
-	if speedTier == "BLAZING" or speedTier == "SWIFT" then
-		pts += (R.speedStampBonus or 50)
-	end
+	local energyMult = 1
+	if speedTier == "BLAZING" then energyMult = R.blazingMult or 2.0
+	elseif speedTier == "SWIFT" then energyMult = R.swiftMult or 1.5 end
+	local pts = math.floor((R.basePoints or 100) * rarityMult * mult * energyMult + 0.5)
 	ps.score += pts
 
 	-- Remove the world squirrel (the client already flew the catch locally) + schedule a fresh one.

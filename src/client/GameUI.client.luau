@@ -981,7 +981,13 @@ if RESCUE_ON then
 			-- speed tier + STYLE (only when it actually popped, >×1.5) share ONE line at +0.4s; the
 			-- "…woohoo!" is a sound 0.5s after snap-back (BirdController) so nothing ever triples up.
 			local bits = {}
-			if tier and tier ~= "" then bits[#bits + 1] = tier .. "!" end
+			-- ENERGY (Chad S34): a fast catch traded altitude for speed → the dive MULTIPLIES the rescue.
+			-- Show the kid the speed→points link right on the beat (teach energy dynamics).
+			if tier and tier ~= "" then
+				local em = (tier == "BLAZING") and (GameConfig.Rescue.blazingMult or 2.0)
+					or (GameConfig.Rescue.swiftMult or 1.5)
+				bits[#bits + 1] = string.format("%s  ⚡×%g ENERGY", tier, em)
+			end
 			if mult and mult > 1.5 then bits[#bits + 1] = string.format("STYLE ×%.1f", mult) end
 			if #bits > 0 then
 				task.delay(0.4, function()

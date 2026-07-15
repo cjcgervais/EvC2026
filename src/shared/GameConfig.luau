@@ -805,7 +805,11 @@ GameConfig.Rescue = {
 	-- SCORING.
 	basePoints       = 100,    -- base points per rescue (generous, identical for everyone).
 	deliverBonus     = 25,     -- per-squirrel bonus when you DELIVER a batch to the safe zone.
-	speedStampBonus  = 50,     -- SWIFT/BLAZING flat bonus.
+	-- ENERGY BONUS (Chad S34: "bonus for high-velocity retrievals to teach energy dynamics"). A fast
+	-- catch = you traded altitude for speed (boom-and-zoom) → your dive MULTIPLIES the rescue. Tiered so
+	-- MORE speed = MORE reward (a legible energy lesson), shown to the kid as "×N ENERGY" on the catch.
+	swiftMult        = 1.5,    -- closing speed ≥ swiftFrac×glide (SWIFT) multiplies the catch score.
+	blazingMult      = 2.0,    -- ≥ blazingFrac×glide (BLAZING) multiplies more (top of the energy curve).
 
 	-- THE ROUND.
 	roundLength      = 120,    -- s; a 2-minute round.
