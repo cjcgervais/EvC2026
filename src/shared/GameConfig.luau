@@ -770,9 +770,12 @@ GameConfig.Rescue = {
 	arcAirtimeMax    = 0.85,   -- s; airtime ceiling (scales up slightly with closing speed).
 	arcApexHeight    = 10,     -- studs above the perch the leap arcs (presentation gravity, floaty & pretty).
 	arcConvergeFrac  = 0.85,   -- past this fraction of airtime, blend HARD to the talon so the catch never snaps.
-	climbDur         = 0.5,    -- s; after the talon catch, the squirrel SCRAMBLES up the flank to its back seat
+	climbDur         = 1.1,    -- s; after the talon catch, the squirrel SCRAMBLES up the flank to its back seat
 	                           -- over this long (Chad's #9 catch-latch beat). Real-time; the slow-mo snap-back
-	                           -- (≤0.2s) rides down under its first part. Lower→snappier, higher→longer scurry.
+	                           -- (≤0.2s) rides down under its first part. Lower→snappier, higher→longer/more-readable
+	                           -- scurry (→1.1 per Chad: "slow down… the climb", "heighten the resolve").
+	squirrelScale    = 4.4,    -- BuildSquirrel scale for BOTH stranded world squirrels and the caught/rider
+	                           -- squirrels (was 2.4 → 4.4 per Chad: "make the squirrels bigger" so the climb reads).
 
 	-- CLIENT SLOW-MO PRESENTATION (Fable §B) — dilates anim/FX/audio/camera ONLY; the sim runs real-time.
 	slowmoScale      = 0.25,   -- presentation timescale during the catch window.
@@ -856,8 +859,10 @@ GameConfig.Thermals = {
 --------------------------------------------------------------------------------
 -- VISUAL — cosmetic-only knobs (no gameplay/balance effect).
 GameConfig.Visual = {
-	birdScale = 1.8,  -- VISUAL scale of bird models so they read at range. Collision + attack reach
-	                  -- still use profile.bodyRadius, so this does NOT change combat distances/balance.
+	birdScale = 2.3,  -- VISUAL scale of bird models so they read at range (1.8→2.3 per Chad: "make the eagle
+	                  -- bigger"). Collision + attack reach still use profile.bodyRadius, so this does NOT change
+	                  -- combat distances/balance — it only changes how much of the screen the bird fills (framing).
+	                  -- The client's talon/seat offsets multiply by this so riders sit ON the scaled body.
 }
 
 GameConfig.Debug = {

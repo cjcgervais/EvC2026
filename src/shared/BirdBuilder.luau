@@ -715,12 +715,12 @@ function BirdBuilder.PoseSquirrel(model, pose, dt, phase)
 			-- scrambling UP the eagle's body to the back seat (Chad's #9 catch-latch vision: "eagle
 			-- catches with talon → squirrel scrambles up to the eagle's back"). A quick hand-over-hand
 			-- climb: arms reach high and legs push, alternating L/R off `phase` (BirdController advances
-			-- it fast) so it reads as clambering, not gliding.
+			-- it fast) so it reads as clambering, not gliding. Big amplitude so the clamber is OBVIOUS.
 			local scurry = math.sin(phase)
 			if isArm then
-				return CFrame.Angles(math.rad(120) + side * scurry * math.rad(40), 0, side * math.rad(26))
+				return CFrame.Angles(math.rad(125) + side * scurry * math.rad(55), 0, side * math.rad(38))
 			else
-				return CFrame.Angles(math.rad(20) - side * scurry * math.rad(34), 0, side * math.rad(22))
+				return CFrame.Angles(math.rad(25) - side * scurry * math.rad(45), 0, side * math.rad(30))
 			end
 		else -- idle
 			if isArm then return CFrame.Angles(math.rad(6), 0, side * math.rad(8)) end

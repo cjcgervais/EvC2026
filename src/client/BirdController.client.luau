@@ -1262,9 +1262,15 @@ local function eagleGlide()
 	return (currentProfile and currentProfile.glideSpeed) or 130
 end
 
--- The talon "basket" — a point just under the belly the leap intercepts.
+-- The eagle model is visually scaled up on the server (GameServer model:ScaleTo(birdScale)). The talon
+-- and back-seat offsets multiply by the SAME factor so the leap target and the riders track the scaled
+-- body — otherwise they sit embedded near the un-scaled centre (why riders read low before). Balance-
+-- neutral: bodyRadius (collision/reach) is unchanged; this only moves cosmetic attach points.
+local BIRD_SCALE = (GameConfig.Visual and GameConfig.Visual.birdScale) or 1
+
+-- The talon "basket" — a point just under the belly the leap intercepts (scaled with the visual body).
 local function talonPos()
-	return rootPart.CFrame * Vector3.new(0, -2.4, 0.3)
+	return rootPart.CFrame * (Vector3.new(0, -2.4, 0.3) * BIRD_SCALE)
 end
 
 -- Grid-packed seats on the back so up to `carryCapacity` (10) riders fit as a little pile of clinging
@@ -1273,12 +1279,14 @@ end
 local SEAT_COLS = 4
 -- Local (eagle-frame) seat position for rider `i` (1-based); the world seat = rootPart.CFrame * this.
 local function seatLocalPos(i)
-	local r = (currentProfile and currentProfile.bodyRadius) or 4.5
+	local r = (((currentProfile and currentProfile.bodyRadius) or 4.5)) * BIRD_SCALE
 	local idx = math.max(0, i - 1)
 	local col = idx % SEAT_COLS
 	local row = math.floor(idx / SEAT_COLS)
 	local colOff = col - (SEAT_COLS - 1) * 0.5            -- centre the columns across the spine
-	return Vector3.new(colOff * (r * 0.5), r * 0.7 + row * (r * 0.12), r * 0.2 + row * (r * 0.5))
+	-- factors are relative to the SCALED radius, so the pile fits the bigger (scale 4.4) riders on the
+	-- bigger (birdScale) back without fully overlapping.
+	return Vector3.new(colOff * (r * 0.4), r * 0.7 + row * (r * 0.1), r * 0.2 + row * (r * 0.42))
 end
 
 -- Where rider `i` (1-based) sits on the back.
@@ -1293,17 +1301,17 @@ local function bezier3(p0, p1, p2, t)
 	return a:Lerp(b, t)
 end
 
--- The talon "basket" in the eagle's LOCAL frame (matches talonPos()'s offset). Start of the climb path.
-local TALON_LOCAL   = Vector3.new(0, -2.4, 0.3)
+-- The talon "basket" in the eagle's LOCAL frame (matches talonPos()'s SCALED offset). Start of the climb.
+local TALON_LOCAL   = Vector3.new(0, -2.4, 0.3) * BIRD_SCALE
 local SCRAMBLE_FREQ = 26                 -- rad/s; how fast the limbs scurry during the climb-up.
 
 -- LIVING BACK-RIDERS (Fable §C) — cosmetic per-rider life applied on TOP of the seat CFrame + ride pose.
 -- Pure client presentation (client-only models in CatchFx); never touches control/camera/kernel.
-local RIDER_BOB_AMP  = 0.35             -- studs; breathing bob amplitude (off the eagle's wingbeat)
+local RIDER_BOB_AMP  = 0.35 * BIRD_SCALE  -- studs; breathing bob amplitude (off the eagle's wingbeat)
 local RIDER_LEAN     = math.rad(5)      -- rad; gentle body lean that breathes with the bob
 local RIDER_LOOK     = math.rad(22)     -- rad; slow independent look-around yaw amplitude
-local RIDER_HOP_DUR  = 0.42             -- s; hop-and-settle duration when a rider first lands
-local RIDER_HOP_AMP  = 1.1             -- studs; peak of the landing hop
+local RIDER_HOP_DUR  = 0.48             -- s; hop-and-settle duration when a rider first lands
+local RIDER_HOP_AMP  = 1.1 * BIRD_SCALE   -- studs; peak of the landing hop (scales with the visual body)
 
 local FEATHER_GOLD = Color3.fromRGB(255, 210, 90)
 
@@ -1336,7 +1344,7 @@ end
 
 -- Build the client-only presentation squirrel that leaps + then rides.
 local function buildPresentationSquirrel(color)
-	local sq = BirdBuilder.BuildSquirrel(2.4, { body = color })
+	local sq = BirdBuilder.BuildSquirrel(RES.squirrelScale or 2.4, { body = color })
 	for _, p in ipairs(sq:GetDescendants()) do
 		if p:IsA("BasePart") then p.CanQuery = false; p.CanTouch = false; p.CanCollide = false end
 	end
@@ -1470,12 +1478,14 @@ local function stepCatch(dt)
 		if ct < climbDur and catch.sq and catch.sq.PrimaryPart then
 			local u = clamp(ct / climbDur, 0, 1)
 			local e = u * u * (3 - 2 * u)          -- smoothstep ease
-			-- talon → seat via a control point pushed out to the seat's flank and forward, so the path
-			-- HUGS the body (climbs up the side) instead of cutting straight through it.
+			-- talon → seat via a control point swung WIDE out to the flank and UP, so the scramble is
+			-- silhouetted climbing up the side of the eagle (Chad: "make a bit more obvious of a climb")
+			-- instead of hugging the belly out of sight.
 			local p0 = TALON_LOCAL
 			local p2 = seatLocalPos(catch.seatIndex)
-			local r  = (currentProfile and currentProfile.bodyRadius) or 4.5
-			local p1 = Vector3.new(p2.X * 1.5, (p0.Y + p2.Y) * 0.5, -r * 0.35)
+			local r  = (((currentProfile and currentProfile.bodyRadius) or 4.5)) * BIRD_SCALE
+			local sideX = (p2.X >= 0) and 1 or -1          -- centre-lane seats still swing out one side
+			local p1 = Vector3.new(p2.X * 1.4 + sideX * r * 0.7, (p0.Y + p2.Y) * 0.5 + r * 0.3, -r * 0.3)
 			local worldPos  = (rootPart.CFrame * CFrame.new(bezier3(p0, p1, p2, e))).Position
 			local seatWorld = (rootPart.CFrame * CFrame.new(p2)).Position
 			local dir = seatWorld - worldPos
@@ -1485,16 +1495,19 @@ local function stepCatch(dt)
 			catch.sq:PivotTo(ori)
 			BirdBuilder.PoseSquirrel(catch.sq, "scramble", dt, catch.t * SCRAMBLE_FREQ)
 		end
-		-- arrived on the back → become a living rider (the #2 substrate). Small settle: it climbed into
-		-- place rather than dropping in, so the landing hop is halved.
+		-- arrived on the back → become a living rider (the #2 substrate). HEIGHTEN THE RESOLVE (Chad): a
+		-- full settle-hop + a little gold poof + a soft pomf so the latch reads as a satisfying arrival.
 		if not catch.converted and ct >= climbDur then
 			catch.converted = true
+			local seatWorld = (rootPart.CFrame * CFrame.new(seatLocalPos(catch.seatIndex))).Position
+			burstFeathers(seatWorld, FEATHER_GOLD, 14)
+			playPomf()
 			riders[#riders + 1] = {
 				model  = catch.sq,
 				phase  = math.random() * math.pi * 2,
 				look   = math.random() * math.pi * 2,
 				t      = 0,
-				settle = RIDER_HOP_DUR * 0.5,
+				settle = RIDER_HOP_DUR,          -- full settle-hop = a clear "landed!" beat
 			}
 			catch.sq = nil
 			catch = nil
@@ -2110,6 +2123,7 @@ local function onFlightStep(dt)
 	if not (isAlive and flightEngine and rootPart and rootPart.Parent) then
 		return
 	end
+	_G.__evcDiagStep = (_G.__evcDiagStep or 0) + 1   -- DIAG: count guard-passing flight frames (see DIAG block)
 
 	-- 1. Thermals -> engine.
 	flightEngine:SetThermalForce(computeThermalForce(rootPart.Position))
@@ -2676,3 +2690,89 @@ task.spawn(function()
 		end
 	end)
 end)
+
+--------------------------------------------------------------------------------
+-- ▼▼▼ DIAG BLOCK — read-only; delete once the "unplayable on Studio replay" bug is convicted. ▼▼▼
+-- Writes NOTHING to control/camera/aim/kernel state. Pure reads + one on-screen label + a 1 Hz Output
+-- print. Runs in its OWN RenderStepped so it reports even when onFlightStep early-returns. It discriminates
+-- the three candidate causes (Fable consult a8323c48f8c02bf0a):
+--   alive=false prof=NIL mouse=Default          → TeamAssigned/profile race (press R should recover)
+--   alive=true  mouse=LockCenter  dmax huge (hand still) → Studio mouse-capture leak (a click may recover)
+--   alive=true  dmax normal  net~=me or rxAge>0 pulsing   → server ownership fight ([AntiCheat] warns server-side)
+-- Toggle DIAG=false to silence.
+--------------------------------------------------------------------------------
+do
+	local DIAG = false   -- flip to true to re-arm the overlay if the "unplayable on replay" bug ever recurs
+	if DIAG then
+		local sg = Instance.new("ScreenGui")
+		sg.Name = "EvCDiag"
+		sg.ResetOnSpawn = false
+		sg.IgnoreGuiInset = true
+		sg.DisplayOrder = 100000
+		sg.Parent = player:WaitForChild("PlayerGui")
+		local lbl = Instance.new("TextLabel")
+		lbl.Size = UDim2.new(0, 560, 0, 96)
+		lbl.Position = UDim2.new(0, 8, 0, 8)
+		lbl.BackgroundTransparency = 0.35
+		lbl.BackgroundColor3 = Color3.new(0, 0, 0)
+		lbl.TextColor3 = Color3.fromRGB(0, 255, 120)
+		lbl.Font = Enum.Font.Code
+		lbl.TextSize = 15
+		lbl.TextXAlignment = Enum.TextXAlignment.Left
+		lbl.TextYAlignment = Enum.TextYAlignment.Top
+		lbl.Text = "[EvC diag] starting…"
+		lbl.Parent = sg
+
+		local acc = 0
+		local dmax, camSpin, birdSpin, spdMax = 0, 0, 0, 0
+		local prevCamLook, prevBirdLook
+		RunService.RenderStepped:Connect(function(dt)
+			local ok, d = pcall(function() return UserInputService:GetMouseDelta().Magnitude end)
+			if ok and d > dmax then dmax = d end
+			-- OUTPUT-side (no input dependency): per-frame rotation of the camera AND the bird nose = the
+			-- unambiguous "spinning / wavering" measure. If these are large with dmax~0 the aim/physics is
+			-- self-driving; if spd explodes/NaNs the kernel blew up.
+			local camLook = camera and camera.CFrame.LookVector
+			if camLook and prevCamLook then
+				local a = math.deg(math.acos(math.clamp(camLook:Dot(prevCamLook), -1, 1)))
+				if a == a and a > camSpin then camSpin = a end   -- a==a rejects NaN
+			end
+			prevCamLook = camLook
+			if flightEngine then
+				local sp = flightEngine.speed
+				if sp and sp > spdMax then spdMax = sp end
+				local bl = flightEngine.orientation and flightEngine.orientation.LookVector
+				if bl and prevBirdLook then
+					local a = math.deg(math.acos(math.clamp(bl:Dot(prevBirdLook), -1, 1)))
+					if a == a and a > birdSpin then birdSpin = a end
+				end
+				prevBirdLook = bl
+			end
+			acc += dt
+			if acc < 0.25 then return end
+			local hz = (_G.__evcDiagStep or 0) * 4
+			_G.__evcDiagStep = 0
+			acc = 0
+			local net = rootPart and rootPart:GetAttribute("NetOwner")
+			local ap = aimApplied or {}
+			lbl.Text = string.format(
+				"[EvC diag] alive=%s prof=%s bird=%s root=%s\nstepHz~=%d mouse=%s dmax=%.0f net=%s me=%d\nspd=%.0f  camSpin=%.0f/f  birdSpin=%.0f/f\naim(pry)=%.2f/%.2f/%.2f  camOK=%s freeLook=%s",
+				tostring(isAlive), tostring(currentProfile ~= nil),
+				tostring(birdModel ~= nil), tostring(rootPart ~= nil and rootPart.Parent ~= nil),
+				hz, UserInputService.MouseBehavior.Name, dmax, tostring(net), player.UserId,
+				spdMax, camSpin, birdSpin,
+				ap.pitch or 0, ap.roll or 0, ap.yaw or 0,
+				tostring(workspace.CurrentCamera == camera), tostring(freeLook.active)
+			)
+			dmax, camSpin, birdSpin, spdMax = 0, 0, 0, 0
+		end)
+
+		task.spawn(function()
+			while true do
+				task.wait(1)
+				print(lbl.Text)
+			end
+		end)
+	end
+end
+-- ▲▲▲ END DIAG BLOCK ▲▲▲

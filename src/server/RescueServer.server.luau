@@ -328,7 +328,7 @@ local function spawnSquirrel(perch)
 	perch = perch or select(1, pickFreePerch())
 	if not perch then return end
 	local rarity = rollRarity()
-	local model = BirdBuilder.BuildSquirrel(2.4, { body = rarity.body })
+	local model = BirdBuilder.BuildSquirrel(R.squirrelScale or 2.4, { body = rarity.body })
 	nextSquirrelId += 1
 	local id = nextSquirrelId
 	model.Name = "Squirrel_" .. id
