@@ -199,6 +199,14 @@ with a directive to bracket the work in **Fable-5 (model: fable) audits before a
 - **#13 [DONE S35] MATH DELIVERY** — n²-acorn deliver + hop-off skip-count ceremony + sentence card + acorn HUD + PERFECT-TEN quantized time factor. Build-green, RED-TEAMED (B1/R1 fixed), UNPLAYTESTED, uncommitted.
 - **#14 [DONE S36] MUSIC ESCALATION** (Packet-03 slice 3) — gray-box swell crossfaded on `delivered + carry` progress-to-ten (wind → pizzicato@1 → rhythm@4 → brass@7 → heartbeat@8-9, tempo tightening) + crew-choir chirp scaling + the SFX_SWOOSH approved-id fix. Build-green, Fable-5 audited both ends (KEEP), UNCOMMITTED. **The SWELL is Chad's FUN gate** (listen checklist in the ledger S36).
 - **#15 MISSION FRAMEWORK + THE FOX** (Packet-03 slice 4 — Chad's Play gates the routing-pressure fun).
+  - **[SCAFFOLD DONE S36] mission framework:** `GameConfig.Missions` data table + `Rescue.activeMission`
+    selector + `RescueServer` resolver routing hazard/deliver/placement through `mission.*` (fallbacks =
+    current literals → `waterfall_meadow` is byte-identical to today). Inert-by-construction, build-green,
+    committed. Flipping `activeMission` is the whole mission switch.
+  - **▶ [NEXT — THE FOX #15b] the real FUN gate:** architect `adbb2d58b749ec3fe` found the fox is a NEW
+    server-AI subsystem (RescueServer has no flight loop; port `updateAICrows`/Boids Y-locked) — its own
+    iteration: fox patrol bird + grove-flare + squirrel frantic/relocate (P3: costs TIME not lives) →
+    red-team-reviewer (new AI path) → Chad flies the routing-pressure fun. Full seam map in ledger S36.
 - **#10 PHASE-1 WORLD:** real trunk/canopy collision + a dedicated valley that skips the combat `BuildMap` (currently kept as floor+backdrop); then line-riding style measures the canopy the player threads.
 - **#GATE [needs Chad's Play — NOT loopable, DO THIS NEXT]:** fly the Packet-02 §A checklist → *"grin at the 3rd catch + push your luck for one more before the waterfall?"* + capture the §E report-back → Fable Packet 03. Also report which gray-box sound ids resolved (Packet 01 §E). This is the only step the loop cannot self-certify.
 

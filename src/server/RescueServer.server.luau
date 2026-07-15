@@ -32,6 +32,17 @@ if not (R and R.enabled) then
 	return -- rescue mode off; do nothing (combat/other modes own the server)
 end
 
+-- MISSION FRAMEWORK (Packet-03 §4, queue #15). The active mission's data table drives the round's hazard /
+-- deliver geometry / critter placement. Resolved once per round (RescueRoundLoop) into this module local so
+-- buildWorld + the triage branch can read it. EVERY field falls back to the current Rescue literal, so an
+-- absent/malformed mission = the shipped Waterfall Meadow round exactly (inert by construction). Missions
+-- change how you FLY, never how you CATCH (P8); always non-lethal (P3).
+local mission: any = {}
+local function resolveMission()
+	mission = (GameConfig.Missions and GameConfig.Missions[R.activeMission]) or {}
+	return mission
+end
+
 --------------------------------------------------------------------------------
 -- REMOTES
 --------------------------------------------------------------------------------
@@ -194,12 +205,18 @@ local function buildWorld()
 	worldFolder.Name = "RescueWorld"
 	worldFolder.Parent = Workspace
 
-	buildWaterfall()
+	-- deliver geometry (mission.deliver.kind; only "waterfall" exists today — absent = waterfall).
+	local dv = mission.deliver or {}
+	if (dv.kind or "waterfall") == "waterfall" then
+		buildWaterfall()
+	end
 
-	local groveCount   = R.groveCount or 4
-	local perchPerGrove= R.grovePerchCount or 5
-	local groveRad     = R.groveRadius or 130
-	local groveGap     = R.groveMinGap or 520
+	-- critter placement (mission.placement; falls back to the shipped grove literals).
+	local pm = mission.placement or {}
+	local groveCount   = pm.groveCount or R.groveCount or 4
+	local perchPerGrove= pm.perchPerGrove or R.grovePerchCount or 5
+	local groveRad     = pm.groveRadius or R.groveRadius or 130
+	local groveGap     = pm.groveMinGap or R.groveMinGap or 520
 
 	-- 1) Place grove CENTRES: spread apart, clear of the mesa, with the grove's radius kept in-bounds.
 	local centreRadMax = math.max(200, (R.valleyRadius or 1600) - groveRad - 60)
@@ -599,6 +616,7 @@ end
 
 local triageBucket = 0
 local function RescueRoundLoop()
+	resolveMission()
 	buildWorld()
 	squirrelsFolder = Instance.new("Folder")
 	squirrelsFolder.Name = "Squirrels"
@@ -625,17 +643,19 @@ local function RescueRoundLoop()
 			timeLeft -= dt
 			-- TRIAGE: once inside the last `triageAt` seconds, a stranded squirrel is balloon-lifted
 			-- to safety every few seconds (fakes the fire cutting some off — Phase 1 replaces with the fire grid).
-			if timeLeft <= (R.triageAt or 60) then
+			-- Driven by mission.hazard (kind "triage"); falls back to the shipped literals.
+			local hz = mission.hazard or {}
+			if (hz.kind or "triage") == "triage" and timeLeft <= (hz.triageAt or R.triageAt or 60) then
 				if not triageStarted then triageStarted = true end
 				triageBucket += dt
-				if triageBucket >= 4 then
+				if triageBucket >= (hz.cadence or 4) then
 					triageBucket = 0
 					-- pick a random stranded squirrel to expire
 					local candidates = {}
 					for id, s in pairs(squirrels) do
 						if s.state == "stranded" then candidates[#candidates + 1] = id end
 					end
-					if #candidates > 2 then -- always leave a couple to catch
+					if #candidates > (hz.minStranded or 2) then -- always leave a couple to catch
 						expireSquirrel(candidates[rng:NextInteger(1, #candidates)])
 					end
 				end

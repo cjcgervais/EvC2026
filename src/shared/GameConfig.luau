@@ -891,6 +891,28 @@ GameConfig.Rescue = {
 	chirpPerRider    = 0.14,   -- …minus this per extra rider (a fuller back = busier chatter), floored.
 	chirpMinGap      = 0.5,    -- s; never chirp faster than this (perf + cacophony floor).
 	chirpVol         = 0.14,   -- rider chirp volume.
+
+	-- MISSION SELECTOR (Packet-03 §4, queue #15). The active mission from GameConfig.Missions below.
+	-- "waterfall_meadow" = the shipped behavior. Flip this ONE string to switch missions (e.g. to
+	-- "fox_on_the_hill" once THE FOX lands). Every mission field falls back to the current literal, so an
+	-- absent/malformed mission reproduces today's round exactly — the selector is inert by construction.
+	activeMission    = "waterfall_meadow",
+}
+
+-- ENVIRONMENT-VARIED MISSIONS (Packet-03 §4). One sacred loop (scan→dive→catch→deliver); the WORLD varies
+-- it. A mission = one hazard driver + deliver geometry + critter-placement rule + ≤1 special verb, as a
+-- DATA TABLE consumed by RescueServer at round start. Missions change how you FLY, never how you CATCH (P8),
+-- and are ALWAYS non-lethal (P3). Fields mirror the current hard-coded Rescue values so the resolver can
+-- fall back to them — waterfall_meadow is therefore byte-identical to the shipped round.
+GameConfig.Missions = {
+	waterfall_meadow = {
+		displayName = "Waterfall Meadow",
+		hazard    = { kind = "triage", triageAt = 60, cadence = 4, minStranded = 2 },  -- the shipped triage timer
+		deliver   = { kind = "waterfall" },                                            -- ride the updraft to the pad
+		placement = { groveCount = 4, perchPerGrove = 5, groveRadius = 130, groveMinGap = 520 }, -- disc groves
+		verb      = nil,                                                                -- no special verb (free routing)
+	},
+	-- fox_on_the_hill = { … }  -- ← THE FOX registers here next (a ground-locked patrol hazard; routing pressure).
 }
 
 GameConfig.Thermals = {
