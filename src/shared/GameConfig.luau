@@ -778,6 +778,15 @@ GameConfig.Rescue = {
 	                           -- squirrels (was 2.4 → 4.4 per Chad: "make the squirrels bigger" so the climb reads).
 	crewAirtime      = 0.42,   -- s; a CREW CATCH's quick leap-to-talon (overlaps the sacred catch; no slow-mo).
 	                           -- Crew catches are what let a fast chain build a combo instead of dropping.
+	courageStep      = 0.08,   -- rider GROWTH per crew catch it helps haul in (Packet-03 P5 "courage is
+	                           -- visible": the ones you saved grow braver, told by size alone).
+	courageStages    = 3,      -- growth cap in steps (3 × 0.08 → ×1.24). NOTE: fully-grown neighbors
+	                           -- already interpenetrate ~0.8 studs at the SEAT_COLS=4 grid spacing —
+	                           -- a cuddly squish, Chad-gated; widen the seat factors if it reads as a merge.
+	fullHintCooldown = 6,      -- s between "WINGS FULL → waterfall!" HUD nudges when you fly a real catch
+	                           -- line with no room aboard (S35 Chad: capacity silence read as lost catches).
+	claimTTL         = 3,      -- s a fired-for squirrel stays locally unclaimable (covers the server's
+	                           -- destroy replication window; a server-REJECTED catch frees up after this).
 
 	-- CLIENT SLOW-MO PRESENTATION (Fable §B) — dilates anim/FX/audio/camera ONLY; the sim runs real-time.
 	slowmoScale      = 0.25,   -- presentation timescale during the catch window.
@@ -806,7 +815,16 @@ GameConfig.Rescue = {
 
 	-- SCORING.
 	basePoints       = 100,    -- base points per rescue (generous, identical for everyone).
-	deliverBonus     = 25,     -- per-squirrel bonus when you DELIVER a batch to the safe zone.
+	-- MATH DELIVERY (Packet-03 §3 — the stealth-math headline; replaced the flat deliverBonus n×25).
+	-- Deliver bonus = n × n ACORNS (an acorn = acornValue points; the HUD divides by acornValue so every
+	-- number a kid sees is small & round). n² makes one brave trip of 10 beat two safe trips of 5 —
+	-- the push-your-luck call IS the multiplication lesson. carryCapacity=10 → 10×10 = the hundred chart.
+	acornValue       = 10,     -- points per acorn (display currency divisor; also the n² bonus unit).
+	hopBeat          = 0.35,   -- s; deliver hop-off cadence — one rider dismounts per beat, ticking the
+	                           -- tally by n (one ROW of the n×n array) so the kid skip-counts to n².
+	perfectTenAt     = 10,     -- rescues delivered in one round to arm the PERFECT TEN finale.
+	timeFactor3At    = 30,     -- s left on the clock at the 10th rescue → TIME FACTOR ×3 (else ×2).
+	timeFactor4At    = 60,     -- s left → the rare ×4 (a blazing round; keep it aspirational).
 	-- ENERGY BONUS (Chad S34: "bonus for high-velocity retrievals to teach energy dynamics"). A fast
 	-- catch = you traded altitude for speed (boom-and-zoom) → your dive MULTIPLIES the rescue. Tiered so
 	-- MORE speed = MORE reward (a legible energy lesson), shown to the kid as "×N ENERGY" on the catch.

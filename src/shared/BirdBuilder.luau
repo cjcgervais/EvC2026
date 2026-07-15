@@ -692,7 +692,8 @@ end
 --   Eases the four limb Motor6Ds toward a named pose. Cosmetic; safe on missing joints.
 --   poses: "idle" (limbs relaxed) · "wave" (both arms up, waving via phase) · "plant" (determined
 --   brace — the tell) · "starfish" (all four spread — the apex "I'M FLYING") · "ride" (gripping seat) ·
---   "scramble" (hand-over-hand climb up to the back seat — the #9 catch-latch beat).
+--   "scramble" (hand-over-hand climb up to the back seat — the #9 catch-latch beat) ·
+--   "reach" (rider leans out arms-wide to net an incoming CREW-CATCH leaper).
 --   phase drives the wave oscillation (radians). dt eases the transition.
 --------------------------------------------------------------------------------
 local SQUIRREL_SMOOTH = 12
@@ -741,6 +742,13 @@ function BirdBuilder.PoseSquirrel(model, pose, dt, phase)
 		elseif pose == "ridedive" then
 			-- riding through a DIVE: arms flung wide overhead ("wheee!"), legs still bracing the seat.
 			if isArm then return CFrame.Angles(math.rad(150), 0, side * math.rad(78)) end
+			return CFrame.Angles(math.rad(55), 0, side * math.rad(24))
+		elseif pose == "reach" then
+			-- CREW CATCH v2 (Chad S35 "should be squirrels"): riders nearest the incoming leaper lean
+			-- out ARMS-WIDE — a firefighter's net. Legs keep the seat grip; arms flung high and wide
+			-- with a small eager tremble off `phase` so the crew visibly WANTS the catch.
+			local eager = math.sin(phase * 3) * math.rad(7)
+			if isArm then return CFrame.Angles(math.rad(105) + eager, 0, side * math.rad(85)) end
 			return CFrame.Angles(math.rad(55), 0, side * math.rad(24))
 		elseif pose == "scramble" then
 			-- scrambling UP the eagle's body to the back seat (Chad's #9 catch-latch vision: "eagle

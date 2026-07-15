@@ -972,6 +972,23 @@ if RESCUE_ON then
 	substamp.ZIndex = 20
 	substamp.Parent = screenGui
 
+	-- Small "CREW CATCH! +1" pop above the carry meter — its own channel so it never fights the big
+	-- center stamps (a crew catch usually fires WHILE a sacred GOTCHA is on screen).
+	local crewPop = Instance.new("TextLabel")
+	crewPop.Name = "RescueCrewPop"
+	crewPop.AnchorPoint = Vector2.new(0.5, 1)
+	crewPop.Size = UDim2.new(0, 300, 0, 34)
+	crewPop.Position = UDim2.new(0.5, 0, 1, -126)
+	crewPop.BackgroundTransparency = 1
+	crewPop.Font = Enum.Font.GothamBlack
+	crewPop.TextScaled = true
+	crewPop.TextColor3 = Color3.fromRGB(170, 240, 170)
+	crewPop.TextStrokeTransparency = 0.3
+	crewPop.TextTransparency = 1
+	crewPop.Text = ""
+	crewPop.ZIndex = 6
+	crewPop.Parent = screenGui
+
 	local stampToken = 0
 	local RARITY_COLOR = {
 		Brown = Color3.fromRGB(255, 230, 140), Silver = Color3.fromRGB(220, 232, 245),
@@ -1023,10 +1040,89 @@ if RESCUE_ON then
 			stamp.Size = UDim2.new(0, 560, 0, 110)
 			TweenService:Create(stamp, TweenInfo.new(1.0, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
 				{ TextTransparency = 1 }):Play()
+		elseif kind == "tally" then
+			-- MATH DELIVERY hop-off tick (Packet-03 §3): the running acorn total — each dismount adds one
+			-- ROW of the n×n array (7…14…21…). Re-triggered every beat; each tick fades on its own so an
+			-- interrupted ceremony never strands the stamp on screen.
+			stampToken += 1
+			stamp.Text = "🌰 " .. tostring(math.floor(tonumber(n) or 0))
+			stamp.TextColor3 = Color3.fromRGB(150, 235, 160)
+			stamp.TextTransparency = 0
+			stamp.Size = UDim2.new(0, 380, 0, 96)
+			TweenService:Create(stamp, TweenInfo.new(0.12, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+				{ Size = UDim2.new(0, 430, 0, 108) }):Play()
+			TweenService:Create(stamp, TweenInfo.new(1.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+				{ TextTransparency = 1 }):Play()
+		elseif kind == "sentence" then
+			-- the MULTIPLICATION SENTENCE card: the batch pays n × n acorns, said out loud. Every number
+			-- the kid sees is small, whole, and verifiable in-head — that verification IS the teaching.
+			stampToken += 1
+			local count = math.max(1, math.floor(tonumber(n) or 1))
+			stamp.Text = string.format("🐿️ %d × %d = 🌰 %d!", count, count, count * count)
+			stamp.TextColor3 = Color3.fromRGB(255, 205, 80)
+			stamp.TextTransparency = 0
+			stamp.Size = UDim2.new(0, 600, 0, 110)
+			TweenService:Create(stamp, TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+				{ Size = UDim2.new(0, 680, 0, 124) }):Play()
+			TweenService:Create(stamp, TweenInfo.new(1.8, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+				{ TextTransparency = 1 }):Play()
+		elseif kind == "crew" then
+			-- CREW CATCH (v2): a quick +1 pop on its OWN channel (above the carry meter) so every catch
+			-- is VISIBLY counted (Chad S35: "a lot of the catches dont get counted") without piling onto
+			-- the center-stamp sequencing.
+			crewPop.Text = "CREW CATCH! +1"
+			crewPop.TextTransparency = 0
+			crewPop.Size = UDim2.new(0, 300, 0, 34)
+			TweenService:Create(crewPop, TweenInfo.new(0.12, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+				{ Size = UDim2.new(0, 340, 0, 40) }):Play()
+			TweenService:Create(crewPop, TweenInfo.new(1.0, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+				{ TextTransparency = 1 }):Play()
+		elseif kind == "full" then
+			-- WINGS FULL (Chad S35): a real catch line flown at capacity used to be pure silence. Say
+			-- WHY the squirrel didn't jump and WHAT to do — this is wayfinding, not failure.
+			stampToken += 1
+			local myTok = stampToken
+			stamp.Text = "WINGS FULL! 🐿️" .. tostring(n or 0) .. "/" .. tostring(GameConfig.Rescue.carryCapacity or 3)
+			stamp.TextColor3 = Color3.fromRGB(150, 200, 255)
+			stamp.TextTransparency = 0
+			stamp.Size = UDim2.new(0, 560, 0, 100)
+			TweenService:Create(stamp, TweenInfo.new(1.4, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+				{ TextTransparency = 1 }):Play()
+			task.delay(0.4, function()
+				if myTok ~= stampToken then return end
+				substamp.Text = "carry them to the WATERFALL!"
+				substamp.TextTransparency = 0
+				TweenService:Create(substamp, TweenInfo.new(1.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+					{ TextTransparency = 1 }):Play()
+			end)
+		elseif kind == "finale" then
+			-- PERFECT-TEN TIME FACTOR (Packet-03 §3 layer 3): the round ends on one last multiplication
+			-- sentence — "Round 380 × 2 = 760!" — staged big-then-detail per the stamp-sequencing rule.
+			stampToken += 1
+			local myTok = stampToken
+			local v = (type(n) == "table") and n or {}
+			stamp.Text = "PERFECT TEN!"
+			stamp.TextColor3 = Color3.fromRGB(255, 205, 80)
+			stamp.TextTransparency = 0
+			stamp.Size = UDim2.new(0, 640, 0, 120)
+			TweenService:Create(stamp, TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+				{ Size = UDim2.new(0, 720, 0, 134) }):Play()
+			TweenService:Create(stamp, TweenInfo.new(2.5, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+				{ TextTransparency = 1 }):Play()
+			task.delay(0.5, function()
+				if myTok ~= stampToken then return end
+				substamp.Text = string.format("🌰 %d × TIME FACTOR %d = 🌰 %d!",
+					math.floor(v.pre or 0), math.floor(v.f or 2), math.floor(v.fin or 0))
+				substamp.TextTransparency = 0
+				TweenService:Create(substamp, TweenInfo.new(2.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+					{ TextTransparency = 1 }):Play()
+			end)
 		end
 	end
 
 	-- Per-frame rescue HUD update.
+	local ACORN = (GameConfig.Rescue and GameConfig.Rescue.acornValue) or 10
+	local finaleShown = false
 	RunService.RenderStepped:Connect(function()
 		local snap = _G.RescueSnapshot and _G.RescueSnapshot()
 		if type(snap) ~= "table" then return end
@@ -1039,7 +1135,20 @@ if RESCUE_ON then
 		else
 			timerLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
 		end
-		scoreLabel.Text = "🐿️ " .. tostring(snap.score or 0) .. "   ·   Saved " .. tostring(snap.rescued or 0)
+		-- Score displays in ACORNS (= points / acornValue) so every number a kid sees stays small & round
+		-- (Packet-03 §3: 10 rescues = 100 acorns = the hundred chart, not "1000 points").
+		scoreLabel.Text = "🌰 " .. tostring(math.floor((snap.score or 0) / ACORN + 0.5)) .. "   ·   Saved " .. tostring(snap.rescued or 0)
+		-- PERFECT-TEN finale: the server sends timeFactor only once results land; show the sentence ONCE.
+		if snap.phase == "results" and snap.timeFactor and not finaleShown then
+			finaleShown = true
+			_G.RescueStamp("finale", nil, nil, nil, {
+				pre = math.floor((snap.preFactorScore or 0) / ACORN + 0.5),
+				f = snap.timeFactor,
+				fin = math.floor((snap.score or 0) / ACORN + 0.5),
+			})
+		elseif snap.phase ~= "results" and finaleShown then
+			finaleShown = false
+		end
 		local cap = snap.capacity or 3
 		carryLabel.Text = "🐿️ " .. tostring(snap.carry or 0) .. "/" .. tostring(cap)
 		carryLabel.TextColor3 = (snap.carry or 0) >= cap and Color3.fromRGB(255, 180, 90) or Color3.fromRGB(255, 255, 255)

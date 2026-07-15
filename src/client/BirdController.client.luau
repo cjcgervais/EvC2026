@@ -1151,6 +1151,8 @@ local catchRemote, deliverRemote
 local rescueState = {
 	phase = "intermission", carry = 0, capacity = (RES and RES.carryCapacity) or 3,
 	score = 0, delivered = 0, rescued = 0, timeLeft = 0, combo = 0,
+	-- optional; the server sends these only once the PERFECT-TEN finale lands at results.
+	timeFactor = nil :: number?, preFactorScore = nil :: number?,
 }
 task.spawn(function()
 	if not (RES and RES.enabled) then return end
@@ -1230,6 +1232,11 @@ end
 local function playWhip()
 	playSound(SFX_SWOOSH, 0.45, 1.2)
 end
+local function playCount(i)
+	-- MATH DELIVERY hop-off counting note: one ping per dismount, stepping UP each time so the
+	-- skip-count is heard as a rising scale (the tally ticking toward n²).
+	playSound(SFX_PING, 0.5, 1.0 + 0.12 * (math.max(1, i) - 1))
+end
 local function playWoohoo()
 	-- a happy "wheee!" — one tone bent up 1.2 -> 2.0 while playing.
 	local s = playSound(SFX_PING, 0.5, 1.2)
@@ -1254,7 +1261,24 @@ local tellId = nil              -- the squirrel currently showing the "determine
 local tellTimer = 0             -- latch countdown (Fable: hold the tell ≥ tellHoldMin)
 local softFailId = nil          -- a squirrel you flew INTO but too slow to catch (FTUE soft-fail wave)
 local softFailTimer = 0         -- latch countdown for the "come back!" reaction
+local lastFullHint = -1e9       -- os.clock() of the last "WINGS FULL" HUD nudge (debounce)
+-- CLAIM GUARD (S35c): [SquirrelId] = os.clock() when we fired a catch for it. The world squirrel stays
+-- in Workspace with State="stranded" until the server's Destroy REPLICATES (1+ frames) — without this
+-- guard the very next frame re-triggered the SAME squirrel as a crew catch; the server silently rejected
+-- the duplicate id and the phantom rider got reconcile-trimmed later (Chad: "went down from 9 to 8 after
+-- a catch"). The old single-slot `not catch` lock hid this; Crew Catch v1 removed it. TTL'd so a squirrel
+-- whose catch the server genuinely rejected becomes catchable again instead of permanently dead.
+local claimedIds = {}
+local function isClaimed(id)
+	local at = id and claimedIds[id]
+	if not at then return false end
+	if os.clock() - at > (RES.claimTTL or 3) then claimedIds[id] = nil; return false end
+	return true
+end
 local catch = nil               -- the SACRED talon catch beat (single; slow-mo) or nil
+local hopOff = nil              -- MATH-DELIVERY dismount ceremony: { n, i, t } while riders hop off one
+                                -- per beat at the safe pad (Packet-03 §3 layer 1), or nil
+local crewCheer = 0             -- s left of the whole-crew "we got one!" cheer after a crew catch lands
 local crewCatches = {}          -- CREW CATCHES (Crew Catch v1): overlapping LIGHT catches that fire while
                                 -- the sacred `catch` is busy, so a fast chain never drops (no slow-mo). Each
                                 -- = { sq, t, airtime, startPos, contactDone }; converts to a rider on contact.
@@ -1315,6 +1339,7 @@ local RIDER_LEAN     = math.rad(5)      -- rad; gentle body lean that breathes w
 local RIDER_LOOK     = math.rad(22)     -- rad; slow independent look-around yaw amplitude
 local RIDER_HOP_DUR  = 0.48             -- s; hop-and-settle duration when a rider first lands
 local RIDER_HOP_AMP  = 1.1 * BIRD_SCALE   -- studs; peak of the landing hop (scales with the visual body)
+local RIDER_GROW_DUR = 0.35             -- s; courage-growth ease (an instant ScaleTo snap reads as a glitch)
 
 local FEATHER_GOLD = Color3.fromRGB(255, 210, 90)
 
@@ -1391,6 +1416,7 @@ end
 local function triggerCatch(sqModel, closing)
 	local id = sqModel:GetAttribute("SquirrelId")
 	if type(id) ~= "number" then return end
+	claimedIds[id] = os.clock()      -- claim BEFORE anything else — one fire per squirrel, ever
 	local body = sqModel.PrimaryPart
 	local startPos = body and body.Position or (rootPart.Position + rootPart.CFrame.LookVector * 20)
 	local color = (body and body.Color) or Color3.fromRGB(150, 96, 52)
@@ -1525,6 +1551,7 @@ end
 local function triggerCrewCatch(sqModel, closing)
 	local id = sqModel:GetAttribute("SquirrelId")
 	if type(id) ~= "number" then return end
+	claimedIds[id] = os.clock()      -- claim BEFORE anything else — one fire per squirrel, ever
 	local body = sqModel.PrimaryPart
 	local startPos = body and body.Position or (rootPart.Position + rootPart.CFrame.LookVector * 20)
 	local color = (body and body.Color) or Color3.fromRGB(150, 96, 52)
@@ -1538,19 +1565,24 @@ local function triggerCrewCatch(sqModel, closing)
 	if catchRemote then catchRemote:FireServer(id, styleMult, tier) end
 	styleMeter = 0
 	tellId = nil
+	-- v2 (Chad S35 "should be squirrels"): the newb leaps for the BACK, where the crew catches it —
+	-- aim at the seat it's about to take (riders + everything already in flight ahead of it).
+	local seatIdx = #riders + (catch and 1 or 0) + #crewCatches + 1
 	crewCatches[#crewCatches + 1] = {
-		sq = buildPresentationSquirrel(color), t = 0,
+		sq = buildPresentationSquirrel(color), t = 0, seatIndex = seatIdx,
 		airtime = RES.crewAirtime or 0.42, startPos = startPos, contactDone = false,
 	}
 	playHup()
 end
 
--- Advance every in-flight crew catch: a quick arc to the talon → light contact juice → becomes a rider.
+-- Advance every in-flight crew catch: the newb arcs to the BACK, where the crew nets it (v2 — Chad S35
+-- "should be squirrels") → light contact juice + a crew CHEER → becomes a rider on the spot.
 local function stepCrewCatches(dt)
-	local tp = talonPos()
 	for i = #crewCatches, 1, -1 do
 		local cc = crewCatches[i]
 		cc.t += dt
+		-- the LIVE world position of the seat it's leaping for (the eagle keeps flying under it).
+		local tp = (rootPart.CFrame * CFrame.new(seatLocalPos(cc.seatIndex or (#riders + 1)) + Vector3.new(0, 1.2, 0))).Position
 		if cc.t < cc.airtime and cc.sq and cc.sq.PrimaryPart then
 			local u = clamp(cc.t / cc.airtime, 0, 1)
 			local flat = cc.startPos:Lerp(tp, u)
@@ -1560,11 +1592,25 @@ local function stepCrewCatches(dt)
 			cc.sq:PivotTo((look.Magnitude > 1e-3) and CFrame.lookAt(pos, rootPart.Position) or CFrame.new(pos))
 			BirdBuilder.PoseSquirrel(cc.sq, "starfish", dt, 0)
 		elseif cc.t >= cc.airtime then
-			-- contact → light poof + pomf, then settle onto the back (the crew hauled it aboard).
+			-- contact IN THE CREW'S ARMS → light poof + pomf + the crew cheers ("CREW CATCH! +1").
 			if not cc.contactDone then
 				cc.contactDone = true
 				burstFeathers(tp, FEATHER_GOLD, 16)
 				playPomf()
+				crewCheer = 0.9
+				if _G.RescueStamp then _G.RescueStamp("crew") end
+				-- P5 COURAGE IS VISIBLE (Packet-03): everyone already aboard helped haul this one in —
+				-- each grows a step (eased in updateRiders) with a proud little re-settle hop. Capped so
+				-- the carry-10 seat grid never overlaps. The NEW rider starts at stage 0 (it just got here).
+				for _, r in ipairs(riders) do
+					if (r.stage or 0) < (RES.courageStages or 3) then
+						r.stage = (r.stage or 0) + 1
+						r.growFrom = (r.model and r.model:GetScale()) or 1
+						r.growTo = 1 + r.stage * (RES.courageStep or 0.08)
+						r.growT = 0
+						r.settle = math.max(r.settle or 0, RIDER_HOP_DUR * 0.5)
+					end
+				end
 				riders[#riders + 1] = {
 					model = cc.sq, phase = math.random() * math.pi * 2,
 					look = math.random() * math.pi * 2, t = 0, settle = RIDER_HOP_DUR,
@@ -1590,6 +1636,11 @@ end
 local function updateRiders(dt)
 	local fp = (flightEngine and flightEngine.flapPhase) or 0
 	local diving = flightEngine and flightEngine.isDiving
+	-- CREW CATCH v2 crowd-work: while a leaper is inbound, the riders nearest its seat (the tail-most —
+	-- seats fill spine→tail, so the newcomers land by the newest riders) lean out ARMS-WIDE to net it;
+	-- when it lands, the whole crew cheers for a beat.
+	local reaching = #crewCatches > 0
+	crewCheer = math.max(0, crewCheer - dt)
 	for i, rider in ipairs(riders) do
 		local m = rider.model
 		if m and m.PrimaryPart then
@@ -1606,11 +1657,29 @@ local function updateRiders(dt)
 				hop = math.sin(p * math.pi) * RIDER_HOP_AMP
 				rider.settle = math.max(0, rider.settle - dt)
 			end
+			-- courage growth (P5): ease the model scale toward its stage over RIDER_GROW_DUR.
+			local grown = rider.growTo or 1
+			if rider.growT then
+				rider.growT += dt
+				local g = clamp(rider.growT / RIDER_GROW_DUR, 0, 1)
+				local e = g * g * (3 - 2 * g)
+				grown = (rider.growFrom or 1) + ((rider.growTo or 1) - (rider.growFrom or 1)) * e
+				m:ScaleTo(grown)
+				if g >= 1 then rider.growT = nil end
+			end
+			-- lift a grown rider by its extra half-height so it sits ON the back, not sunk into it.
+			local lift = (grown - 1) * ((m:GetAttribute("SquirrelScale") or 2.4) * 0.575)
 			local seat = seatCFrame(i)
-				* CFrame.new(0, bob + hop, 0)
+				* CFrame.new(0, bob + hop + lift, 0)
 				* CFrame.Angles(br * RIDER_LEAN, look, br * RIDER_LEAN * 0.5)
 			m:PivotTo(seat)
-			BirdBuilder.PoseSquirrel(m, diving and "ridedive" or "ride", dt, fp + (rider.phase or 0))
+			local pose = diving and "ridedive" or "ride"
+			if reaching and i > #riders - 3 then
+				pose = "reach"
+			elseif crewCheer > 0 then
+				pose = "waveBig"                       -- the whole crew cheers the catch
+			end
+			BirdBuilder.PoseSquirrel(m, pose, dt, fp + (rider.phase or 0))
 		end
 	end
 end
@@ -1641,6 +1710,7 @@ end
 local function resetRescuePresentation()
 	if catch and catch.sq then pcall(function() catch.sq:Destroy() end) end
 	catch = nil
+	hopOff = nil
 	clearCrewCatches()
 	releaseRiders()
 	rescueCam.env = 0
@@ -1720,7 +1790,11 @@ local function scanSquirrels(dt)
 	-- + every in-flight crew catch + the riders, so we never exceed carry capacity.
 	local inFlight = (catch and 1 or 0) + #crewCatches
 	local haveRoom = (#riders + inFlight) < (rescueState.capacity or RES.carryCapacity or 3)
-	local canCatch = haveRoom and rescueState.phase == "active"
+	-- No new catches during the hop-off ceremony (riders are mid-dismount; the tally is counting).
+	local canCatch = haveRoom and rescueState.phase == "active" and not hopOff
+	-- Tells only when a catch could actually follow — a FULL eagle must not wind up squirrels it can't
+	-- take (anticipation with no payoff reads as "my catch didn't count"; Chad S35).
+	local roomForTell = haveRoom and not hopOff and rescueState.phase == "active"
 
 	local effRadius = (RES.triggerRadius or 28)
 	if isFtue then effRadius = effRadius * (RES.ftueRadiusMult or 1.5) end
@@ -1734,7 +1808,8 @@ local function scanSquirrels(dt)
 	softFailTimer = math.max(0, softFailTimer - dt)
 
 	for _, m in ipairs(squirrelsFolder:GetChildren()) do
-		if m:IsA("Model") and m:GetAttribute("State") == "stranded" and m.PrimaryPart then
+		if m:IsA("Model") and m:GetAttribute("State") == "stranded" and m.PrimaryPart
+			and not isClaimed(m:GetAttribute("SquirrelId")) then
 			local toVec = m.PrimaryPart.Position - eaglePos
 			local dist = toVec.Magnitude
 			if dist < 260 then
@@ -1743,12 +1818,30 @@ local function scanSquirrels(dt)
 				if canCatch and dist <= effRadius and closing >= gate then
 					if catch then triggerCrewCatch(m, closing) else triggerCatch(m, closing) end
 					canCatch = false
+					-- this trigger may have taken the LAST seat — recompute room so a second squirrel
+					-- scanned this same frame can't plant a no-payoff tell (red-team F4).
+					haveRoom = (#riders + (catch and 1 or 0) + #crewCatches) < (rescueState.capacity or RES.carryCapacity or 3)
+					roomForTell = roomForTell and haveRoom
 				elseif canCatch and dist <= effRadius and closing < gate then
 					-- SOFT-FAIL (Fable §D): you flew right through the sphere but weren't closing fast
 					-- enough — the squirrel waves "come back!" so the miss has a face, never silence.
 					softFailId = m:GetAttribute("SquirrelId")
 					softFailTimer = 1.3
-				elseif closing >= gate then
+				elseif (not haveRoom or hopOff) and rescueState.phase == "active"
+					and dist <= effRadius and closing >= gate then
+					-- FULL (or mid-hop-off): a REAL catch line (closing ≥ gate) flown with no room
+					-- aboard. This was total silence — Chad S35: "around 7 to 10 a lot of the catches
+					-- dont get counted". The squirrel waves "come back!" always; the HUD hint fires only
+					-- when no catch beat is live (red-team F2: never stomp a GOTCHA), debounced, and
+					-- reports riders+in-flight (red-team F1: the number that actually made it full).
+					softFailId = m:GetAttribute("SquirrelId")
+					softFailTimer = 1.3
+					if not hopOff and not catch and #crewCatches == 0
+						and os.clock() - lastFullHint > (RES.fullHintCooldown or 6) then
+						lastFullHint = os.clock()
+						if _G.RescueStamp then _G.RescueStamp("full", nil, nil, nil, #riders + inFlight) end
+					end
+				elseif roomForTell and closing >= gate then
 					local toSurface = math.max(0, dist - effRadius)
 					local tte = toSurface / math.max(closing, 1e-3)
 					if tte <= (RES.tellLeadTime or 0.4) and tte < bestTellTime then
@@ -1815,19 +1908,59 @@ local function updateStyle(dt)
 end
 
 -- Deliver a cargo when riding into the safe zone above the waterfall.
+-- MATH DELIVERY hop-off ceremony (Packet-03 §3 layer 1): after a deliver, the riders dismount ONE PER
+-- BEAT — each hop rings a rising note and ticks the tally by n (one ROW of the n×n acorn array), so the
+-- child skip-counts (7…14…21…) straight into the multiplication sentence "7 × 7 = 49!". Presentation
+-- only — the server already paid the authoritative n² when the deliver remote fired.
+local function stepHopOff(dt)
+	if not hopOff then return end
+	hopOff.t += dt
+	local beat = RES.hopBeat or 0.35
+	if hopOff.t < beat then return end
+	hopOff.t -= beat
+	hopOff.i += 1
+	local rider = table.remove(riders)               -- top of the pile leaves first
+	if rider and rider.model and rider.model.PrimaryPart then
+		local m = rider.model
+		local side = (hopOff.i % 2 == 0) and 1 or -1   -- alternate dismount sides
+		burstFeathers(m.PrimaryPart.Position, FEATHER_GOLD, 8)
+		task.spawn(function()                          -- a little starfish dismount arc, then gone
+			local pivot0 = m:GetPivot()
+			local t = 0
+			while t < 0.5 do
+				local d = task.wait()
+				t += d
+				if not (m.Parent and m.PrimaryPart) then return end
+				local u = clamp(t / 0.5, 0, 1)
+				m:PivotTo(pivot0 * CFrame.new(side * u * 9, math.sin(u * math.pi) * 5 - u * 11, 0))
+				BirdBuilder.PoseSquirrel(m, "starfish", d, 0)
+			end
+			m:Destroy()
+		end)
+	end
+	playCount(hopOff.i)
+	if _G.RescueStamp then _G.RescueStamp("tally", nil, nil, nil, hopOff.i * hopOff.n) end
+	if hopOff.i >= hopOff.n then
+		local n = hopOff.n
+		hopOff = nil
+		if _G.RescueStamp then _G.RescueStamp("sentence", nil, nil, nil, n) end
+	end
+end
+
 local function updateDeliver(dt)
 	deliverCooldown = math.max(0, deliverCooldown - dt)
-	-- Don't deliver mid-catch (sacred OR crew) — a crew catch still in flight would add a phantom rider
-	-- right after releaseRiders() clears the back.
-	if #riders <= 0 or deliverCooldown > 0 or catch or #crewCatches > 0 then return end
+	-- Don't deliver mid-catch (sacred OR crew — a crew catch still in flight would add a phantom rider
+	-- to a cleared back), mid-hop-off (the ceremony is already paying this batch out), or outside an
+	-- active round (a buzzer-beater the server would reject must not run a zero-payout ceremony —
+	-- red-team R1; the riders just stay aboard into results).
+	if #riders <= 0 or deliverCooldown > 0 or catch or #crewCatches > 0 or hopOff
+		or rescueState.phase ~= "active" then return end
 	local d = RES.deliverPos
 	local flat = Vector3.new(rootPart.Position.X - d.X, 0, rootPart.Position.Z - d.Z).Magnitude
 	if flat < (RES.deliverRadius or 70) and rootPart.Position.Y > (RES.deliverPadY or 250) - 50 then
 		if deliverRemote then deliverRemote:FireServer() end
-		local n = #riders
-		releaseRiders()
-		deliverCooldown = 1.5
-		if _G.RescueStamp then _G.RescueStamp("deliver", nil, nil, nil, n) end
+		hopOff = { n = #riders, i = 0, t = 0 }         -- riders now dismount one per beat (stepHopOff)
+		deliverCooldown = #riders * (RES.hopBeat or 0.35) + 1.5
 		playChord()
 	end
 end
@@ -1839,6 +1972,7 @@ local function updateRescue(dt)
 		-- flying nothing (dead / between lives): tear the beat down cleanly.
 		if catch and catch.sq then catch.sq:Destroy() end
 		catch = nil
+		hopOff = nil
 		clearCrewCatches()
 		if #riders > 0 then releaseRiders() end
 		rescueCam.env = 0
@@ -1850,11 +1984,13 @@ local function updateRescue(dt)
 	if catch then stepCatch(dt) end
 	stepCrewCatches(dt)
 	updateRiders(dt)
+	stepHopOff(dt)
 	updateDeliver(dt)
 	updateWayfinder()
 	-- Reconcile local riders to the server's authoritative carry when idle (heals a rejected-catch phantom).
-	-- Only when NOTHING is in flight (sacred or crew), else we'd trim a rider a crew catch is about to add.
-	if not catch and #crewCatches == 0 and type(rescueState.carry) == "number" and #riders > rescueState.carry then
+	-- Only when NOTHING is in flight (sacred or crew) AND no hop-off ceremony is paying out — the server's
+	-- carry is already 0 during hop-off, so reconciling then would insta-dump the whole dismount queue.
+	if not catch and #crewCatches == 0 and not hopOff and type(rescueState.carry) == "number" and #riders > rescueState.carry then
 		trimRidersTo(rescueState.carry)
 	end
 
@@ -1883,6 +2019,7 @@ _G.RescueSnapshot = function()
 		score = rescueState.score, delivered = rescueState.delivered, rescued = rescueState.rescued,
 		carry = #riders, capacity = rescueState.capacity or (RES and RES.carryCapacity) or 3,
 		style = styleMeter, combo = rescueState.combo or 0,
+		timeFactor = rescueState.timeFactor, preFactorScore = rescueState.preFactorScore,
 	}
 end
 

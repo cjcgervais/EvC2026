@@ -52,9 +52,8 @@ up the eagle's flank over ~0.5s (`Rescue.climbDur`) before latching in as a livi
 - **Git:** #9a committed `4aa3d0b`; **#9b CARRY-10 also built + committed this session** (Chad: "go ahead") —
   `carryCapacity` 3→10 + grid-packed seats (`SEAT_COLS=4`, stacking toward the tail). Both on `updraft`, NOT
   pushed. Ledger detail + the 6-point playtest checklist: `.loop/rescue-phase0/state.md` (S34).
-- **▶ NEXT:** squirrel-model polish (Chad: "they need some work"), then the Chad-gated feel-knob VALUES
-  (`slowmoScale`→0.45, `climbDur`, `arcConvergeFrac`→0.75…) on his Play, then #10 Phase-1 world. Then the
-  #GATE play (grin at the 3rd catch? push-your-luck? → capture §E → Fable Packet 03).
+- **▶ NEXT:** *(superseded by the S34-LATE block below — Chad returned, the Growing-Crew direction landed,
+  and Packet-03 now sequences the queue.)*
 
 ### ▶ S34 (cont.): 🐞 ACQUISITION RACE FIX — intermittent "unplayable on replay" (build-green, UNPLAYTESTED)
 Chad hit an INTERMITTENT bug: *"good the first try then the next two… moves all around, eagle wavers, cant
@@ -71,6 +70,96 @@ poll self-heals any residual race (gated on `not acquiring` so it can't restart 
 Build-green, luau-lsp baseline-only. **▶ Chad: fly 3-4 times (Stop between) — it should acquire EVERY time.
 If it ever recurs, check Output for `[EvC] acquire() error`.**
 
+### ▶ S34 LATE (2026-07-14, Chad present + directing): THE GROWING CREW — 5 more commits (all build-green, red-teamed where risky, UNPLAYTESTED unless noted)
+Chad returned mid-S34, approved the visual pass, riffed a major vision (verbatim in
+`docs/rescue-consults/VISION-S34-chad.md`) → Fable consult produced **`docs/rescue-consults/PACKET-03-growing-crew.md`**
+(the sequenced roadmap: crew catch → math delivery → music → fox mission → helper birds → fire+cannon). Landed:
+- **`b154a47` bigger eagle + squirrels, slower/heightened climb — Chad-APPROVED in Play.** `Visual.birdScale`
+  1.8→2.3, `squirrelScale`→4.4, `climbDur`→1.1; talon/seat offsets now multiply by birdScale (fixes embedded seating).
+- **`6c262f4` PACKET-03 docs** (the Growing-Crew design + Chad's raw vision).
+- **`62bc7a0` staged DIVE-WING FOLD — Chad-LOVED ("its wonderful").** `AnimateWings` unfolds through smooth staged
+  sweep/anhedral keyed to nose-down depth; cosmetic Motor6D.Transform only, kernel byte-identical.
+- **`77780f4` ENERGY BONUS** (Chad's locked plan item): high-closing-speed catches now SCORE (extends the built
+  SWIFT/BLAZING tiers into `pts = base × rarity × style × energy`), kid-visible energy→points readout.
+- **`fea86a1` BOOM-AND-ZOOM REWARDS:** hidden speed-scoop (`scoopSpeedGain` widens effRadius with speed — a quiet
+  facilitator) + **COMBO x2..x6** (server-authoritative streak inside `comboWindow=4s` multiplies catch score;
+  pulsing COMBO banner) → "bank now or keep the chain?" is a real choice.
+- **`685127b` CREW CATCH v1 (Packet-03 headline slice; fixes Chad's live bug "not all gotchas are being counted").**
+  The single-slot `not catch` lock in `scanSquirrels` silently dropped chained triggers during the ~2s beat. Now
+  catches OVERLAP: the sacred slow-mo TALON catch is byte-unchanged and stays the one-at-a-time hero beat; a
+  squirrel triggering while it's busy becomes a **CREW CATCH** — LIGHT grammar (no slow-mo/camera env), ~0.42s arc,
+  settles straight onto the back ("the crew hauled it aboard"). Same authoritative `CatchSquirrel` → scores + feeds
+  the combo. Red-teamed CLEAR (`a466c6bed31a21866`). NOTE for Chad: crew catches skip the #9a scramble-up by design —
+  confirm it reads as "hauled aboard," not a pop-in.
+- **▶ NEXT (Packet-03 order): rider GROWTH (+COURAGE — crew-catch survivors grow, cap 1.25) to complete slice 1,
+  then slice 2 MATH DELIVERY (skip-count hop-off → n² multiplication sentence → PERFECT-TEN time factor — replaces
+  flat `deliverBonus n×25` at `RescueServer:538`), then music escalation / fox mission per the Packet-03 table.**
+  *(→ done in S35, below.)*
+
+### ▶ S35 (2026-07-15, autonomous loop): docs repaired + #12 RIDER GROWTH + #13 MATH DELIVERY BUILT (build-green, red-teamed w/ fixes, UNPLAYTESTED, **UNCOMMITTED**)
+A cleared-context agent found the S34-late commits undocumented (that session closed without a ledger/HANDOFF
+write), reconstructed the trail (this box, the ledger, memory), then built the next two Packet-03 slices:
+- **#12 RIDER GROWTH (P5 "courage is visible"):** every rider already aboard grows a step when a CREW CATCH
+  lands (`Rescue.courageStep=0.08` × `courageStages=3` cap ×1.24; eased `Model:ScaleTo` over 0.35s + proud
+  re-settle hop + seat lift so grown riders sit ON the back). Client presentation only. "+COURAGE" micro-stamp
+  deferred (stamp discipline).
+- **#13 MATH DELIVERY (Packet-03 §3, all 3 layers):** SERVER — deliver pays **n × n × acornValue(10)** (n²
+  acorns; `deliverBonus` retired), PERFECT-TEN tracker + TIME FACTOR ×2/×3(≥30s left)/×4(≥60s) applied once at
+  `endRound`, round total QUANTIZED to whole acorns first so the finale sentence is exactly true (red-team B1).
+  CLIENT — deliver = a HOP-OFF CEREMONY (one rider per `hopBeat=0.35s`, rising note, tally ticking i×n — each
+  hop one ROW of the n×n array, 7…14…21…49) → the sentence card "🐿️ n × n = 🌰 n²!"; HUD score now in 🌰 ACORNS
+  (points÷10); results shows "PERFECT TEN!" + "🌰 pre × TIME FACTOR f = 🌰 fin!". Gates: no catches/deliver/
+  rider-reconcile during the ceremony; deliver phase-gated (red-team R1); teardown clears it.
+- **Red-team `a7c1563d4d5e1fe9f`:** 1 BLOCK (false finale math → FIXED by quantize) + 2 REVISE (phase gate →
+  FIXED; commit split → the git plan) + notes (grown-pile squish is Chad-gated; a triage-race sentence-off-by-one
+  is a logged Phase-0 transient). Everything else survived attack; CS-1..9 untouched.
+- **Verify:** rojo-build PASS; luau-lsp = documented baseline ONLY (0 new); selene UNAVAILABLE (404). Green.
+- **Git: UNCOMMITTED — a TWO-commit plan (growth, then math) is in `.loop/rescue-phase0/state.md` (S35),
+  awaiting Chad's approval (ASK-gated).** The S35 playtest checklist (7 points — growth read, skip-count,
+  sentence readability, PERFECT-TEN in-head verification, ceremony teardown, CS re-confirm) is there too.
+- **▶ NEXT: #14 music escalation (autonomous), #15 mission framework + THE FOX (Chad's Play gates the fun),
+  and Chad flies the S35 checklist → §E report-back → Fable Packet-04.**
+
+### ▶ S35b (2026-07-15): Chad PLAYTESTED → 2 feedback fixes BUILT (build-green, red-teamed REVISE→fixed, UNPLAYTESTED, UNCOMMITTED)
+Chad's verdicts: ✅ combo ×6 works, ✅ hop-off skip-count + acorns "all good", ✅ CS re-confirm; growth visible.
+⚠️ "around 7 to 10 alot of the catches dont get counted still" + the crew catch "should be squirrels".
+- **🐞→✅ CAPACITY SILENCE (the "not counted" root cause):** at 7-9 riders + catches in flight the eagle is
+  FULL → `canCatch` false → a real catch line gave NOTHING (and squirrels still planted no-payoff TELLs).
+  Now: squirrel always waves "come back!", a debounced **"WINGS FULL! 🐿️N/10 → carry them to the
+  WATERFALL!"** stamp explains why (suppressed while any catch beat is live), tells gated on real room.
+- **✅ CREW CATCH v2 ("should be squirrels"):** the newb now leaps to the BACK SEAT (live-seat arc, not the
+  talon); the tail-most riders lean out ARMS-WIDE (new `"reach"` pose), it lands in their arms, the whole
+  crew CHEERS, and **"CREW CATCH! +1"** pops on its own channel by the carry meter — every catch visibly
+  counted. Growth (#12) fires on the same beat: the ones who catch, grow.
+- **Red-team `a3228414e496a4539` REVISE → F1/F2/F4 fixed; F3 = known cosmetic one-seat pop when crew+sacred
+  overlap (playtest gate; fix = sticky per-rider seats, follow-up). CS-1..9/kernel/balance clean.**
+- Also noted: talon-grab micro-anim = future queue item; slow-mo+climb still play on every CHAIN-OPENER
+  (sacred) catch — if an isolated catch shows no climb, that's a bug to report.
+- **Git: still UNCOMMITTED** — 4-commit plan (or one combined, Chad's call) + the S35b playtest checklist in
+  `.loop/rescue-phase0/state.md`.
+
+### ▶ S35c (2026-07-15): 🐞→✅ THE REAL "not counted" BUG — double-fire on the same squirrel (CLAIM GUARD)
+Chad's decisive repro: *"went down from 9 to 8 after a catch"* = a phantom rider reconcile-trimmed = a
+silent server reject. **Root cause = a Crew Catch v1 REGRESSION:** no trigger ever CLAIMED the world
+squirrel, and the server's Destroy replicates a frame late — so the frame after a sacred catch fired, the
+SAME squirrel re-triggered as a crew catch (same id), the server rejected the duplicate, and the client's
+second (ghost) squirrel became a phantom rider. The old `not catch` lock had accidentally prevented this;
+v1 removed it. **Fix:** `claimedIds[id]` stamped first-thing in BOTH triggers + the scan loop skips claimed
+squirrels (`Rescue.claimTTL=3` frees a genuinely-rejected squirrel). One fire per squirrel, ever. The ghost
+double-squirrel was likely Chad's "something strange when a crew catch fires." Build-green (0 new),
+self-red-teamed, UNPLAYTESTED. **Gate: carry only ever +1 per squirrel, never down except deliver.**
+
+### ▶ S35d (2026-07-15): ✅ CHAD PLAYTESTED — PASS. COMMITTED.
+*"flew it it seems good got all my squirrels ! lets commit here and handoff to the next agent?"* — the
+claim guard holds; the whole S35 batch (growth · math delivery · full-feedback · crew catch v2) is
+Chad-approved and **committed on `updraft` (2 commits: server scoring, then client/config/UI+docs). NOT
+pushed.** Sound-id finding from his Output: **`rbxasset://sounds/swoosh.wav` = "Asset is not approved"
+(×70)** → pomf/hup/whip are half-silent; the PING chime resolves. → swap SFX_SWOOSH in the audio pass.
+**▶ NEXT AGENT: run `/evc-loop` → #14 MUSIC ESCALATION (Packet-03 slice 3, autonomous — count-to-ten
+stems + crew chatter; include the SFX_SWOOSH replacement) → #15 MISSION FRAMEWORK + THE FOX (slice 4,
+Chad's Play gates the routing fun). Known cosmetic follow-up: sticky per-rider seats (red-team F3 one-seat
+pop). Then Fable Packet-04 off Chad's next §E report.**
+
 ### ▶ RESCUE PHASE-0 QUEUE (work top-down in the loop)
 - **#0 [DONE S32]** bigger trigger (`triggerRadius` 28→42) + easier snatch (`closingGateFrac` 0.40→0.30) + bigger map (`valleyRadius` 1000→1600, `treeCount`→68, `squirrelCount`→15). *(Chad's two asks — applied; he re-plays to confirm.)*
 - **#1 [DONE S33] GROVES** (Fable §B5): `RescueServer.buildWorld` clusters perch-trees into `groveCount=4` groves (`grovePerchCount=5`, `groveRadius=130`, `groveMinGap=520`) + backdrop scatter; squirrels spawn ONLY on the 20 grove perches → catch chains + style continuity.
@@ -83,6 +172,11 @@ If it ever recurs, check Output for `[EvC] acquire() error`.**
 - **#8 [DONE S33] WAYFINDING** (Fable §D): while carrying ≥1, a faint gold `Beam` streamer arcs from the eagle toward the waterfall (diegetic compass, zero UI).
 - **#9a [DONE S34] CRAWL-AND-LATCH ANIMATION:** the caught squirrel now SCRAMBLES up the eagle's flank from the talon to its back seat (real-time CLIMB phase in `stepCatch` + `"scramble"` pose + `Rescue.climbDur=0.5`), then latches in via the #2 living-rider system. Build-green, red-teamed CLEAR, UNPLAYTESTED. *(Chad's S33 headline vision.)*
 - **#9b [DONE S34] CARRY-10:** `carryCapacity` 3→10 (moves both the server carry gate + client) + `seatLocalPos` reworked into a GRID (`SEAT_COLS=4` across the spine, the rest stacking toward the tail) so 10 riders pile on the back. Build-green, self-red-teamed, UNPLAYTESTED. *(Chad: "go ahead no need for later phase.")*
+- **#11 [DONE S34-late] CREW CATCH v1** (Packet-03 slice 1 core) + energy bonus + combo x2..x6 + speed-scoop + dive-wing fold + bigger eagle — see the S34-LATE block above. UNPLAYTESTED except where marked Chad-approved.
+- **#12 [DONE S35] RIDER GROWTH (+COURAGE)** — riders grow a step per crew catch witnessed (eased ScaleTo, cap ×1.24) + re-settle hop + seat lift. Build-green, red-team-covered, UNPLAYTESTED, uncommitted.
+- **#13 [DONE S35] MATH DELIVERY** — n²-acorn deliver + hop-off skip-count ceremony + sentence card + acorn HUD + PERFECT-TEN quantized time factor. Build-green, RED-TEAMED (B1/R1 fixed), UNPLAYTESTED, uncommitted.
+- **#14 MUSIC ESCALATION** (Packet-03 slice 3) — layered stems crossfaded on `delivered + carry` progress-to-ten; crew chatter scales with crew size.
+- **#15 MISSION FRAMEWORK + THE FOX** (Packet-03 slice 4 — Chad's Play gates the routing-pressure fun).
 - **#10 PHASE-1 WORLD:** real trunk/canopy collision + a dedicated valley that skips the combat `BuildMap` (currently kept as floor+backdrop); then line-riding style measures the canopy the player threads.
 - **#GATE [needs Chad's Play — NOT loopable, DO THIS NEXT]:** fly the Packet-02 §A checklist → *"grin at the 3rd catch + push your luck for one more before the waterfall?"* + capture the §E report-back → Fable Packet 03. Also report which gray-box sound ids resolved (Packet 01 §E). This is the only step the loop cannot self-certify.
 
