@@ -890,6 +890,23 @@ if RESCUE_ON then
 	scoreLabel.Text = "🐿️ 0"; scoreLabel.Parent = topFrame
 
 	-- CARRY + STYLE (bottom center, above the control hint)
+	-- COMBO banner (Chad S34): consecutive catches build a x N combo — the SHOWN reward for boom-and-zoom
+	-- (the speed-widened scoop is the hidden facilitator). Appears at x2, hotter toward x6, pulses.
+	local comboLabel = Instance.new("TextLabel")
+	comboLabel.Name = "RescueCombo"
+	comboLabel.AnchorPoint = Vector2.new(0.5, 0)
+	comboLabel.Size = UDim2.new(0, 340, 0, 46)
+	comboLabel.Position = UDim2.new(0.5, 0, 0, 98)
+	comboLabel.BackgroundTransparency = 1
+	comboLabel.Font = Enum.Font.GothamBlack
+	comboLabel.TextScaled = true
+	comboLabel.TextStrokeTransparency = 0.3
+	comboLabel.TextColor3 = Color3.fromRGB(255, 175, 60)
+	comboLabel.Text = ""
+	comboLabel.Visible = false
+	comboLabel.ZIndex = 6
+	comboLabel.Parent = screenGui
+
 	local carryFrame = Instance.new("Frame")
 	carryFrame.Name = "RescueCarry"
 	carryFrame.AnchorPoint = Vector2.new(0.5, 1)
@@ -1026,6 +1043,18 @@ if RESCUE_ON then
 		local cap = snap.capacity or 3
 		carryLabel.Text = "🐿️ " .. tostring(snap.carry or 0) .. "/" .. tostring(cap)
 		carryLabel.TextColor3 = (snap.carry or 0) >= cap and Color3.fromRGB(255, 180, 90) or Color3.fromRGB(255, 255, 255)
+		-- COMBO banner: show the streak from the server snapshot, hotter + pulsing toward ×comboMax.
+		local combo = math.floor(tonumber(snap.combo) or 0)
+		if combo >= 2 then
+			local hot = math.clamp((combo - 2) / 4, 0, 1)
+			comboLabel.Text = string.format("🔥 ×%d COMBO", combo)
+			comboLabel.TextColor3 = Color3.fromRGB(255, 175, 60):Lerp(Color3.fromRGB(255, 60, 40), hot)
+			local pulse = 1 + 0.06 * math.sin(os.clock() * 12)
+			comboLabel.Size = UDim2.new(0, 340 * pulse, 0, 46 * pulse)
+			comboLabel.Visible = true
+		else
+			comboLabel.Visible = false
+		end
 		local styleMult = 1 + (snap.style or 0)
 		if styleMult > 1.05 then
 			styleLabel.Text = string.format("STYLE ×%.1f", styleMult)

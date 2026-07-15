@@ -810,6 +810,12 @@ GameConfig.Rescue = {
 	-- MORE speed = MORE reward (a legible energy lesson), shown to the kid as "×N ENERGY" on the catch.
 	swiftMult        = 1.5,    -- closing speed ≥ swiftFrac×glide (SWIFT) multiplies the catch score.
 	blazingMult      = 2.0,    -- ≥ blazingFrac×glide (BLAZING) multiplies more (top of the energy curve).
+	-- BOOM-AND-ZOOM REWARD (Chad S34). scoopSpeedGain = a TRADE SECRET: flying faster widens the catch
+	-- "scoop" a little (rewards speed without telling the player). comboWindow/comboMax = the SHOWN reward:
+	-- consecutive catches within the window build a ×2..×comboMax combo that multiplies the score.
+	scoopSpeedGain   = 0.25,   -- TRADE SECRET: max fractional widening of the catch scoop at ~2× glide (no UI).
+	comboWindow      = 4.0,    -- s; catch again within this to keep the combo chain alive (else it resets).
+	comboMax         = 6,      -- combo multiplier cap (×2 ×3 ×4 ×5 ×6 in a row).
 
 	-- THE ROUND.
 	roundLength      = 120,    -- s; a 2-minute round.

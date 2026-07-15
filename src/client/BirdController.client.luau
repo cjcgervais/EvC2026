@@ -1150,7 +1150,7 @@ local function lerpN(a, b, t) return a + (b - a) * t end
 local catchRemote, deliverRemote
 local rescueState = {
 	phase = "intermission", carry = 0, capacity = (RES and RES.carryCapacity) or 3,
-	score = 0, delivered = 0, rescued = 0, timeLeft = 0,
+	score = 0, delivered = 0, rescued = 0, timeLeft = 0, combo = 0,
 }
 task.spawn(function()
 	if not (RES and RES.enabled) then return end
@@ -1650,6 +1650,10 @@ local function scanSquirrels(dt)
 
 	local effRadius = (RES.triggerRadius or 28)
 	if isFtue then effRadius = effRadius * (RES.ftueRadiusMult or 1.5) end
+	-- TRADE SECRET (Chad S34): flying FASTER widens the catch scoop a little — rewards boom-and-zoom
+	-- without telling the player. 1× at glide → up to 1+scoopSpeedGain at ~2× glide. No UI, no announce.
+	local glideSp = eagleGlide()
+	effRadius = effRadius * (1 + clamp((flightEngine.speed - glideSp) / math.max(1, glideSp), 0, 1) * (RES.scoopSpeedGain or 0.25))
 
 	local bestTellId, bestTellTime = nil, math.huge
 	tellTimer = math.max(0, tellTimer - dt)
@@ -1799,7 +1803,7 @@ _G.RescueSnapshot = function()
 		phase = rescueState.phase, timeLeft = rescueState.timeLeft,
 		score = rescueState.score, delivered = rescueState.delivered, rescued = rescueState.rescued,
 		carry = #riders, capacity = rescueState.capacity or (RES and RES.carryCapacity) or 3,
-		style = styleMeter,
+		style = styleMeter, combo = rescueState.combo or 0,
 	}
 end
 

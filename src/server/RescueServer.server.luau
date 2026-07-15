@@ -419,7 +419,7 @@ local playerState = {}           -- [player] = { score, carry, delivered, rescue
 local function stateFor(player)
 	local ps = playerState[player]
 	if not ps then
-		ps = { score = 0, carry = 0, delivered = 0, rescued = 0 }
+		ps = { score = 0, carry = 0, delivered = 0, rescued = 0, combo = 0, lastCatchAt = -1e9 }
 		playerState[player] = ps
 	end
 	return ps
@@ -435,6 +435,7 @@ local function pushState(player)
 		capacity = R.carryCapacity or 3,
 		delivered = ps.delivered,
 		rescued = ps.rescued,
+		combo = ps.combo or 0,
 	})
 end
 
@@ -494,7 +495,17 @@ Remotes.CatchSquirrel.OnServerEvent:Connect(function(player, squirrelId, styleMu
 	local energyMult = 1
 	if speedTier == "BLAZING" then energyMult = R.blazingMult or 2.0
 	elseif speedTier == "SWIFT" then energyMult = R.swiftMult or 1.5 end
-	local pts = math.floor((R.basePoints or 100) * rarityMult * mult * energyMult + 0.5)
+	-- COMBO (Chad S34): consecutive catches within comboWindow build a streak ×2..×comboMax that
+	-- multiplies the score. Boom-and-zoom (fast flight + the speed-widened scoop) keeps the chain alive;
+	-- flying off to deliver lets the window lapse — so "bank now or keep chaining?" becomes a real choice.
+	local now = os.clock()
+	if now - (ps.lastCatchAt or -1e9) <= (R.comboWindow or 4) then
+		ps.combo = math.min((ps.combo or 0) + 1, R.comboMax or 6)
+	else
+		ps.combo = 1
+	end
+	ps.lastCatchAt = now
+	local pts = math.floor((R.basePoints or 100) * rarityMult * mult * energyMult * ps.combo + 0.5)
 	ps.score += pts
 
 	-- Remove the world squirrel (the client already flew the catch locally) + schedule a fresh one.
