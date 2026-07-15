@@ -1058,7 +1058,14 @@ if RESCUE_ON then
 			-- the kid sees is small, whole, and verifiable in-head — that verification IS the teaching.
 			stampToken += 1
 			local count = math.max(1, math.floor(tonumber(n) or 1))
-			stamp.Text = string.format("🐿️ %d × %d = 🌰 %d!", count, count, count * count)
+			-- COMBO CASH-IN (Chad S36 "multiply the delivery"): the banked deliver combo arrives as `mult`;
+			-- when >1 the drop pays n × n × combo — shown so the ×N is the payoff reveal after the skip-count.
+			local cmb = math.max(1, math.floor(tonumber(mult) or 1))
+			if cmb > 1 then
+				stamp.Text = string.format("🐿️ %d × %d × 🔥%d = 🌰 %d!", count, count, cmb, count * count * cmb)
+			else
+				stamp.Text = string.format("🐿️ %d × %d = 🌰 %d!", count, count, count * count)
+			end
 			stamp.TextColor3 = Color3.fromRGB(255, 205, 80)
 			stamp.TextTransparency = 0
 			stamp.Size = UDim2.new(0, 600, 0, 110)

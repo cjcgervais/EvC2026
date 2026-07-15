@@ -453,6 +453,8 @@ local function pushState(player)
 		delivered = ps.delivered,
 		rescued = ps.rescued,
 		combo = ps.combo or 0,
+		deliverN = ps.deliverN,           -- the authoritative n the LAST deliver paid (sentence renders from this)
+		deliverCombo = ps.deliverCombo,   -- the combo the LAST deliver cashed in (the sentence card's ×N)
 		timeFactor = ps.timeFactor,       -- nil until the PERFECT-TEN finale lands at round end
 		preFactorScore = ps.preFactorScore, -- the round total BEFORE the time factor (the sentence's left side)
 	})
@@ -534,9 +536,8 @@ Remotes.CatchSquirrel.OnServerEvent:Connect(function(player, squirrelId, styleMu
 	local energyMult = 1
 	if speedTier == "BLAZING" then energyMult = R.blazingMult or 2.0
 	elseif speedTier == "SWIFT" then energyMult = R.swiftMult or 1.5 end
-	-- COMBO (Chad S34): consecutive catches within comboWindow build a streak ×2..×comboMax that
-	-- multiplies the score. Boom-and-zoom (fast flight + the speed-widened scoop) keeps the chain alive;
-	-- flying off to deliver lets the window lapse — so "bank now or keep chaining?" becomes a real choice.
+	-- COMBO (Chad S34): consecutive catches within comboWindow build a streak ×2..×comboMax. Boom-and-zoom
+	-- (fast flight + the speed-widened scoop) keeps the chain alive; flying off to deliver lets it lapse.
 	local now = os.clock()
 	if now - (ps.lastCatchAt or -1e9) <= (R.comboWindow or 4) then
 		ps.combo = math.min((ps.combo or 0) + 1, R.comboMax or 6)
@@ -544,7 +545,11 @@ Remotes.CatchSquirrel.OnServerEvent:Connect(function(player, squirrelId, styleMu
 		ps.combo = 1
 	end
 	ps.lastCatchAt = now
-	local pts = math.floor((R.basePoints or 100) * rarityMult * mult * energyMult * ps.combo + 0.5)
+	-- The combo now pays at DELIVER, not per-catch (Chad S36: "multiply the delivery"). Bank the PEAK combo
+	-- reached during THIS carry load; the deliver multiplies n² by it. Per-catch score stays combo-free so
+	-- the streak's whole payoff lands at the waterfall — "bank now or keep chaining for a bigger drop?".
+	ps.loadCombo = math.max(ps.loadCombo or 1, ps.combo)
+	local pts = math.floor((R.basePoints or 100) * rarityMult * mult * energyMult + 0.5)
 	ps.score += pts
 
 	-- Remove the world squirrel (the client already flew the catch locally) + schedule a fresh one.
@@ -578,7 +583,16 @@ Remotes.DeliverSquirrels.OnServerEvent:Connect(function(player)
 	-- = n² ACORNS (an acorn = acornValue points; the HUD divides so every number the kid sees is small
 	-- and round). n² is the genius knob: two trips of 5 pay 50 acorns, one brave trip of 10 pays 100 —
 	-- "one more before the waterfall?" becomes a computable lesson that multiplication beats addition.
-	ps.score += n * n * (R.acornValue or 10)
+	-- COMBO CASH-IN (Chad S36 "multiply the delivery"): × the PEAK combo you built while chaining this load
+	-- → the drop pays n × n × combo acorns. deliverCombo is sent so the client sentence card is EXACTLY the
+	-- payout (the sentence must never lie — red-team B1). Reset the streak for the next load.
+	local cmb = math.max(1, math.floor(ps.loadCombo or 1))
+	ps.score += n * n * (R.acornValue or 10) * cmb
+	-- Send BOTH the authoritative n and the combo so the client sentence renders from SERVER truth, not the
+	-- local rider count (which can diverge from ps.carry — red-team B1). The two land in the same push.
+	ps.deliverN = n
+	ps.deliverCombo = cmb
+	ps.loadCombo = nil
 	ps.carry = 0
 	-- PERFECT TEN (Chad: "10/10 in good time"): stamp the clock the moment the 10th rescue lands;
 	-- endRound turns it into the TIME FACTOR finale multiplier.
@@ -604,6 +618,9 @@ local function startRound()
 		ps.perfectAt = nil
 		ps.timeFactor = nil
 		ps.preFactorScore = nil
+		ps.loadCombo = nil
+		ps.deliverCombo = nil
+		ps.deliverN = nil
 		-- keep `rescued` as the running crowd across rounds
 	end
 	pushAll()

@@ -1153,6 +1153,8 @@ local rescueState = {
 	score = 0, delivered = 0, rescued = 0, timeLeft = 0, combo = 0,
 	-- optional; the server sends these only once the PERFECT-TEN finale lands at results.
 	timeFactor = nil :: number?, preFactorScore = nil :: number?,
+	-- optional; set at each deliver so the sentence card renders n × n × combo from server truth (S36).
+	deliverN = nil :: number?, deliverCombo = nil :: number?,
 }
 task.spawn(function()
 	if not (RES and RES.enabled) then return end
@@ -1952,7 +1954,16 @@ local function stepHopOff(dt)
 	if hopOff.i >= hopOff.n then
 		local n = hopOff.n
 		hopOff = nil
-		if _G.RescueStamp then _G.RescueStamp("sentence", nil, nil, nil, n) end
+		-- Render the sentence from SERVER truth (deliverN × deliverN × deliverCombo = exactly the acorns paid,
+		-- red-team B1). Only when the authoritative n has arrived; else fall back to the plain local n × n with
+		-- NO combo, so the card never applies a combo without its matching n (never a lie).
+		if _G.RescueStamp then
+			if rescueState.deliverN then
+				_G.RescueStamp("sentence", nil, nil, rescueState.deliverCombo, rescueState.deliverN)
+			else
+				_G.RescueStamp("sentence", nil, nil, nil, n)
+			end
+		end
 	end
 end
 
