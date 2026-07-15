@@ -1199,7 +1199,10 @@ end
 -- doesn't resolve in this build it simply stays silent (no error); Chad reports which resolved.
 --------------------------------------------------------------------------------
 local SFX_PING   = "rbxasset://sounds/electronicpingshort.wav"
-local SFX_SWOOSH = "rbxasset://sounds/swoosh.wav"
+-- S36 #14: swoosh.wav returns "Asset is not approved for the requester" (Chad's Output log ×70) so every
+-- hup/whip/pomf-whoosh was silent. action_falling.ogg is a locally-shipped, moderation-immune wind whoosh
+-- (the R15 falling sound) — it pitches the same way and doubles as the base WIND STEM in updateMusic.
+local SFX_SWOOSH = "rbxasset://sounds/action_falling.ogg"
 local SFX_SNAP   = "rbxasset://sounds/switch.wav"
 
 local function playSound(id, vol, speed)
