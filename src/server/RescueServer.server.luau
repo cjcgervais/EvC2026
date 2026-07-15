@@ -436,6 +436,8 @@ local function pushState(player)
 		delivered = ps.delivered,
 		rescued = ps.rescued,
 		combo = ps.combo or 0,
+		timeFactor = ps.timeFactor,       -- nil until the PERFECT-TEN finale lands at round end
+		preFactorScore = ps.preFactorScore, -- the round total BEFORE the time factor (the sentence's left side)
 	})
 end
 
@@ -535,8 +537,17 @@ Remotes.DeliverSquirrels.OnServerEvent:Connect(function(player)
 	local n = ps.carry
 	ps.delivered += n
 	ps.rescued += n
-	ps.score += n * (R.deliverBonus or 25)
+	-- MATH DELIVERY (Packet-03 §3): the deliver bonus IS a multiplication sentence — n squirrels × n
+	-- = n² ACORNS (an acorn = acornValue points; the HUD divides so every number the kid sees is small
+	-- and round). n² is the genius knob: two trips of 5 pay 50 acorns, one brave trip of 10 pays 100 —
+	-- "one more before the waterfall?" becomes a computable lesson that multiplication beats addition.
+	ps.score += n * n * (R.acornValue or 10)
 	ps.carry = 0
+	-- PERFECT TEN (Chad: "10/10 in good time"): stamp the clock the moment the 10th rescue lands;
+	-- endRound turns it into the TIME FACTOR finale multiplier.
+	if not ps.perfectAt and ps.delivered >= (R.perfectTenAt or 10) then
+		ps.perfectAt = timeLeft
+	end
 	pushState(player)
 end)
 
@@ -553,6 +564,9 @@ local function startRound()
 		ps.score = 0
 		ps.carry = 0
 		ps.delivered = 0
+		ps.perfectAt = nil
+		ps.timeFactor = nil
+		ps.preFactorScore = nil
 		-- keep `rescued` as the running crowd across rounds
 	end
 	pushAll()
@@ -560,6 +574,26 @@ end
 
 local function endRound()
 	phase = "results"
+	-- PERFECT TEN → TIME FACTOR (Packet-03 §3 layer 3): a player who delivered their 10th rescue with
+	-- clock to spare gets the round total multiplied — staged as ONE last multiplication sentence the
+	-- kid can verify in-head ("Round 380 × 2 = 760!"). Small whole numbers only: ×2 for making it,
+	-- ×3 / rare ×4 for making it FAST. Server-authoritative; the client just displays the sentence.
+	for _, player in ipairs(Players:GetPlayers()) do
+		local ps = stateFor(player)
+		if ps.perfectAt and not ps.timeFactor then
+			-- Quantize to WHOLE ACORNS first (style multipliers leave ragged points) so the finale
+			-- sentence is EXACTLY true in acorns — a kid who verifies "139 × 2" in-head must never
+			-- catch the game lying (red-team B1).
+			local av = R.acornValue or 10
+			ps.score = math.floor(ps.score / av + 0.5) * av
+			local f = 2
+			if ps.perfectAt >= (R.timeFactor4At or 60) then f = 4
+			elseif ps.perfectAt >= (R.timeFactor3At or 30) then f = 3 end
+			ps.preFactorScore = ps.score
+			ps.timeFactor = f
+			ps.score *= f
+		end
+	end
 	pushAll()
 end
 
