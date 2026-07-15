@@ -1844,6 +1844,12 @@ local function scanSquirrels(dt)
 						lastFullHint = os.clock()
 						if _G.RescueStamp then _G.RescueStamp("full", nil, nil, nil, #riders + inFlight) end
 					end
+					-- DIAG (S36): a REAL catch line was suppressed as full — is the client "full" at a count
+					-- the SERVER doesn't share? (phantom-inflated #riders). Compare to the server carry.
+					if RES.catchDiag then
+						warn(string.format("[RescueDIAG-C] FULL-suppress: riders=%d inFlight=%d serverCarry=%s cap=%d",
+							#riders, inFlight, tostring(rescueState.carry), rescueState.capacity or RES.carryCapacity or 3))
+					end
 				elseif roomForTell and closing >= gate then
 					local toSurface = math.max(0, dist - effRadius)
 					local tte = toSurface / math.max(closing, 1e-3)
@@ -2081,6 +2087,12 @@ local function updateRescue(dt)
 	-- Only when NOTHING is in flight (sacred or crew) AND no hop-off ceremony is paying out — the server's
 	-- carry is already 0 during hop-off, so reconciling then would insta-dump the whole dismount queue.
 	if not catch and #crewCatches == 0 and not hopOff and type(rescueState.carry) == "number" and #riders > rescueState.carry then
+		-- DIAG (S36): a phantom is being trimmed — the client showed more riders than the server counted.
+		-- This is the "carry went 9->8 after a catch" event; the count above tells us how many were lost.
+		if RES.catchDiag then
+			warn(string.format("[RescueDIAG-C] TRIM riders %d -> serverCarry %d (%d phantom)",
+				#riders, rescueState.carry, #riders - rescueState.carry))
+		end
 		trimRidersTo(rescueState.carry)
 	end
 

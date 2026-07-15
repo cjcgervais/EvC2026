@@ -487,18 +487,38 @@ end
 -- bounds every client value (clamp + a distance sanity gate below) — but does NOT fully re-simulate the
 -- catch. Fine for solo Phase 0; a competitive build would move detection server-side. (red-team REVISE 3.)
 Remotes.CatchSquirrel.OnServerEvent:Connect(function(player, squirrelId, styleMult, speedTier)
-	if phase ~= "active" then return end
-	if typeof(squirrelId) ~= "number" then return end
+	-- CATCH DIAGNOSTIC (S36): log the exact outcome so Chad's "8-9/10 don't count" gets a named cause
+	-- (SYNC check; zero behavior when R.catchDiag is off). ps may not exist yet on the earliest rejects.
+	local function diag(reason, dist)
+		if not R.catchDiag then return end
+		local psx = playerState[player]
+		warn(string.format("[RescueDIAG] %s  id=%s carry=%s/%d%s", reason, tostring(squirrelId),
+			tostring(psx and psx.carry), R.carryCapacity or 3, dist and string.format(" dist=%.0f", dist) or ""))
+	end
+	if phase ~= "active" then diag("REJECT:phase"); return end
+	if typeof(squirrelId) ~= "number" then diag("REJECT:badId"); return end
 	local s = squirrels[squirrelId]
-	if not s or s.state ~= "stranded" then return end
+	if not s or s.state ~= "stranded" then diag("REJECT:gone(" .. tostring(s and s.state) .. ")"); return end
 	local ps = stateFor(player)
-	if ps.carry >= (R.carryCapacity or 3) then return end   -- full — must deliver first
+	if ps.carry >= (R.carryCapacity or 3) then diag("REJECT:FULL"); return end   -- full — must deliver first
 	-- Distance sanity: the eagle must actually be near the squirrel (bounds teleport-catching).
 	local body = eagleBodyOf(player)
 	if body and s.model and s.model.PrimaryPart then
-		if (body.Position - s.model.PrimaryPart.Position).Magnitude > (R.triggerRadius or 28) * 2.5 then
+		local dist = (body.Position - s.model.PrimaryPart.Position).Magnitude
+		-- VELOCITY-AWARE gate (S36 fix): the client legitimately triggers within its ftue/scoop-widened
+		-- radius, but by the time this fires the big (2.3×) eagle has flown on — at boom-and-zoom speed the
+		-- server sees it much farther (diag: legit catches at dist 80-110, clipped by the old flat 105 gate
+		-- → phantoms → "8-9/10 don't count"). Gate = base slack + how far the eagle travels during
+		-- ~catchGateLatency. Still bounds a gross teleport-claim; scales with the actual cause (speed).
+		local speed = body.AssemblyLinearVelocity.Magnitude
+		local gate = (R.triggerRadius or 28) * (R.catchGateMult or 3.5) + speed * (R.catchGateLatency or 0.25)
+		if dist > gate then
+			diag(string.format("REJECT:dist(gate=%.0f)", gate), dist)
 			return
 		end
+		diag("ACCEPT", dist)
+	else
+		diag("ACCEPT(nobody)")
 	end
 
 	-- Accept the catch.

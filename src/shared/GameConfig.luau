@@ -892,6 +892,20 @@ GameConfig.Rescue = {
 	chirpMinGap      = 0.5,    -- s; never chirp faster than this (perf + cacophony floor).
 	chirpVol         = 0.14,   -- rider chirp volume.
 
+	-- CATCH DIAGNOSTIC (S36) — when true, the server logs every CatchSquirrel outcome (ACCEPT / the exact
+	-- REJECT reason + carry + distance) and the client logs FULL-suppresses + phantom trims, tagged
+	-- "[RescueDIAG]". This is the SYNC check for Chad's recurring "catches around 8-9/10 don't count":
+	-- one flight's Output names the exact cause. Flip false (or delete) once the fix lands. Zero behavior.
+	-- S36: the fix (velocity-aware gate below) is Chad-confirmed ("seems good") → flag OFF; code stays gated.
+	catchDiag        = false,
+	-- CATCH DISTANCE GATE (S36 fix) — the server's sanity bound on how far the eagle may be from a squirrel
+	-- when it claims a catch. The old flat `triggerRadius*2.5` (=105) clipped LEGIT catches: the big (2.3×)
+	-- eagle flying fast is 80-110 studs out by the time the catch reaches the server (diag-confirmed
+	-- REJECT:dist at 106-110) → phantoms → "8-9/10 don't count". Now VELOCITY-AWARE: base slack + the
+	-- distance the eagle covers during ~catchGateLatency. Still bounds gross teleport-claims (PvE, low-stakes).
+	catchGateMult    = 3.5,    -- base gate = triggerRadius × this (=147 at triggerRadius 42; covers eagle size).
+	catchGateLatency = 0.25,   -- + eagleSpeed × this (studs of fly-past slack; scales with boom-and-zoom speed).
+
 	-- MISSION SELECTOR (Packet-03 §4, queue #15). The active mission from GameConfig.Missions below.
 	-- "waterfall_meadow" = the shipped behavior. Flip this ONE string to switch missions (e.g. to
 	-- "fox_on_the_hill" once THE FOX lands). Every mission field falls back to the current literal, so an
