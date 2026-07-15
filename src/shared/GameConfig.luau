@@ -870,6 +870,27 @@ GameConfig.Rescue = {
 	grovePerchCount  = 5,      -- perch-trees per grove (>~ live squirrels/grove so respawns have slack).
 	groveRadius      = 130,    -- studs; a grove's trees/perches cluster within this radius of its centre.
 	groveMinGap      = 520,    -- studs; keep grove centres at least this far apart (distinct clumps).
+
+	-- MUSIC ESCALATION (Packet-03 §6, queue #14). ONE number — deliveredThisRound + carry — drives a
+	-- layered gray-box swell toward the Perfect Ten: base wind → +pizzicato@1 → +rhythm@4 → +brass@7 →
+	-- @8-9 strip to a heartbeat pulse. GRAY-BOX (pitched rbxasset one-shots on a beat clock + a looped
+	-- wind bed); real stems are a later asset pass. Client PRESENTATION only (audio) — the SWELL FEEL is
+	-- Chad's Play to certify (the #14 FUN gate). All consumed with `or`-defaults so a config-only revert
+	-- stays build-green.
+	musicEnabled     = true,
+	musicWindVol     = 0.10,   -- base looped wind-bed volume while a round is active (the always-on floor).
+	musicBeatSlow    = 0.75,   -- s between music beats at 0 progress (calm)…
+	musicBeatFast    = 0.34,   -- …tightening to this at the Perfect Ten (urgent, driving).
+	musicPizzAt      = 1,      -- progress (delivered+carry) at which the pizzicato layer enters (1st catch).
+	musicRhythmAt    = 4,      -- …the offbeat rhythm layer fills the groove…
+	musicBrassAt     = 7,      -- …the low brass swell note joins…
+	musicHeartAt     = 8,      -- …@8-9 STRIP the melody to a drums+heartbeat pulse (tension before ten).
+	musicLayerVol    = 0.16,   -- per-layer one-shot volume (low; layered they build without clipping).
+	-- CREW CHOIR — rider chatter scales with crew size ("the crew is the choir").
+	chirpBase        = 2.4,    -- s between rider chirps with 1 rider aboard…
+	chirpPerRider    = 0.14,   -- …minus this per extra rider (a fuller back = busier chatter), floored.
+	chirpMinGap      = 0.5,    -- s; never chirp faster than this (perf + cacophony floor).
+	chirpVol         = 0.14,   -- rider chirp volume.
 }
 
 GameConfig.Thermals = {

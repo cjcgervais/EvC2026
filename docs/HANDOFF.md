@@ -160,6 +160,28 @@ stems + crew chatter; include the SFX_SWOOSH replacement) → #15 MISSION FRAMEW
 Chad's Play gates the routing fun). Known cosmetic follow-up: sticky per-rider seats (red-team F3 one-seat
 pop). Then Fable Packet-04 off Chad's next §E report.**
 
+### ▶ S36 (2026-07-15, autonomous program.md loop): #14 MUSIC ESCALATION BUILT (build-green, Fable-5 audited both ends, UNCOMMITTED)
+Chad launched the autonomous **`program.md`** loop (registered + committed `c926b25` via `/agent-builder`)
+with a directive to bracket the work in **Fable-5 (model: fable) audits before and after** — done.
+- **Pre-work Fable audit → GO-WITH-CAVEATS** (the `playSound` 4s-self-destruct must not carry a LOOP;
+  `deliveredThisRound` = `rescueState.delivered + #riders`; the spec's "S33 drum" isn't in code; use the
+  locally-verified approved `rbxasset://sounds/action_falling.ogg`).
+- **#14a swoosh fix:** `SFX_SWOOSH` → `rbxasset://sounds/action_falling.ogg` (fixes the ×70 "Asset not
+  approved"; pomf/hup/whip audible again; doubles as the wind bed).
+- **#14b music escalation:** new client `updateMusic(dt)`/`fadeMusic()` — a gray-box swell on the drama
+  number `delivered + #riders`: base WIND BED (persistent looped Sound, bypasses the 4s-destroy) → +pizzicato@1
+  → +rhythm@4 → +brass@7 → @8-9 strip to a heartbeat pulse; tempo tightens with progress. Crew choir = rider
+  chirp cadence scales with `#riders`. New `GameConfig.Rescue` music/choir keys (all `or`-defaulted).
+  Hooked after `updateRiders(dt)`; faded in the teardown branch. **Client PRESENTATION only — CS-1..9/kernel/
+  camera/aim untouched by construction; no server-authority path.**
+- **Post-work Fable audit → KEEP** (zero BLOCK/REVISE; 4 cosmetic NOTEs; the one actioned = gated the delayed
+  heartbeat thump on `phase == "active"`). **Verify:** rojo-build PASS; luau-lsp baseline ONLY (0 new);
+  selene UNAVAILABLE (404). Green.
+- **DECIDE = FUN-GATE.** #14's buildable substrate is DONE; **the SWELL is Chad's Play to certify** (7-point
+  LISTEN checklist in `.loop/rescue-phase0/state.md` S36). **UNCOMMITTED — 2 commits prepped, ASK-gated:**
+  (1) #14a swoosh, (2) #14b music+config. **▶ NEXT: #15 mission framework + THE FOX (framework autonomous,
+  fox-routing fun Chad-gated), then sticky per-rider seats (F3), then §E → Packet-04.**
+
 ### ▶ RESCUE PHASE-0 QUEUE (work top-down in the loop)
 - **#0 [DONE S32]** bigger trigger (`triggerRadius` 28→42) + easier snatch (`closingGateFrac` 0.40→0.30) + bigger map (`valleyRadius` 1000→1600, `treeCount`→68, `squirrelCount`→15). *(Chad's two asks — applied; he re-plays to confirm.)*
 - **#1 [DONE S33] GROVES** (Fable §B5): `RescueServer.buildWorld` clusters perch-trees into `groveCount=4` groves (`grovePerchCount=5`, `groveRadius=130`, `groveMinGap=520`) + backdrop scatter; squirrels spawn ONLY on the 20 grove perches → catch chains + style continuity.
@@ -175,7 +197,7 @@ pop). Then Fable Packet-04 off Chad's next §E report.**
 - **#11 [DONE S34-late] CREW CATCH v1** (Packet-03 slice 1 core) + energy bonus + combo x2..x6 + speed-scoop + dive-wing fold + bigger eagle — see the S34-LATE block above. UNPLAYTESTED except where marked Chad-approved.
 - **#12 [DONE S35] RIDER GROWTH (+COURAGE)** — riders grow a step per crew catch witnessed (eased ScaleTo, cap ×1.24) + re-settle hop + seat lift. Build-green, red-team-covered, UNPLAYTESTED, uncommitted.
 - **#13 [DONE S35] MATH DELIVERY** — n²-acorn deliver + hop-off skip-count ceremony + sentence card + acorn HUD + PERFECT-TEN quantized time factor. Build-green, RED-TEAMED (B1/R1 fixed), UNPLAYTESTED, uncommitted.
-- **#14 MUSIC ESCALATION** (Packet-03 slice 3) — layered stems crossfaded on `delivered + carry` progress-to-ten; crew chatter scales with crew size.
+- **#14 [DONE S36] MUSIC ESCALATION** (Packet-03 slice 3) — gray-box swell crossfaded on `delivered + carry` progress-to-ten (wind → pizzicato@1 → rhythm@4 → brass@7 → heartbeat@8-9, tempo tightening) + crew-choir chirp scaling + the SFX_SWOOSH approved-id fix. Build-green, Fable-5 audited both ends (KEEP), UNCOMMITTED. **The SWELL is Chad's FUN gate** (listen checklist in the ledger S36).
 - **#15 MISSION FRAMEWORK + THE FOX** (Packet-03 slice 4 — Chad's Play gates the routing-pressure fun).
 - **#10 PHASE-1 WORLD:** real trunk/canopy collision + a dedicated valley that skips the combat `BuildMap` (currently kept as floor+backdrop); then line-riding style measures the canopy the player threads.
 - **#GATE [needs Chad's Play — NOT loopable, DO THIS NEXT]:** fly the Packet-02 §A checklist → *"grin at the 3rd catch + push your luck for one more before the waterfall?"* + capture the §E report-back → Fable Packet 03. Also report which gray-box sound ids resolved (Packet 01 §E). This is the only step the loop cannot self-certify.

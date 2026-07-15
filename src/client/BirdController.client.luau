@@ -1968,6 +1968,91 @@ local function updateDeliver(dt)
 	end
 end
 
+--------------------------------------------------------------------------------
+-- MUSIC ESCALATION (#14, Packet-03 §6) — ONE number, deliveredThisRound + carry, drives a layered
+-- gray-box swell toward the Perfect Ten: base wind → +pizzicato@1 → +rhythm@4 → +brass@7 → @8-9 strip
+-- to a heartbeat pulse; tempo tightens as the round builds. The crew is the choir (rider chatter scales
+-- with crew size). AUDIO ONLY — reads rescue state, writes only Sound instances; touches NO control /
+-- camera / kernel code (CS-1..9 untouched by construction). The looped WIND BED is a PERSISTENT Sound
+-- (NOT routed through playSound, which self-destructs at 4s and would kill a loop); every other layer is
+-- a beat-clocked ONE-SHOT (playSound's 4s cleanup is correct for those). The SWELL FEEL is Chad's FUN gate.
+--------------------------------------------------------------------------------
+local musicBed               -- persistent looped wind Sound (created lazily on first active frame)
+local musicBeatTimer = 0     -- counts down to the next music beat
+local musicBeatFlip  = false -- alternates each beat so rhythm can play OFFbeats vs pizzicato/brass ON-beats
+local chirpTimer     = 0     -- counts down to the next crew-choir rider chirp
+
+local function fadeMusic()
+	if musicBed then musicBed.Volume = 0 end
+end
+
+local function updateMusic(dt)
+	if not (RES and RES.musicEnabled ~= false) then return end
+	local active = rescueState.phase == "active"
+	-- WIND BED — a persistent LOOPED Sound; volume eased toward the floor while active, to 0 otherwise.
+	if not musicBed then
+		musicBed = Instance.new("Sound")
+		musicBed.Name = "RescueWindBed"
+		musicBed.SoundId = SFX_SWOOSH          -- action_falling.ogg pitched down into a rumble-wind bed
+		musicBed.Looped = true
+		musicBed.Volume = 0
+		musicBed.PlaybackSpeed = 0.5
+		musicBed.Parent = SoundService
+		musicBed:Play()
+	end
+	local targetWind = active and (RES.musicWindVol or 0.10) or 0
+	musicBed.Volume = musicBed.Volume + (targetWind - musicBed.Volume) * math.min(1, dt * 3)
+	if not active then
+		musicBeatTimer, chirpTimer = 0, 0
+		return
+	end
+
+	-- THE DRAMA NUMBER — progress toward the Perfect Ten (delivered this round + what you're carrying).
+	local prog = (rescueState.delivered or 0) + #riders
+	local frac = clamp(prog / (RES.perfectTenAt or 10), 0, 1)
+
+	-- BEAT CLOCK — tempo tightens from calm to driving as the round builds.
+	local beatLen = (RES.musicBeatSlow or 0.75)
+		+ ((RES.musicBeatFast or 0.34) - (RES.musicBeatSlow or 0.75)) * frac
+	musicBeatTimer -= dt
+	if musicBeatTimer <= 0 then
+		musicBeatTimer += beatLen
+		musicBeatFlip = not musicBeatFlip
+		local vol = RES.musicLayerVol or 0.16
+		if prog >= (RES.musicHeartAt or 8) then
+			-- @8-9: STRIP the melody — a low double-thump heartbeat drives the tension toward ten.
+			playSound(SFX_SNAP, vol * 1.1, 0.4)
+			-- gate the off-beat thump so a round-end/death mid-beat can't leak one stray thump (audit NOTE).
+			task.delay(beatLen * 0.5, function()
+				if rescueState.phase == "active" then playSound(SFX_SNAP, vol * 0.8, 0.4) end
+			end)
+		else
+			if prog >= (RES.musicPizzAt or 1) and not musicBeatFlip then
+				playSound(SFX_PING, vol, 1.5)              -- PIZZICATO — soft ping on the downbeat
+			end
+			if prog >= (RES.musicRhythmAt or 4) and musicBeatFlip then
+				playSound(SFX_PING, vol * 0.9, 2.0)        -- RHYTHM — an offbeat ping fills the groove
+			end
+			if prog >= (RES.musicBrassAt or 7) and not musicBeatFlip then
+				playSound(SFX_SNAP, vol, 0.7)              -- BRASS — a low swell note on the downbeat
+			end
+		end
+	end
+
+	-- CREW CHOIR — rider chatter; a fuller back = busier chirping ("the crew is the choir").
+	if #riders > 0 then
+		chirpTimer -= dt
+		if chirpTimer <= 0 then
+			chirpTimer = math.max(RES.chirpMinGap or 0.5,
+				(RES.chirpBase or 2.4) - (RES.chirpPerRider or 0.14) * (#riders - 1))
+			local wobble = 1.6 + 0.5 * math.sin(prog * 1.3 + #riders)  -- pitch wanders so it's not a metronome
+			playSound(SFX_PING, RES.chirpVol or 0.14, wobble)
+		end
+	else
+		chirpTimer = 0
+	end
+end
+
 -- MASTER rescue update, called once per flight frame from onFlightStep.
 local function updateRescue(dt)
 	if not (RES and RES.enabled) then return end
@@ -1980,6 +2065,7 @@ local function updateRescue(dt)
 		if #riders > 0 then releaseRiders() end
 		rescueCam.env = 0
 		slowmoDesat(0)
+		fadeMusic()
 		return
 	end
 	updateStyle(dt)
@@ -1987,6 +2073,7 @@ local function updateRescue(dt)
 	if catch then stepCatch(dt) end
 	stepCrewCatches(dt)
 	updateRiders(dt)
+	updateMusic(dt)
 	stepHopOff(dt)
 	updateDeliver(dt)
 	updateWayfinder()
