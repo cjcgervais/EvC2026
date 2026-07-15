@@ -37,8 +37,17 @@ local IDLE_FREQUENCY = 1.5            -- radians/sec for idle bob (uses dt accum
 -- ∧ (tips-down tent; a dihedral ∨ would be tips-up). Verified deep-research ranges: ~30–45° aft
 -- sweep, ~10–20° anhedral. These are cosmetic only
 -- (Motor6D.Transform, which never feeds FlightPhysics), so they are free to be art-directed.
-local DIVE_SWEEPBACK = math.rad(42)   -- wings pull aft into the swept-V/arrowhead while diving
-local DIVE_ANHEDRAL  = math.rad(20)   -- and the tips dip below the shoulder (cupped toward prey)
+-- STAGED DIVE FOLD (S34 sandbox): instead of one binary dive pose, the wings UNFOLD through smooth
+-- levels as the nose drops — first the primaries sweep aft a little (shallow dive), then deepen into the
+-- full swept-back arrowhead stoop with a cupped anhedral + a subtle blade tilt (committed vertical
+-- stoop). Driven by the body's own continuous nose-down depth, smoothstepped through 3 keyframes.
+local DIVE_SWEEP_L1  = math.rad(24)   -- L1 (shallow): the hand/primaries begin to sweep aft
+local DIVE_SWEEP_L2  = math.rad(54)   -- L2 (full stoop): dramatic swept-back arrowhead (the "sweet" line)
+local DIVE_ANHED_L1  = math.rad(10)   -- L1: tips begin to dip
+local DIVE_ANHED_L2  = math.rad(26)   -- L2: full cupped anhedral (tips down, toward prey)
+local DIVE_BLADE     = math.rad(9)    -- L2 only: subtle leading-edge-down blade tilt = a bladed diving look
+local DIVE_ONSET_Y   = -0.12          -- body LookVector.Y where the fold begins (level → shallow)
+local DIVE_FULL_Y    = -0.92          -- LookVector.Y where it reaches the full committed stoop
 local SMOOTH = 10                     -- how quickly the wing eases toward its target
 
 -- Per-model idle-bob phase accumulator. Kept in a WEAK-KEYED Lua table (not a model
@@ -96,6 +105,21 @@ end
 -- Linear blend of two CFrames' rotation (good enough for small wing angles).
 local function approachCFrame(current, target, alpha)
 	return current:Lerp(target, math.clamp(alpha, 0, 1))
+end
+
+-- Smoothstep (Hermite) — eased 0→1 as x runs edge0→edge1 (edge0 may be > edge1 for a decreasing input).
+local function smoothstep(edge0, edge1, x)
+	local t = math.clamp((x - edge0) / (edge1 - edge0), 0, 1)
+	return t * t * (3 - 2 * t)
+end
+
+-- Smoothly interpolate through THREE keyframes as x runs 0 → 0.5 → 1 — a "smooth step between multiple
+-- levels of unfolding": k0 at rest, k1 at the half-dive, k2 at the full stoop.
+local function staged3(x, k0, k1, k2)
+	if x <= 0.5 then
+		return k0 + (k1 - k0) * smoothstep(0, 0.5, x)
+	end
+	return k1 + (k2 - k1) * smoothstep(0.5, 1, x)
 end
 
 --------------------------------------------------------------------------------
@@ -475,22 +499,27 @@ function BirdBuilder.AnimateWings(model, isFlapping, isDiving, flapPhase, dt)
 
 	-- Compute this frame's pose, shared by both wings:
 	--   dihedral = up/down tip angle (about the joint's Z/forward axis)
-	--   sweep    = aft yaw of the whole wing (about the joint's Y/up axis) — only used diving
-	local dihedral, sweep
-	if isDiving then
-		-- Glide-dive: pull the wings AFT (swept-V arrowhead) and drop the tips into a shallow
-		-- anhedral. The two together read as a stooping raptor, not a flat glide.
-		dihedral = -DIVE_ANHEDRAL
-		sweep = DIVE_SWEEPBACK
-	elseif isFlapping then
-		-- Sine flap about neutral; flapPhase comes from the physics engine.
-		dihedral = math.sin(flapPhase) * FLAP_AMPLITUDE
-		sweep = 0
+	--   sweep    = aft yaw of the whole wing (about the joint's Y/up axis) — grows with dive depth
+	--   blade    = leading-edge-down tilt (about X) — only at the deep stoop, for the bladed look
+	-- BASE pose = flap or gentle idle bob, wings held out flat.
+	local baseDihedral
+	if isFlapping then
+		baseDihedral = math.sin(flapPhase) * FLAP_AMPLITUDE
 	else
-		-- Gentle idle glide: small slow bob, wings held out flat (no sweep).
-		dihedral = math.sin(idle) * IDLE_AMPLITUDE
-		sweep = 0
+		baseDihedral = math.sin(idle) * IDLE_AMPLITUDE
 	end
+
+	-- STAGED DIVE FOLD (S34 sandbox): read the body's own nose-down depth (continuous) and UNFOLD the
+	-- wings through smooth levels — sweep the primaries aft, then deepen into the full swept arrowhead
+	-- stoop with a cupped anhedral and a subtle blade tilt. `isDiving` is ignored here in favour of the
+	-- continuous depth so the fold eases in progressively ("slowly sweeps its wings") instead of snapping.
+	local ly = body.CFrame.LookVector.Y
+	local diveAmt   = smoothstep(DIVE_ONSET_Y, DIVE_FULL_Y, ly)      -- 0 level → 1 near-vertical
+	local sweep     = staged3(diveAmt, 0, DIVE_SWEEP_L1, DIVE_SWEEP_L2)
+	local diveTipDrop = staged3(diveAmt, 0, DIVE_ANHED_L1, DIVE_ANHED_L2)
+	local blade     = DIVE_BLADE * smoothstep(0.55, 1.0, diveAmt)    -- only the committed stoop blades over
+	-- Blend the base pose out as the dive folds in; the dive's own anhedral drops the tips.
+	local dihedral  = baseDihedral * (1 - diveAmt) - diveTipDrop
 
 	-- STRIKE ATTACK POSE (S31): while the server marks this bird's strike ACTIVE (the replicated Body
 	-- attribute StrikeActive), cup the wings up into a flare so the strike READS to every client. Purely
@@ -510,8 +539,10 @@ function BirdBuilder.AnimateWings(model, isFlapping, isDiving, flapPhase, dt)
 		local motor = body:FindFirstChild(jointName)
 		if not motor or not motor:IsA("Motor6D") then return end
 		local sign = motor:GetAttribute("FlapSign") or 1
-		-- Yaw aft first, then roll the dihedral, so the swept wing also carries the tip drop.
-		local target = CFrame.Angles(0, -sign * sweep, 0) * CFrame.Angles(0, 0, sign * dihedral)
+		-- Yaw aft first, then roll the dihedral, then a symmetric leading-edge-down blade tilt (deep dive).
+		local target = CFrame.Angles(0, -sign * sweep, 0)
+			* CFrame.Angles(0, 0, sign * dihedral)
+			* CFrame.Angles(blade, 0, 0)
 		-- Ease toward the target for smooth motion (and graceful state changes).
 		local alpha = math.clamp(dt * SMOOTH, 0, 1)
 		motor.Transform = approachCFrame(motor.Transform, target, alpha)
