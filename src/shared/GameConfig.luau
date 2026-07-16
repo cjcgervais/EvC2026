@@ -969,7 +969,36 @@ GameConfig.Missions = {
 		placement = { groveCount = 4, perchPerGrove = 5, groveRadius = 130, groveMinGap = 520 }, -- disc groves
 		verb      = nil,                                                                -- no special verb (free routing)
 	},
-	-- fox_on_the_hill = { … }  -- ← THE FOX registers here next (a ground-locked patrol hazard; routing pressure).
+	-- THE FOX (#15b, Packet-03 slice 4) — a ground-locked patrol that adds ROUTING PRESSURE (never lethal, P3).
+	-- A single Y-locked fox trots from its den to a grove; on approach the grove FLARES orange + the squirrels
+	-- there go frantic (a "come rescue us NOW" tell); if it reaches them they SCATTER to fresh perches — costing
+	-- you TIME (farther/spread), never lives. The fox visibly loses (sits, then trots home). Flip activeMission
+	-- to this to Play it (resolveMission reads once at boot → restart Play). All numbers live in hazard below.
+	fox_on_the_hill = {
+		displayName = "Fox on the Hill",
+		hazard = {
+			kind = "fox",
+			-- NUMBERS (Fable-5 post-audit): the den sits ~1360 studs out, so TRAVEL time dominates, not den-idle.
+			-- At speed 40 a den→grove trip is ~35-45s → patrol #1 lands ~t=55-70s with a chance of a #2; the old
+			-- speed 24 gave ONE late patrol or none (Chad would judge the fox's ABSENCE, not its beat). Still
+			-- 3-9× slower than the eagle → a CLOCK you can beat, never a chase.
+			firstAt         = 100,  -- timeLeft when patrols begin (a ~20s calm opening; mirrors the triageAt idiom)
+			cadence         = 8,    -- s idle in the den between patrols (travel paces the round; keep dead air short)
+			speed           = 40,   -- studs/s trot — travel ~35-45s per leg; the eagle glides ~3× faster (a clock)
+			flareRange      = 600,  -- flare fires this far out → 600/40 = 15s warning (reach-if-you-commit window)
+			arriveRange     = 40,   -- "reached the grove centre" → the squirrels scatter
+			franticRadius   = 170,  -- groveRadius(130)+40 slack → the whole grove panics together
+			relocateMinDist = 400,  -- scatter target ≥ this from the fox (vs groveMinGap 520 → usually a NEW grove)
+			scamperTime     = 1.4,  -- s of server-animated hop to the new perch (uncatchable but READABLE, not a teleport)
+			dwell           = 3,    -- s the fox sits ("aw, missed 'em") before trotting home — it visibly loses
+			minTargets      = 2,    -- a grove needs ≥ this many stranded squirrels to be worth a patrol
+			footY           = 4,    -- fox pivot height above the Y=0 baseplate top
+			foxScale        = 2.0,  -- vs squirrelScale 2.4 — readable from altitude, smaller than the hero eagle
+		},
+		deliver   = { kind = "waterfall" },                                            -- same ride home
+		placement = { groveCount = 4, perchPerGrove = 5, groveRadius = 130, groveMinGap = 520 },
+		verb      = nil,
+	},
 }
 
 GameConfig.Thermals = {

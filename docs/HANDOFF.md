@@ -234,10 +234,14 @@ report-back → Fable Packet-04. **Music swell + combo balance are still Chad's 
     selector + `RescueServer` resolver routing hazard/deliver/placement through `mission.*` (fallbacks =
     current literals → `waterfall_meadow` is byte-identical to today). Inert-by-construction, build-green,
     committed. Flipping `activeMission` is the whole mission switch.
-  - **▶ [NEXT — THE FOX #15b] the real FUN gate:** architect `adbb2d58b749ec3fe` found the fox is a NEW
-    server-AI subsystem (RescueServer has no flight loop; port `updateAICrows`/Boids Y-locked) — its own
-    iteration: fox patrol bird + grove-flare + squirrel frantic/relocate (P3: costs TIME not lives) →
-    red-team-reviewer (new AI path) → Chad flies the routing-pressure fun. Full seam map in ledger S36.
+  - **[BUILT S38 — THE FOX #15b] ✅ built + red-team CLEAR + Fable-5 bracketed, INERT-by-default, UNPLAYTESTED.**
+    New server-AI patrol subsystem (2D kinematic seek — deliberately NO Boids/FlightPhysics import = strongest
+    kernel-safety proof). `Missions.fox_on_the_hill` (all tunables in `hazard`); `BuildFox` rascal; RescueServer
+    `stepFox` (den→approach→sit→return on ONE Heartbeat, phase-gated) + orange grove-flare + `Frantic=true`
+    (separate attr → squirrels STAY catchable, you RACE the fox) + `relocateSquirrel` scatter (TIME cost, P3
+    non-lethal); client renders frantic (fast pose + urgent beacon). **▶ Chad's FUN gate: set
+    `activeMission="fox_on_the_hill"`, restart Play** — did the flare make you DROP your line and race there?
+    Full detail + playtest checklist + tune knobs in ledger S38. Revert = `activeMission="waterfall_meadow"`.
 - **#10 PHASE-1 WORLD:** real trunk/canopy collision + a dedicated valley that skips the combat `BuildMap` (currently kept as floor+backdrop); then line-riding style measures the canopy the player threads.
 - **#GATE [needs Chad's Play — NOT loopable, DO THIS NEXT]:** fly the Packet-02 §A checklist → *"grin at the 3rd catch + push your luck for one more before the waterfall?"* + capture the §E report-back → Fable Packet 03. Also report which gray-box sound ids resolved (Packet 01 §E). This is the only step the loop cannot self-certify.
 

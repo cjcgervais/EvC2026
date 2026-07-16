@@ -1964,11 +1964,16 @@ local function scanSquirrels(dt)
 			local sid = m:GetAttribute("SquirrelId")
 			local isTell = (st == "stranded") and (sid == tellId)
 			local isSoftFail = (st == "stranded") and (softFailTimer > 0) and (sid == softFailId)
+			-- THE FOX (#15b): a squirrel the fox is menacing carries Frantic=true (still "stranded" → still
+			-- catchable). Render it panicking so you drop your line and race there. The tell (about to catch)
+			-- always wins the pose — the sacred anticipation beat is protected.
+			local isFrantic = (st == "stranded") and (m:GetAttribute("Frantic") == true)
 			local pose = "wave"
 			local phase = squirrelPhase
 			if st == "expiring" then pose = "ride"
 			elseif isTell then pose = "plant"
-			elseif isSoftFail then pose = "waveBig"; phase = squirrelPhase * 2.4 end   -- fast excited wave
+			elseif isSoftFail then pose = "waveBig"; phase = squirrelPhase * 2.4   -- fast excited wave
+			elseif isFrantic then pose = "waveBig"; phase = squirrelPhase * 3.4 end -- panic: even faster
 			BirdBuilder.PoseSquirrel(m, pose, dt, phase)
 			-- Local cosmetic flare (client-only property writes; the server never re-touches these).
 			local beacon = m:FindFirstChild("Beacon")
@@ -1977,6 +1982,12 @@ local function scanSquirrels(dt)
 					beacon.Transparency = 0.05 + 0.15 * (1 - flarePulse)
 					local w = 2.2 * (1.7 + 0.5 * flarePulse)
 					beacon.Size = Vector3.new(w, 54, w)
+				elseif isFrantic then
+					-- fast urgent flicker + taller than the tell (the orange grove-flare column is the hue cue)
+					local fp = 0.5 + 0.5 * math.sin(squirrelPhase * 6)
+					beacon.Transparency = 0.0 + 0.25 * fp
+					local w = 2.2 * (1.6 + 0.7 * fp)
+					beacon.Size = Vector3.new(w, 60, w)
 				else
 					beacon.Transparency = 0.55
 					beacon.Size = Vector3.new(2.2, 44, 2.2)

@@ -688,6 +688,108 @@ function BirdBuilder.BuildSquirrel(scale, palette)
 end
 
 --------------------------------------------------------------------------------
+-- BuildFox(scale, palette) — THE FOX (#15b): a friendly cartoon rascal for the ground patrol. A server-anchored
+-- world prop moved by PivotTo (no Motor6D — the trot bob is applied by the server mover). PrimaryPart = Body,
+-- -Z = forward (nose), so CFrame.lookAt(pos, pos+dir) faces it along its travel. P3 art rule: oversized friendly
+-- eyes, rounded everything, NO teeth/claws — it must read as a mischief-maker who SCATTERS squirrels, never a
+-- predator. `palette` optional: { body, belly, eye }.
+--------------------------------------------------------------------------------
+function BirdBuilder.BuildFox(scale, palette)
+	local s = tonumber(scale) or 2.0
+	palette = palette or {}
+	local coat  = palette.body  or Color3.fromRGB(214, 110, 48)    -- rust orange
+	local cream = palette.belly or Color3.fromRGB(244, 236, 220)   -- cream chest/snout/tail-tip
+	local iris  = palette.eye   or Color3.fromRGB(40, 30, 22)
+
+	local model = Instance.new("Model")
+	model.Name = "Fox"
+
+	-- BODY: a low horizontal bean (a trotting fox is longer than tall). PrimaryPart, cosmetic (no collide/query).
+	local body = makePart("Body", Vector3.new(s * 0.95, s * 0.9, s * 1.7), coat)
+	body.Shape = Enum.PartType.Ball
+	body.CanCollide = false
+	body.CanQuery = false
+	body.CanTouch = false
+	body.CastShadow = true
+	body.CFrame = CFrame.new(0, 0, 0)
+	body.Parent = model
+	model.PrimaryPart = body
+
+	-- CHEST: cream front.
+	local chest = makePart("Chest", Vector3.new(s * 0.7, s * 0.7, s * 0.8), cream)
+	chest.Shape = Enum.PartType.Ball
+	chest.CFrame = body.CFrame * CFrame.new(0, -s * 0.1, -s * 0.7)
+	chest.Parent = model
+	weldTo(body, chest)
+
+	-- HEAD: forward + up.
+	local head = makePart("Head", Vector3.new(s * 0.72, s * 0.7, s * 0.7), coat)
+	head.Shape = Enum.PartType.Ball
+	head.CFrame = body.CFrame * CFrame.new(0, s * 0.42, -s * 0.86)
+	head.Parent = model
+	weldTo(body, head)
+
+	-- SNOUT (cream, pointed forward) + nose.
+	local snout = makePart("Snout", Vector3.new(s * 0.34, s * 0.32, s * 0.5), cream)
+	snout.Shape = Enum.PartType.Ball
+	snout.CFrame = head.CFrame * CFrame.new(0, -s * 0.14, -s * 0.42)
+	snout.Parent = model
+	weldTo(body, snout)
+	local nose = makePart("Nose", Vector3.new(s * 0.14, s * 0.12, s * 0.12), Color3.fromRGB(40, 28, 28))
+	nose.Shape = Enum.PartType.Ball
+	nose.CFrame = snout.CFrame * CFrame.new(0, 0, -s * 0.26)
+	nose.Parent = model
+	weldTo(body, nose)
+
+	-- EARS: two upright triangle-ish blocks — the fox silhouette.
+	for _, side in ipairs({ -1, 1 }) do
+		local ear = makePart("Ear", Vector3.new(s * 0.22, s * 0.4, s * 0.14), coat)
+		ear.CFrame = head.CFrame * CFrame.new(side * s * 0.28, s * 0.46, s * 0.02)
+		ear.Parent = model
+		weldTo(body, ear)
+	end
+
+	-- EYES: big + friendly (the P3 charm — a rascal, not a hunter).
+	for _, side in ipairs({ -1, 1 }) do
+		local eye = makePart("Eye", Vector3.new(s * 0.24, s * 0.28, s * 0.2), Color3.fromRGB(245, 245, 245))
+		eye.Shape = Enum.PartType.Ball
+		eye.CFrame = head.CFrame * CFrame.new(side * s * 0.24, s * 0.08, -s * 0.34)
+		eye.Parent = model
+		weldTo(body, eye)
+		local pupil = makePart("Pupil", Vector3.new(s * 0.13, s * 0.16, s * 0.12), iris)
+		pupil.Shape = Enum.PartType.Ball
+		pupil.CFrame = eye.CFrame * CFrame.new(0, 0, -s * 0.1)
+		pupil.Parent = model
+		weldTo(body, pupil)
+	end
+
+	-- TAIL: big fluffy brush with a cream tip, sweeping back and up.
+	local tailA = makePart("TailSeg", Vector3.new(s * 0.55, s * 0.55, s * 0.6), coat)
+	tailA.Shape = Enum.PartType.Ball
+	tailA.CFrame = body.CFrame * CFrame.new(0, s * 0.2, s * 0.95)
+	tailA.Parent = model
+	weldTo(body, tailA)
+	local tailB = makePart("TailTip", Vector3.new(s * 0.5, s * 0.5, s * 0.5), cream)
+	tailB.Shape = Enum.PartType.Ball
+	tailB.CFrame = body.CFrame * CFrame.new(0, s * 0.5, s * 1.25)
+	tailB.Parent = model
+	weldTo(body, tailB)
+
+	-- LEGS: four short stubs (cosmetic; the trot bob is in the server mover).
+	for _, x in ipairs({ -1, 1 }) do
+		for _, z in ipairs({ -0.55, 0.6 }) do
+			local leg = makePart("Leg", Vector3.new(s * 0.22, s * 0.5, s * 0.22), Color3.fromRGB(60, 40, 28))
+			leg.CFrame = body.CFrame * CFrame.new(x * s * 0.38, -s * 0.6, z * s)
+			leg.Parent = model
+			weldTo(body, leg)
+		end
+	end
+
+	model:SetAttribute("FoxScale", s)
+	return model
+end
+
+--------------------------------------------------------------------------------
 -- PoseSquirrel(model, pose, dt, phase)
 --   Eases the four limb Motor6Ds toward a named pose. Cosmetic; safe on missing joints.
 --   poses: "idle" (limbs relaxed) · "wave" (both arms up, waving via phase) · "plant" (determined

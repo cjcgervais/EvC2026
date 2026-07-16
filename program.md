@@ -89,7 +89,9 @@ feather/tumble FX, SpatialHash). A change that deletes or reuses beats a change 
   (a 15-yo shines) in the SAME mechanic. **Non-lethal always** (P3).
 - The **Fable consult packet per turn** (`docs/rescue-consults/`) is the standing method for
   design-heavy items — spawn `rescue-gameplay-architect` (design attribution) before building
-  a new mechanic; it reports, it never edits.
+  a new mechanic; it reports, it never edits. **Per Chad (S37): run that architect on Fable-5
+  (`model: fable`) as the game-architect, and bracket the tricky parts with a Fable-5 audit
+  BEFORE (design/scope) and AFTER (faithfulness + feel check) — the S37 flap-audio pattern.**
 
 ---
 

@@ -23,6 +23,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace         = game:GetService("Workspace")
 local Players           = game:GetService("Players")
+local RunService        = game:GetService("RunService")   -- THE FOX (#15b): drives the Y-locked patrol step
 
 local GameConfig  = require(ReplicatedStorage:WaitForChild("GameConfig"))
 local BirdBuilder = require(ReplicatedStorage:WaitForChild("BirdBuilder"))
@@ -96,6 +97,7 @@ end
 --------------------------------------------------------------------------------
 local worldFolder
 local perchList = {}   -- array of { pos = Vector3, underCanopy = bool }
+local groveList = {}   -- THE FOX (#15b): grove centres, hoisted from buildWorld so the fox can target a grove
 
 -- `queryable=true` makes the part participate in the flight collision spherecast + the style/updraft
 -- proximity rays (a SOLID surface the eagle slides on, non-lethally). Visual-only parts stay CanQuery=false
@@ -198,12 +200,23 @@ local function plantPerchTree(pos)
 	end
 end
 
+-- THE FOX (#15b): the den sits at valleyRadius*0.85 on the bearing OPPOSITE the waterfall — so den-watching
+-- and waterfall trips occupy different sky sectors (the routing tension). Y = footY above the Y=0 baseplate top.
+local function foxDenPos()
+	local d = R.deliverPos
+	local bearing = math.atan2(d.Z, d.X) + math.pi
+	local rad = (R.valleyRadius or 1600) * 0.85
+	local footY = (mission.hazard or {}).footY or 4
+	return Vector3.new(math.cos(bearing) * rad, footY, math.sin(bearing) * rad)
+end
+
 -- Groves (Fable §B5): squirrels only ever spawn on grove perches, so they cluster into a few tight
 -- clumps → catch chains + style continuity. Everything else is visual-only backdrop forest.
 local function buildWorld()
 	worldFolder = Instance.new("Folder")
 	worldFolder.Name = "RescueWorld"
 	worldFolder.Parent = Workspace
+	table.clear(groveList)   -- THE FOX (#15b): rebuild the grove-centre list this round
 
 	-- deliver geometry (mission.deliver.kind; only "waterfall" exists today — absent = waterfall).
 	local dv = mission.deliver or {}
@@ -232,7 +245,19 @@ local function buildWorld()
 		for _, other in ipairs(groveCentres) do
 			if (Vector3.new(c.X - other.X, 0, c.Z - other.Z)).Magnitude < groveGap then ok = false; break end
 		end
-		if ok then groveCentres[#groveCentres + 1] = c end
+		if ok then
+			groveCentres[#groveCentres + 1] = c
+			groveList[#groveList + 1] = c   -- THE FOX (#15b): remember the centre so the fox can target this grove
+		end
+	end
+
+	-- THE FOX (#15b): a den mound the fox trots home to (visual only — CanQuery=false, no collision). Only
+	-- when the fox hazard is active; waterfall_meadow never builds it (inert-by-default).
+	if (mission.hazard or {}).kind == "fox" then
+		local den = foxDenPos()
+		local mound = anchoredPart("FoxDen", Vector3.new(64, 26, 64), Color3.fromRGB(96, 74, 52), Enum.Material.Ground, worldFolder)
+		mound.Shape = Enum.PartType.Ball
+		mound.CFrame = CFrame.new(den.X, 2, den.Z)
 	end
 
 	-- 2) Each grove = a tight cluster of perch-trees around its centre.
@@ -651,6 +676,250 @@ local function endRound()
 	pushAll()
 end
 
+--------------------------------------------------------------------------------
+-- THE FOX (#15b, Packet-03 slice 4) — a single Y-locked patrol that adds ROUTING PRESSURE. It trots from its
+-- den to a grove; on APPROACH the grove FLARES orange + those squirrels go frantic (a separate attribute the
+-- client renders as an urgent tell — they stay "stranded" and CATCHABLE, so you race the fox for them); if it
+-- ARRIVES the squirrels SCATTER to fresh perches — a TIME cost (now farther/spread), NEVER lethal (P3). The fox
+-- never touches a squirrel; it sits ("aw, missed 'em") then trots home. Server-authoritative. Inert unless the
+-- active mission's hazard.kind == "fox": the Heartbeat step is only connected then, and first-line-gates on phase.
+--------------------------------------------------------------------------------
+local fox = nil   -- { model, pos, den, state, timer, target, flared, flare, bob }
+
+local function distXZ(a, b)
+	return (Vector3.new(a.X - b.X, 0, a.Z - b.Z)).Magnitude
+end
+
+local function buildFoxFlare(centre)
+	local col = anchoredPart("FoxFlare", Vector3.new(320, 7, 7), Color3.fromRGB(255, 140, 40), Enum.Material.Neon, worldFolder)
+	col.Shape = Enum.PartType.Cylinder
+	col.Transparency = 0.25
+	col.CFrame = CFrame.new(centre.X, 160, centre.Z) * CFrame.Angles(0, 0, math.rad(90))
+	local att = Instance.new("Attachment")
+	att.Parent = col
+	local em = Instance.new("ParticleEmitter")
+	em.Color = ColorSequence.new(Color3.fromRGB(255, 150, 50))
+	em.LightEmission = 0.7
+	em.Size = NumberSequence.new(7, 1)
+	em.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.2), NumberSequenceKeypoint.new(1, 1) })
+	em.Lifetime = NumberRange.new(1.0, 1.8)
+	em.Rate = 30
+	em.Speed = NumberRange.new(20, 45)
+	em.SpreadAngle = Vector2.new(24, 24)
+	em.Acceleration = Vector3.new(0, 24, 0)
+	em.Parent = att
+	return col
+end
+
+local function clearFoxFlare()
+	if fox and fox.flare then
+		fox.flare:Destroy()
+		fox.flare = nil
+	end
+end
+
+local function strandedNear(centre, radius)
+	local n = 0
+	for _, s in pairs(squirrels) do
+		if s.state == "stranded" and s.model and s.model.PrimaryPart then
+			if distXZ(s.model.PrimaryPart.Position, centre) <= radius then n += 1 end
+		end
+	end
+	return n
+end
+
+-- Pick a grove worth a patrol (≥ minTargets stranded within franticRadius); nil = none this cycle.
+local function pickFoxTarget(hz)
+	local eligible = {}
+	local fr = hz.franticRadius or 170
+	for _, c in ipairs(groveList) do
+		if strandedNear(c, fr) >= (hz.minTargets or 2) then eligible[#eligible + 1] = c end
+	end
+	if #eligible == 0 then return nil end
+	return eligible[rng:NextInteger(1, #eligible)]
+end
+
+-- Layer Frantic=true on stranded squirrels near the target. Separate attribute → State stays "stranded" →
+-- still catchable (the whole point: race the fox for the frantic ones).
+local function setFranticNear(centre, radius)
+	for _, s in pairs(squirrels) do
+		if s.state == "stranded" and s.model and s.model.PrimaryPart then
+			if distXZ(s.model.PrimaryPart.Position, centre) <= radius then
+				s.model:SetAttribute("Frantic", true)
+			end
+		end
+	end
+end
+
+-- Clear Frantic everywhere (red-team NOTE): a squirrel the fox flared but never relocated (caught, or the
+-- round/patrol ended first) would otherwise keep panicking with no fox near it — a cosmetic lie. Called on
+-- arrival (after the spook) and when the fox parks, so panic only ever shows while a patrol is live.
+local function clearAllFrantic()
+	for _, s in pairs(squirrels) do
+		if s.model and s.model.Parent and s.model:GetAttribute("Frantic") then
+			s.model:SetAttribute("Frantic", nil)
+		end
+	end
+end
+
+-- Scatter ONE squirrel to a fresh perch ≥ relocateMinDist from the fox — a TIME cost, never harm. It's
+-- uncatchable ("relocating") for the ~scamperTime hop (client scan + server gate both exclude it), then
+-- stranded again on the new perch. Mirrors the expireSquirrel task.spawn arc + guards model.Parent per step.
+local function relocateSquirrel(id)
+	local s = squirrels[id]
+	if not (s and s.state == "stranded" and s.model and s.model.Parent) then return end
+	s.state = "relocating"
+	s.model:SetAttribute("State", "relocating")
+	s.model:SetAttribute("Frantic", nil)
+	local hz = mission.hazard or {}
+	local foxPos = (fox and fox.pos) or Vector3.new(0, 0, 0)
+	local newPerch, newIdx
+	for _ = 1, 30 do
+		local perch, idx = pickFreePerch()
+		if not perch then break end
+		if distXZ(perch.pos, foxPos) >= (hz.relocateMinDist or 400) then
+			newPerch, newIdx = perch, idx
+			break
+		else
+			usedPerches[idx] = nil   -- too close; release and retry
+		end
+	end
+	if not newPerch then newPerch, newIdx = pickFreePerch() end   -- fallback: any free perch
+	if not newPerch then
+		s.state = "stranded"                      -- valley full → settle back in place, still rescuable
+		s.model:SetAttribute("State", "stranded")
+		return
+	end
+	-- perch bookkeeping: free the OLD index, claim the NEW (the catch-respawn path frees s.perchIndex)
+	if s.perchIndex then usedPerches[s.perchIndex] = nil end
+	s.perchIndex = newIdx
+	s.perch = newPerch
+	local model = s.model
+	local startCf = model:GetPivot()
+	local yaw = rng:NextNumber() * math.pi * 2
+	local endCf = CFrame.new(newPerch.pos) * CFrame.Angles(0, yaw, 0)
+	local dur = math.max(0.2, hz.scamperTime or 0.9)
+	task.spawn(function()
+		local steps = math.max(1, math.floor(dur / 0.03))
+		for i = 1, steps do
+			if not (model and model.Parent) then return end
+			local a = i / steps
+			local pos = startCf.Position:Lerp(endCf.Position, a)
+			local arc = math.sin(a * math.pi) * 16    -- a little hop
+			model:PivotTo(CFrame.new(pos + Vector3.new(0, arc, 0)) * CFrame.Angles(0, yaw, 0))
+			task.wait(0.03)
+		end
+		if not (model and model.Parent) then return end
+		model:PivotTo(endCf)
+		model:SetAttribute("UnderCanopy", newPerch.underCanopy == true)
+		s.state = "stranded"
+		s.model:SetAttribute("State", "stranded")
+	end)
+end
+
+local function spookNear(centre, radius)
+	local ids = {}
+	for id, s in pairs(squirrels) do
+		if s.state == "stranded" and s.model and s.model.PrimaryPart then
+			if distXZ(s.model.PrimaryPart.Position, centre) <= radius then ids[#ids + 1] = id end
+		end
+	end
+	for _, id in ipairs(ids) do relocateSquirrel(id) end
+end
+
+-- Move + face the fox toward dirUnit with a trot bob (Y locked to footY + the bounce).
+local function pivotFox(dirUnit, dt)
+	if not (fox and fox.model and fox.model.Parent) then return end
+	local footY = (mission.hazard or {}).footY or 4
+	fox.bob = (fox.bob or 0) + dt * 9
+	local y = footY + math.abs(math.sin(fox.bob)) * 1.3
+	local at = Vector3.new(fox.pos.X, y, fox.pos.Z)
+	fox.model:PivotTo(CFrame.lookAt(at, at + dirUnit))
+end
+
+local function spawnFox()
+	if fox and fox.model then fox.model:Destroy() end
+	local hz = mission.hazard or {}
+	local den = foxDenPos()
+	local model = BirdBuilder.BuildFox(hz.foxScale or 2.0)
+	model.Name = "PatrolFox"
+	model:PivotTo(CFrame.new(den))
+	if model.PrimaryPart then model.PrimaryPart.Anchored = true end
+	model.Parent = worldFolder
+	fox = { model = model, pos = den, den = den, state = "den", timer = hz.cadence or 18, flared = false, bob = 0 }
+end
+
+-- Park the fox at its den (between rounds / not active) — no patrol, no flare left stranded.
+local function parkFox()
+	if not fox then return end
+	clearFoxFlare()
+	clearAllFrantic()   -- round ended / not active → no squirrel should be left panicking (red-team NOTE)
+	fox.state = "den"
+	fox.pos = fox.den
+	fox.flared = false
+	fox.timer = (mission.hazard or {}).cadence or 18
+	if fox.model and fox.model.Parent then
+		fox.model:PivotTo(CFrame.new(fox.den))
+	end
+end
+
+-- The Heartbeat step (connected once, only in fox missions). O(1) + ≤squirrelCount distance checks; no raycasts.
+local function stepFox(dt)
+	if not (fox and fox.model and fox.model.Parent) then return end
+	if phase ~= "active" then parkFox(); return end
+	local hz = mission.hazard or {}
+	local f = fox
+	f.timer = (f.timer or 0) - dt
+
+	if f.state == "den" then
+		if timeLeft > (hz.firstAt or 100) then return end   -- calm opening: don't depart yet
+		if f.timer <= 0 then
+			local target = pickFoxTarget(hz)
+			if target then
+				f.target = target
+				f.state = "approach"
+				f.flared = false
+			else
+				f.timer = (hz.cadence or 18) * 0.5              -- nothing worth chasing; recheck soon
+			end
+		end
+	elseif f.state == "approach" then
+		local dir = Vector3.new(f.target.X - f.pos.X, 0, f.target.Z - f.pos.Z)
+		local d = dir.Magnitude
+		if not f.flared and d <= (hz.flareRange or 360) then
+			f.flared = true
+			f.flare = buildFoxFlare(f.target)
+			setFranticNear(f.target, hz.franticRadius or 170)
+		end
+		if d <= (hz.arriveRange or 40) then
+			spookNear(f.target, hz.franticRadius or 170)
+			clearAllFrantic()   -- any flared-but-not-relocated squirrel stops panicking now (red-team NOTE)
+			f.state = "sit"
+			f.timer = hz.dwell or 3
+		elseif d > 1e-3 then
+			local u = dir.Unit
+			f.pos = f.pos + u * math.min((hz.speed or 24) * dt, d)
+			pivotFox(u, dt)
+		end
+	elseif f.state == "sit" then
+		if f.timer <= 0 then
+			clearFoxFlare()
+			f.state = "return"
+		end
+	elseif f.state == "return" then
+		local dir = Vector3.new(f.den.X - f.pos.X, 0, f.den.Z - f.pos.Z)
+		local d = dir.Magnitude
+		if d <= (hz.arriveRange or 40) then
+			f.state = "den"
+			f.timer = hz.cadence or 18
+		elseif d > 1e-3 then
+			local u = dir.Unit
+			f.pos = f.pos + u * math.min((hz.speed or 24) * dt, d)
+			pivotFox(u, dt)
+		end
+	end
+end
+
 local triageBucket = 0
 local function RescueRoundLoop()
 	resolveMission()
@@ -658,6 +927,13 @@ local function RescueRoundLoop()
 	squirrelsFolder = Instance.new("Folder")
 	squirrelsFolder.Name = "Squirrels"
 	squirrelsFolder.Parent = Workspace
+
+	-- THE FOX (#15b): spawn the patrol + connect its Heartbeat step ONCE, only if this mission's hazard is the
+	-- fox. Inert-by-default: waterfall_meadow never enters here → no fox, no den, no step connected.
+	if (mission.hazard or {}).kind == "fox" then
+		spawnFox()
+		RunService.Heartbeat:Connect(stepFox)
+	end
 
 	while true do
 		-- INTERMISSION
