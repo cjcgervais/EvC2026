@@ -4,6 +4,40 @@ Read this first. It tells the next agent exactly where the project stands, the o
 
 ---
 
+## ▶▶ S38 CLOSE (2026-07-15) — READ THIS FIRST (supersedes the stale audio/HUD notes further down)
+
+**All committed on `updraft` (NOT pushed). HEAD = `17c3deb`.** Fox mode is LIVE (`GameConfig.activeMission = "fox_on_the_hill"`). `audioDiag` OFF.
+
+**What landed S37→S38 (all Chad-played + committed):**
+- 🔊 **THE FLAP-AUDIO SAGA IS CLOSED.** After ~6 patch attempts, root causes were: the WIND loop reused the flap
+  sample (pulsed like flapping), the sample never stopped (rang for seconds), AND the music heartbeat at 8-10 was a
+  low thump that "sped up" (read as flapping). Definitive fix (Fable-5 audit): the flap is now a **STATELESS
+  PER-FRAME PROJECTION** — one looped Sound, never Stopped, `Volume = (flapVolBase+flapVolPow·pow)·(eff·foldFade·exert)·am`
+  recomputed each frame → silence is arithmetic, "persists after stop" is impossible. **DO NOT reintroduce a
+  triggered/timer flap sound, and NEVER loop `SFX_SWOOSH` for wind/music (it pulses like flapping).**
+- 🎵 **MUSIC = carry-driven, jingle ONLY at a full 10/10** (was delivered+carry, which ratcheted up + beeped after
+  delivery). Build layers removed. Wind = a smooth low speed-rush (windMaxVol 0.5). Chad-confirmed better.
+- ⏰ **FAST-TEN TIME BONUS** revealed at the perfect-10 delivery (banked; tallied at round end). 🏁 **ROUND-OVER
+  SCREEN** (acorns count up, 8s) for EVERY round. 🛎️ **BUZZER GRACE** (`phase="grace"`, 4s) so a delivery made just
+  before 0:00 still counts + its ceremony finishes. Carry count bumps immediately on catch (counts in-flight).
+- 🦅 **HUD** (S37): SPD/ALT + AoA + HP/FLY bars hidden in rescue; flap indicator + 🐿️ count bottom-center.
+
+**🦊 THE FOX — BUILT + Chad-FLOWN: "the fox works but I don't really see the point of it yet."** The mechanic is
+technically correct (patrol → grove flare → frantic-but-catchable → scatter = time cost; beacon-visible; inert-by-
+default). **The GAP is PURPOSE/stakes: it doesn't yet change how you play or reward beating it.** ▶ If the fox is
+resumed, that's a DESIGN pass (why should the player care? — a real reward for beating it, a real cost for losing,
+or it gates/pressures the perfect-ten). NOT a code bug. Consider `rescue-gameplay-architect` on the purpose.
+
+**⏸️ DEFERRED (Chad's call):** change flap from the sticky Shift/Ctrl throttle to a **HOLD-LMB "flap or no flap"**
+for kid-simplicity (LMB free in rescue; touches LOCKED CS-7 → grep the registry + red-team; also makes the audio
+trivially correct since eff→0 on release).
+
+**▶ NEXT (Chad, S38 close): "start on something else with a clear context."** The audio is DONE — do not reopen it.
+Options: the FOX PURPOSE design pass · rider-growth/Packet-04 meta · Phase-1 world (real canopy collision) · the
+hold-LMB flap · or a fresh Chad direction. Full turn-by-turn detail in `.loop/rescue-phase0/state.md` (S37/S38 cont.1-10).
+
+---
+
 ## ▶ COLD START — Session 32 (2026-07-13): 🦅🔥🐿️ EAGLES TO THE RESCUE — Phase-0 PLAYABLE SLICE BUILT (build-green, red-teamed, UNPLAYTESTED)
 
 **THE GAME IS NOW "EAGLES TO THE RESCUE."** Chad greenlit the direction (see `docs/EAGLES-TO-THE-RESCUE-plan.md`, the creative bible) and, while away, gave FULL AUTONOMY to build the Phase-0 playable slice in the sandbox with a Fable consult at every turn. Done this session. **This SUPERSEDES the UPDRAFT proximity-flight loop below (Chad flew UPDRAFT, called it DULL) and combat (shelved).** Read the bible + `docs/rescue-consults/PACKET-01/02` (Fable design specs) + the `project-rescue-phase0` memory FIRST.
@@ -234,7 +268,10 @@ report-back → Fable Packet-04. **Music swell + combo balance are still Chad's 
     selector + `RescueServer` resolver routing hazard/deliver/placement through `mission.*` (fallbacks =
     current literals → `waterfall_meadow` is byte-identical to today). Inert-by-construction, build-green,
     committed. Flipping `activeMission` is the whole mission switch.
-  - **[BUILT S38 — THE FOX #15b] ✅ built + red-team CLEAR + Fable-5 bracketed, INERT-by-default, UNPLAYTESTED.**
+  - **[BUILT + FLOWN S38 — THE FOX #15b] ✅ built, committed, Chad-flown: "works but I don't see the point yet."
+    The MECHANIC is done; the GAP is PURPOSE/stakes (a real reward for beating it / cost for losing). Next fox work
+    = a DESIGN pass, not a bug. See the S38 CLOSE block at the top.**
+  - _(historical build detail below)_ ✅ built + red-team CLEAR + Fable-5 bracketed, INERT-by-default.
     New server-AI patrol subsystem (2D kinematic seek — deliberately NO Boids/FlightPhysics import = strongest
     kernel-safety proof). `Missions.fox_on_the_hill` (all tunables in `hazard`); `BuildFox` rascal; RescueServer
     `stepFox` (den→approach→sit→return on ONE Heartbeat, phase-gated) + orange grove-flare + `Frantic=true`
