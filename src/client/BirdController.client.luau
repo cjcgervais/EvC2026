@@ -1256,6 +1256,88 @@ local function playWoohoo()
 	end
 end
 
+-- FLIGHT AUDIO (Chad S36) — reads the BIRD's state, not the player's fingers ("my fingers aren't flapping,
+-- the bird is"). FLAP WHOOSH scales to the sticky positive flapThrottle (a bird left flapping keeps whooshing;
+-- soaring fades it; a dive silences it). WIND is a persistent loop whose volume/pitch rise with SPEED (both
+-- play when you flap AND go fast). Pure audio that LISTENS to the engine — never writes kernel/control/camera.
+local wingPhasePrev = 0
+local flapEffortEnv = 0     -- audio-only exertion envelope (Fable S37): Shift attacks it, release decays it
+local flapSound             -- persistent flap Sound (created lazily), RESTARTED each wingbeat → crisp successive beats
+local windSound             -- persistent looped wind Sound (created lazily), volume scales with speed
+local function updateWingSound(dt)
+	dt = dt or 0.016
+	if not flightEngine then
+		wingPhasePrev = 0
+		flapEffortEnv = 0
+		if windSound then windSound.Volume = 0 end
+		return
+	end
+	-- FLAP WHOOSH — one whoosh per wingbeat (flapPhase wraps mod 2π); volume/pitch scale to the bird's flap
+	-- LEVEL (positive flapThrottle). Persists while the sticky throttle stays up; fades as you soar to 0.
+	local fp = flightEngine.flapPhase or 0
+	local eff = math.max(0, flightEngine.flapThrottle or 0)
+
+	-- EXERTION ENVELOPE (Fable S37): the sticky throttle is a TRIM, not effort — a bird holding a cruise
+	-- climb-power isn't audibly laboring, yet `eff` alone kept it whooshing forever (Chad: "I turned down the
+	-- flapping and the sound stayed"). So the whoosh follows this audio-only envelope instead: holding Shift
+	-- (up-thrust intent) ATTACKS it toward 1; releasing DECAYS it toward 0 → the bird settles onto set wings
+	-- over ~2-3 softening strokes. NEVER writes the kernel/throttle; Ctrl (down-thrust) never adds effort.
+	local shiftHeld = UserInputService:IsKeyDown(Enum.KeyCode.LeftShift)
+	local tau = shiftHeld and (RES.effortAttackTau or 0.10) or (RES.effortReleaseTau or 0.55)
+	flapEffortEnv = flapEffortEnv + ((shiftHeld and 1 or 0) - flapEffortEnv) * (1 - math.exp(-dt / math.max(1e-3, tau)))
+	-- NOSE-DOWN FADE: the sticky flapThrottle stays positive in a dive, so `eff` alone kept the whoosh firing
+	-- while the wings were visibly TUCKED. Read the engine's own orientation (never a control write) and fade
+	-- the whoosh out across the same LookVector.Y band the dive-wing-fold uses → the sound tracks the wings:
+	-- 1 at/above the fold onset, 0 at the committed stoop. Multiplied into volume so it ramps, never pops.
+	local ly = flightEngine.orientation and flightEngine.orientation.LookVector.Y or 0
+	local onset = RES.wingNoseFadeOnset or -0.12
+	local full  = RES.wingNoseFadeFull  or -0.92
+	local foldFade = clamp((ly - full) / math.max(1e-3, onset - full), 0, 1)
+	local wrapped = fp < wingPhasePrev
+	local pitch = (RES.wingPitchBase or 1.40) + (RES.wingPitchPower or 0.90) * eff
+	local strokeVol = (RES.wingVolBase or 0.04) + (RES.wingVolPower or 0.42) * eff
+	local gate = RES.effortGate or 0.07
+	-- ONE flap sound path (Chad S37): a wingbeat whooshes only while you're ACTIVELY flapping — the envelope is
+	-- driven by Shift, so releasing it decays past the gate in ~0.5s and the whoosh STOPS. A stroke already
+	-- playing always finishes on its own (we never hard-cut mid-whoosh). No held-throttle "maintenance" beat:
+	-- not holding Shift → no flap sound, full stop. (foldFade also silences it as the wings tuck in a dive.)
+	if wrapped and eff > 0.02 and foldFade > 0.02 and flapEffortEnv > gate then
+		-- Re-trigger ONE persistent Sound each wingbeat (restart from the attack) instead of spawning a
+		-- full-length one-shot per beat: at flap rate the one-shots overlapped into a wash — this gives a
+		-- crisp, SUCCESSIVE whoosh locked to the wingbeat frequency (Chad S37).
+		if not flapSound then
+			flapSound = Instance.new("Sound")
+			flapSound.Name = "FlapWhoosh"
+			flapSound.SoundId = SFX_SWOOSH
+			flapSound.Parent = SoundService
+		end
+		flapSound.Volume = strokeVol * flapEffortEnv * foldFade
+		flapSound.PlaybackSpeed = pitch
+		flapSound.TimePosition = 0
+		flapSound:Play()
+	end
+	wingPhasePrev = fp
+
+	-- WIND — persistent loop; volume + pitch rise with SPEED (roars in a dive; layers under the flap whoosh
+	-- when you flap AND go fast). Eased so it swells rather than pops.
+	if not windSound then
+		windSound = Instance.new("Sound")
+		windSound.Name = "FlightWind"
+		windSound.SoundId = SFX_SWOOSH
+		windSound.Looped = true
+		windSound.Volume = 0
+		windSound.PlaybackSpeed = RES.windPitchBase or 0.55
+		windSound.Parent = SoundService
+		windSound:Play()
+	end
+	local speed = flightEngine.speed or 0
+	local sf = clamp((speed - (RES.windMinSpeed or 90))
+		/ math.max(1, (RES.windFullSpeed or 280) - (RES.windMinSpeed or 90)), 0, 1)
+	local targetVol = sf * (RES.windMaxVol or 0.38)
+	windSound.Volume = windSound.Volume + (targetVol - windSound.Volume) * math.min(1, (dt or 0.016) * 4)
+	windSound.PlaybackSpeed = (RES.windPitchBase or 0.55) + (RES.windPitchSpeed or 0.55) * sf
+end
+
 --------------------------------------------------------------------------------
 -- RESCUE STATE (client)
 --------------------------------------------------------------------------------
@@ -2590,6 +2672,7 @@ local function onFlightStep(dt)
 
 	-- 2. Step the simulation with the live input.
 	flightEngine:Update(dt, inputState)
+	updateWingSound(dt) -- flap whoosh (scales to the bird's flap level) + speed-scaled wind (Chad S36); no kernel write
 
 	-- ==== BEGIN SCRATCH TELEMETRY (Wind Tunnel capture — DELETE after; non-committed) ====
 	-- Captures the CLEAN internal state the flight_sim ToyPlant needs to be validated against.
@@ -2805,6 +2888,13 @@ local function teardownDrive()
 	-- Kill any in-flight rescue catch beat so death/respawn/swap can't strand the global slow-mo
 	-- desaturation, the camera offset, or orphan presentation squirrels (red-team BLOCK 1).
 	resetRescuePresentation()
+	-- Mute the persistent flight-wind loop + reset the flap-audio envelope on teardown. onFlightStep stops
+	-- calling updateWingSound the instant flightEngine goes nil, so its own reset branch never runs — without
+	-- this the looped wind would FREEZE at its last (loud) volume and roar through the death/respawn window
+	-- (red-team F1: exactly the "sound that won't stop" class this session set out to kill).
+	if windSound then windSound.Volume = 0 end
+	if flapSound then flapSound:Stop() end
+	flapEffortEnv = 0
 	flightEngine = nil
 	birdModel = nil
 	rootPart = nil

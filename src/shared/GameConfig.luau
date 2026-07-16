@@ -892,6 +892,49 @@ GameConfig.Rescue = {
 	chirpMinGap      = 0.5,    -- s; never chirp faster than this (perf + cacophony floor).
 	chirpVol         = 0.14,   -- rider chirp volume.
 
+	-- FLIGHT AUDIO (Chad S36) — reads the BIRD's state, not the player's fingers ("my fingers aren't flapping,
+	-- the bird is"). TWO layers:
+	--  • FLAP WHOOSH — one crisp whoosh per wingbeat, VOLUME/pitch scale to the bird's flap LEVEL (the sticky
+	--    positive flapThrottle). A bird left flapping keeps whooshing; SOARING (throttle→0) fades it; a DIVE
+	--    (throttle<0) silences it. It scales to how hard the bird flaps, not to pressing a key.
+	--  • WIND — a persistent loop whose volume + pitch rise with SPEED (roars in a dive; both play when you
+	--    flap AND go fast). Pure audio off the flight engine; the LOCKED flight feel is untouched.
+	wingVolBase      = 0.12,   -- flap whoosh volume at the faintest flap… (Chad S37: turned up — "sounds really low")
+	wingVolPower     = 0.95,   -- …+ this × flap level (a hard flap is much louder; ~1.07 at full flap).
+	wingPitchBase    = 1.50,   -- flap whoosh PlaybackSpeed at a gentle flap (pitched up = short/crisp)…
+	wingPitchPower   = 0.90,   -- …+ this × flap level (a hard flap whooshes brighter/tighter). One persistent flap
+	                           -- Sound is RESTARTED each wingbeat (BirdController) so beats are crisp + SUCCESSIVE,
+	                           -- matching the flap frequency, instead of full-length one-shots smearing into a wash.
+	-- NOSE-DOWN FADE (Chad S36 bug fix): the sticky flapThrottle stays positive in a dive, so the whoosh
+	-- kept firing while the wings were visibly TUCKED. Fade the whoosh out on the SAME nose-down signal the
+	-- dive-wing-fold uses (body LookVector.Y) so the sound tracks the wings: full at/above the fold onset,
+	-- silent at the full committed stoop. Values mirror BirdBuilder DIVE_ONSET_Y / DIVE_FULL_Y.
+	wingNoseFadeOnset = -0.12,  -- LookVector.Y where the whoosh begins to fade (wings start folding)…
+	wingNoseFadeFull  = -0.92,  -- …and where it's fully silent (committed stoop, wings fully tucked).
+	-- EXERTION ENVELOPE (Chad S37, Fable consult): the flap throttle is STICKY and HOLDS with no decay (a
+	-- LOCKED flight feature) — so a bird trimmed for a cruise-climb kept whooshing forever ("I turned down the
+	-- flapping and the sound stayed"). Fix WITHOUT touching the control: the whoosh follows an AUDIO-ONLY effort
+	-- envelope, not the held throttle. Holding Shift ATTACKS the envelope; releasing DECAYS it → release-to-quiet
+	-- (a bird settling onto set wings, not a sample cut). Ctrl never adds effort. Wind loop is untouched.
+	effortAttackTau  = 0.10,   -- s — envelope rise time-constant while Shift (up-thrust) is held.
+	effortReleaseTau = 0.20,   -- s — envelope fall time after you let go: the whoosh STOPS ~0.5s after you stop
+	                           --      actively flapping (Chad S37, hard requirement: "it has to stop when I turn
+	                           --      down the flapping"). Not held → no flap sound. Ctrl never adds effort.
+	effortGate       = 0.07,   -- a wingbeat makes NO new whoosh below this envelope (a playing one still finishes).
+	-- NOTE (Chad S37): the earlier soft "maintenance beat" (a living-bird texture during a held hands-free climb)
+	-- was REMOVED — it read as "still flapping when I turned down the flapping." There is now exactly ONE flap
+	-- sound path, gated on actively holding Shift. Do not re-add a cruise-hold beat without a fresh Chad ask.
+	-- WIND (Chad S37): only appears at HIGH speed now (not from an easy glide), and made DISTINCT from the flap
+	-- whoosh — the wind was confused with flapping because it reused the flap sample. It's now a soft, steady,
+	-- low airflow ("a very dull whistle, not static"): a small pitch range well BELOW the crisp flap pitch, so
+	-- flap = fast crisp pulses / wind = a continuous low tone. (True tonal whistle would want a dedicated asset —
+	-- this is the best distinct approximation from the moderation-safe sample.)
+	windMinSpeed     = 190,    -- studs/s where wind STARTS (only when genuinely fast, well above a climb/glide)…
+	windFullSpeed    = 360,    -- …and where it reaches full (real dive speed).
+	windMaxVol       = 0.45,   -- wind volume at full speed (soft — sits under the flap, not a roar).
+	windPitchBase    = 0.85,   -- wind PlaybackSpeed at windMinSpeed (low/dull, clearly below the flap's 1.5-2.4)…
+	windPitchSpeed   = 0.55,   -- …+ this × speed-fraction (0.85→1.40 — a gentle rise, never into the flap range).
+
 	-- CATCH DIAGNOSTIC (S36) — when true, the server logs every CatchSquirrel outcome (ACCEPT / the exact
 	-- REJECT reason + carry + distance) and the client logs FULL-suppresses + phantom trims, tagged
 	-- "[RescueDIAG]". This is the SYNC check for Chad's recurring "catches around 8-9/10 don't count":
