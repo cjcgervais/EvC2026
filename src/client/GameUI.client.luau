@@ -1013,6 +1013,36 @@ if RESCUE_ON then
 	crewPop.ZIndex = 6
 	crewPop.Parent = screenGui
 
+	-- ROUND-OVER SCREEN (Chad S38: after time's up, a real end-of-round PANEL for the whole results phase —
+	-- not just a fading stamp + an instant clock reset). Hidden until phase=="results".
+	local resultsPanel = Instance.new("Frame")
+	resultsPanel.Name = "RescueResults"
+	resultsPanel.AnchorPoint = Vector2.new(0.5, 0.5)
+	resultsPanel.Size = UDim2.new(0, 580, 0, 300)
+	resultsPanel.Position = UDim2.new(0.5, 0, 0.44, 0)
+	resultsPanel.BackgroundColor3 = Color3.fromRGB(18, 24, 32)
+	resultsPanel.BackgroundTransparency = 0.12
+	resultsPanel.BorderSizePixel = 0
+	resultsPanel.Visible = false
+	resultsPanel.ZIndex = 30
+	resultsPanel.Parent = screenGui
+	do local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, 20); c.Parent = resultsPanel end
+	local function rLabel(y, h, color, bold)
+		local l = Instance.new("TextLabel")
+		l.BackgroundTransparency = 1
+		l.Size = UDim2.new(1, -40, 0, h); l.Position = UDim2.new(0, 20, 0, y)
+		l.Font = bold and Enum.Font.GothamBlack or Enum.Font.GothamBold
+		l.TextScaled = true; l.TextColor3 = color; l.TextStrokeTransparency = 0.5
+		l.ZIndex = 31; l.Parent = resultsPanel
+		return l
+	end
+	local rTitle  = rLabel(24, 58, Color3.fromRGB(255, 214, 120), true);  rTitle.Text = "ROUND OVER!"
+	local rAcorns = rLabel(100, 44, Color3.fromRGB(150, 235, 160), false)
+	local rSaved  = rLabel(150, 38, Color3.fromRGB(220, 230, 240), false)
+	local rBonus  = rLabel(196, 34, Color3.fromRGB(255, 205, 80), false)
+	local rNext   = rLabel(252, 28, Color3.fromRGB(150, 190, 220), false); rNext.Text = "next round starting…"
+	_G.RescueResultsPanel = { panel = resultsPanel, acorns = rAcorns, saved = rSaved, bonus = rBonus }
+
 	local stampToken = 0
 	local RARITY_COLOR = {
 		Brown = Color3.fromRGB(255, 230, 140), Silver = Color3.fromRGB(220, 232, 245),
@@ -1148,14 +1178,73 @@ if RESCUE_ON then
 				TweenService:Create(substamp, TweenInfo.new(2.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
 					{ TextTransparency = 1 }):Play()
 			end)
+		elseif kind == "roundover" then
+			-- ROUND OVER tally (Chad S38): a non-perfect round still closes on a number, staged big-then-detail.
+			stampToken += 1
+			local myTok = stampToken
+			local v = (type(n) == "table") and n or {}
+			stamp.Text = "ROUND OVER!"
+			stamp.TextColor3 = Color3.fromRGB(150, 235, 160)
+			stamp.TextTransparency = 0
+			stamp.Size = UDim2.new(0, 600, 0, 118)
+			TweenService:Create(stamp, TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+				{ Size = UDim2.new(0, 680, 0, 132) }):Play()
+			TweenService:Create(stamp, TweenInfo.new(2.5, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+				{ TextTransparency = 1 }):Play()
+			task.delay(0.5, function()
+				if myTok ~= stampToken then return end
+				substamp.Text = string.format("🌰 %d acorns   ·   🐿️ %d saved!", math.floor(v.acorns or 0), math.floor(v.saved or 0))
+				substamp.TextTransparency = 0
+				TweenService:Create(substamp, TweenInfo.new(2.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+					{ TextTransparency = 1 }):Play()
+			end)
+		elseif kind == "timebonus" then
+			-- FAST-TEN TIME BONUS (Chad S38): revealed a beat AFTER the perfect-10 sentence card. It surfaces the
+			-- earned ×N as a PROMISE — the tally is deferred to the round-end finale. Fable-5 rules: future tense
+			-- ("we'll count it at the END"), NO total/=, NO 🌰 acorn (acorns = points-in-hand; their absence signals
+			-- nothing's paid yet), only ⏰. A speed ladder (plain → FAST! → SUPER FAST!) + color/scale make ×4 bigger.
+			stampToken += 1
+			local myTok = stampToken
+			local f = math.floor(tonumber(n) or 2)
+			local main, sub, col, w, hold
+			if f >= 4 then
+				main = "⏰ SUPER FAST! TIME BONUS ×4!"
+				sub  = "the BIGGEST bonus — we'll count it at the END!"
+				col  = Color3.fromRGB(255, 240, 150); w = 760; hold = 2.8
+			elseif f >= 3 then
+				main = "⏰ FAST! TIME BONUS ×3!"
+				sub  = "we'll count it at the END!"
+				col  = Color3.fromRGB(255, 205, 80); w = 640; hold = 2.2
+			else
+				main = "⏰ TIME BONUS ×2!"
+				sub  = "we'll count it at the END!"
+				col  = Color3.fromRGB(150, 230, 255); w = 560; hold = 2.2
+			end
+			stamp.Text = main
+			stamp.TextColor3 = col
+			stamp.TextTransparency = 0
+			stamp.Size = UDim2.new(0, w, 0, 110)
+			TweenService:Create(stamp, TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+				{ Size = UDim2.new(0, w + 80, 0, 124) }):Play()
+			TweenService:Create(stamp, TweenInfo.new(hold, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+				{ TextTransparency = 1 }):Play()
+			task.delay(0.45, function()
+				if myTok ~= stampToken then return end
+				substamp.Text = sub
+				substamp.TextTransparency = 0
+				TweenService:Create(substamp, TweenInfo.new(2.0, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+					{ TextTransparency = 1 }):Play()
+			end)
 		end
 	end
 
 	-- Per-frame rescue HUD update.
 	local ACORN = (GameConfig.Rescue and GameConfig.Rescue.acornValue) or 10
-	local finaleShown = false
+	local resultsShown = false
+	local resultsFinalAcorns = 0    -- the round's acorn total, ticked up over ~1.6s for a satisfying tally
+	local resultsCountT = 0
 	local hintFaded = false
-	RunService.RenderStepped:Connect(function()
+	RunService.RenderStepped:Connect(function(dt)
 		local snap = _G.RescueSnapshot and _G.RescueSnapshot()
 		if type(snap) ~= "table" then return end
 		-- Fade the instruction line once the player has caught their first squirrel — they've got it (Chad S36).
@@ -1176,16 +1265,32 @@ if RESCUE_ON then
 		-- Score displays in ACORNS (= points / acornValue) so every number a kid sees stays small & round
 		-- (Packet-03 §3: 10 rescues = 100 acorns = the hundred chart, not "1000 points").
 		scoreLabel.Text = "🌰 " .. tostring(math.floor((snap.score or 0) / ACORN + 0.5)) .. "   ·   Saved " .. tostring(snap.rescued or 0)
-		-- PERFECT-TEN finale: the server sends timeFactor only once results land; show the sentence ONCE.
-		if snap.phase == "results" and snap.timeFactor and not finaleShown then
-			finaleShown = true
-			_G.RescueStamp("finale", nil, nil, nil, {
-				pre = math.floor((snap.preFactorScore or 0) / ACORN + 0.5),
-				f = snap.timeFactor,
-				fin = math.floor((snap.score or 0) / ACORN + 0.5),
-			})
-		elseif snap.phase ~= "results" and finaleShown then
-			finaleShown = false
+		-- ROUND-OVER TALLY (Chad S38: a normal round showed NOTHING at the end and just restarted). EVERY round now
+		-- ends with a summary stamp, ONCE: a PERFECT TEN gets the ×N time-factor finale; any other round gets the
+		-- plain acorns + squirrels-saved tally so the round always closes on a number.
+		if snap.phase == "results" then
+			if not resultsShown then
+				resultsShown = true
+				resultsCountT = 0
+				resultsFinalAcorns = math.floor((snap.score or 0) / ACORN + 0.5)
+				rSaved.Text  = "🐿️ " .. tostring(snap.delivered or 0) .. " squirrels saved this round"
+				if snap.timeFactor then
+					rBonus.Text = string.format("⏰ PERFECT TEN!   TIME BONUS ×%d   (🌰 %d × %d = 🌰 %d)",
+						snap.timeFactor, math.floor((snap.preFactorScore or 0) / ACORN + 0.5), snap.timeFactor,
+						math.floor((snap.score or 0) / ACORN + 0.5))
+					rBonus.Visible = true
+				else
+					rBonus.Visible = false
+				end
+			end
+			-- COUNT-UP TALLY (Chad S38: "too quick to tally"): tick the acorns from 0 up to the round total over
+			-- ~1.6s so the score visibly ADDS UP on the screen instead of just appearing locked-in.
+			resultsCountT = math.min(1, resultsCountT + (dt or 1 / 60) / 1.6)
+			rAcorns.Text = "🌰 " .. tostring(math.floor(resultsFinalAcorns * resultsCountT + 0.5)) .. " acorns"
+			resultsPanel.Visible = true
+		else
+			resultsPanel.Visible = false
+			resultsShown = false
 		end
 		local cap = snap.capacity or 3
 		carryLabel.Text = "🐿️ " .. tostring(snap.carry or 0) .. "/" .. tostring(cap)

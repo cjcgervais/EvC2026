@@ -878,13 +878,17 @@ GameConfig.Rescue = {
 	-- Chad's Play to certify (the #14 FUN gate). All consumed with `or`-defaults so a config-only revert
 	-- stays build-green.
 	musicEnabled     = true,
-	musicWindVol     = 0.10,   -- base looped wind-bed volume while a round is active (the always-on floor).
+	musicWindVol     = 0,      -- OFF (Chad S38): this bed also looped SFX_SWOOSH (pitched to a rumble) — killed so
+	                           -- there is truly NO continuous whoosh anywhere. The music BEAT layer (pings/snaps) stays.
 	musicBeatSlow    = 0.75,   -- s between music beats at 0 progress (calm)…
 	musicBeatFast    = 0.34,   -- …tightening to this at the Perfect Ten (urgent, driving).
 	musicPizzAt      = 1,      -- progress (delivered+carry) at which the pizzicato layer enters (1st catch).
 	musicRhythmAt    = 4,      -- …the offbeat rhythm layer fills the groove…
 	musicBrassAt     = 7,      -- …the low brass swell note joins…
-	musicHeartAt     = 8,      -- …@8-9 STRIP the melody to a drums+heartbeat pulse (tension before ten).
+	musicHeartAt     = 8,      -- …@8-10 STRIP the melody to a HURRY-UP CLOCK TICK (was a low heartbeat THUMP that
+	                           -- read as "flapping that speeds up" — Chad S38; now a bright alternating tick-tock).
+	jingleLo         = 1.2,    -- FULL-LOAD JINGLE (Chad S38): only at a FULL 10/10 carry, a warm rising two-note
+	jingleHi         = 1.6,    -- "di-dah" says "get to the waterfall!" — then STOPS on deliver. Lower/warmer than the old tick.
 	musicLayerVol    = 0.16,   -- per-layer one-shot volume (low; layered they build without clipping).
 	-- CREW CHOIR — rider chatter scales with crew size ("the crew is the choir").
 	chirpBase        = 2.4,    -- s between rider chirps with 1 rider aboard…
@@ -892,48 +896,41 @@ GameConfig.Rescue = {
 	chirpMinGap      = 0.5,    -- s; never chirp faster than this (perf + cacophony floor).
 	chirpVol         = 0.14,   -- rider chirp volume.
 
-	-- FLIGHT AUDIO (Chad S36) — reads the BIRD's state, not the player's fingers ("my fingers aren't flapping,
-	-- the bird is"). TWO layers:
-	--  • FLAP WHOOSH — one crisp whoosh per wingbeat, VOLUME/pitch scale to the bird's flap LEVEL (the sticky
-	--    positive flapThrottle). A bird left flapping keeps whooshing; SOARING (throttle→0) fades it; a DIVE
-	--    (throttle<0) silences it. It scales to how hard the bird flaps, not to pressing a key.
-	--  • WIND — a persistent loop whose volume + pitch rise with SPEED (roars in a dive; both play when you
-	--    flap AND go fast). Pure audio off the flight engine; the LOCKED flight feel is untouched.
-	wingVolBase      = 0.12,   -- flap whoosh volume at the faintest flap… (Chad S37: turned up — "sounds really low")
-	wingVolPower     = 0.95,   -- …+ this × flap level (a hard flap is much louder; ~1.07 at full flap).
-	wingPitchBase    = 1.50,   -- flap whoosh PlaybackSpeed at a gentle flap (pitched up = short/crisp)…
-	wingPitchPower   = 0.90,   -- …+ this × flap level (a hard flap whooshes brighter/tighter). One persistent flap
-	                           -- Sound is RESTARTED each wingbeat (BirdController) so beats are crisp + SUCCESSIVE,
-	                           -- matching the flap frequency, instead of full-length one-shots smearing into a wash.
-	-- NOSE-DOWN FADE (Chad S36 bug fix): the sticky flapThrottle stays positive in a dive, so the whoosh
-	-- kept firing while the wings were visibly TUCKED. Fade the whoosh out on the SAME nose-down signal the
-	-- dive-wing-fold uses (body LookVector.Y) so the sound tracks the wings: full at/above the fold onset,
-	-- silent at the full committed stoop. Values mirror BirdBuilder DIVE_ONSET_Y / DIVE_FULL_Y.
-	wingNoseFadeOnset = -0.12,  -- LookVector.Y where the whoosh begins to fade (wings start folding)…
+	-- FLIGHT AUDIO — flap sound = a STATELESS PER-FRAME PROJECTION (Fable-5 audit, Chad S38, definitive rewrite
+	-- after 6 failed patches). ONE persistent LOOPED Sound that is NEVER Stopped or seeked; every frame its
+	-- Volume is recomputed from scratch as `(flapVolBase + flapVolPow·pow) · level · am`, where:
+	--   • level = eff · foldFade · exert   → if the wings aren't beating (throttle→0 via Ctrl) OR are folded in a
+	--     dive, level is 0, so Volume is 0 THE SAME FRAME. "Persists after I stop" is now ARITHMETICALLY
+	--     impossible — silence is a computed value, not a timer/stop that can fail to fire.
+	--   • am = flapAmFloor + (1-flapAmFloor)·max(0,sin(flapPhase))^flapPulseExp  → the wingbeat rhythm (a sharp
+	--     per-beat pulse over a faint air-bed) so it reads as whoosh-whoosh, not a drone.
+	--   • exert = 1 while Shift is held (hands-on flap), else flapHandsFree (hands-free cruise on the sticky
+	--     throttle is quieter but not silent — the wings are still visibly beating). flapHandsFree=0 → releasing
+	--     Shift goes fully silent (one knob if Chad wants that).
+	-- PlaybackSpeed = flapPitchBase + flapPitchPow·pow (tracks effort only — NEVER phase-modulated, which warbles).
+	flapVolBase      = 1.6,    -- flap volume at the faintest beat (Chad S38: LOUDER again — "still barely noticeable")…
+	flapVolPow       = 1.8,    -- …+ this × flap power → full-effort peak ≈ 3.4 (Roblox Volume caps at 10; >1 is legal & loud).
+	flapHandsFree    = 0.55,   -- voice while flapping HANDS-FREE (Shift not held, sticky throttle still up). 0 = silent.
+	flapAmFloor      = 0.45,   -- air-bed between wingbeats (raised Chad S38: the old 0.12 kept it near-silent between
+	                           -- beats → "barely noticeable"; a higher floor makes the flap continuously PRESENT).
+	flapPitchBase    = 1.2,    -- PlaybackSpeed at a gentle beat (Chad S38: raised from 0.85 — "feels muffled"; brighter/crisper)…
+	flapPitchPow     = 0.75,   -- …+ this × flap power → tops at ~1.95 (present + crisp, still below the old 2.4 screech).
+	flapPulseExp     = 2,      -- sharpness of the per-beat pulse (Chad S38: 3→2 = broader, louder peaks, still rhythmic).
+	audioDiag        = false,  -- (was ON to hunt the persist bug — structurally fixed now). Logs a line each time the flap crosses
+	                           -- audible/silent — so a flight PROVES the fix (or names the exact nonzero input if not).
+	-- NOSE-DOWN FADE (dive wing-fold): foldFade 1 at/above the fold onset → 0 at the committed stoop; it's a factor
+	-- of `level`, so a dive silences the flap as the wings tuck. Values mirror BirdBuilder DIVE_ONSET_Y / DIVE_FULL_Y.
+	wingNoseFadeOnset = -0.12,  -- LookVector.Y where the flap begins to fade (wings start folding)…
 	wingNoseFadeFull  = -0.92,  -- …and where it's fully silent (committed stoop, wings fully tucked).
-	-- EXERTION ENVELOPE (Chad S37, Fable consult): the flap throttle is STICKY and HOLDS with no decay (a
-	-- LOCKED flight feature) — so a bird trimmed for a cruise-climb kept whooshing forever ("I turned down the
-	-- flapping and the sound stayed"). Fix WITHOUT touching the control: the whoosh follows an AUDIO-ONLY effort
-	-- envelope, not the held throttle. Holding Shift ATTACKS the envelope; releasing DECAYS it → release-to-quiet
-	-- (a bird settling onto set wings, not a sample cut). Ctrl never adds effort. Wind loop is untouched.
-	effortAttackTau  = 0.10,   -- s — envelope rise time-constant while Shift (up-thrust) is held.
-	effortReleaseTau = 0.20,   -- s — envelope fall time after you let go: the whoosh STOPS ~0.5s after you stop
-	                           --      actively flapping (Chad S37, hard requirement: "it has to stop when I turn
-	                           --      down the flapping"). Not held → no flap sound. Ctrl never adds effort.
-	effortGate       = 0.07,   -- a wingbeat makes NO new whoosh below this envelope (a playing one still finishes).
-	-- NOTE (Chad S37): the earlier soft "maintenance beat" (a living-bird texture during a held hands-free climb)
-	-- was REMOVED — it read as "still flapping when I turned down the flapping." There is now exactly ONE flap
-	-- sound path, gated on actively holding Shift. Do not re-add a cruise-hold beat without a fresh Chad ask.
-	-- WIND (Chad S37): only appears at HIGH speed now (not from an easy glide), and made DISTINCT from the flap
-	-- whoosh — the wind was confused with flapping because it reused the flap sample. It's now a soft, steady,
-	-- low airflow ("a very dull whistle, not static"): a small pitch range well BELOW the crisp flap pitch, so
-	-- flap = fast crisp pulses / wind = a continuous low tone. (True tonal whistle would want a dedicated asset —
-	-- this is the best distinct approximation from the moderation-safe sample.)
-	windMinSpeed     = 190,    -- studs/s where wind STARTS (only when genuinely fast, well above a climb/glide)…
-	windFullSpeed    = 360,    -- …and where it reaches full (real dive speed).
-	windMaxVol       = 0.45,   -- wind volume at full speed (soft — sits under the flap, not a roar).
-	windPitchBase    = 0.85,   -- wind PlaybackSpeed at windMinSpeed (low/dull, clearly below the flap's 1.5-2.4)…
-	windPitchSpeed   = 0.55,   -- …+ this × speed-fraction (0.85→1.40 — a gentle rise, never into the flap range).
+	-- WIND (Chad S38: back ON, quieter + earlier). A SMOOTH low speed-rush whose volume/pitch rise with SPEED —
+	-- NOT rhythmic, so it reads as air rushing, not wingbeats (and the flap is now a distinct physics-driven pump
+	-- + the music a clock tick, so nothing else competes). Threshold lowered so normal fast flight hears it ("I
+	-- can barely hear the wind at speed, maybe I didn't go that fast"). Kept LOW-pitched, well below any flap read.
+	windMinSpeed     = 130,    -- studs/s where wind STARTS (just above easy glide ~110 → audible in normal fast flight)…
+	windFullSpeed    = 330,    -- …and where it reaches full (a real dive).
+	windMaxVol       = 0.5,    -- wind volume at full speed (a present rush, not a roar). If it EVER reads as flapping again → 0.
+	windPitchBase    = 0.7,    -- wind PlaybackSpeed at windMinSpeed (low airy rush)…
+	windPitchSpeed   = 0.5,    -- …+ this × speed-fraction (0.7→1.2 — a gentle rise, stays a low rush).
 
 	-- CATCH DIAGNOSTIC (S36) — when true, the server logs every CatchSquirrel outcome (ACCEPT / the exact
 	-- REJECT reason + carry + distance) and the client logs FULL-suppresses + phantom trims, tagged
@@ -953,7 +950,7 @@ GameConfig.Rescue = {
 	-- "waterfall_meadow" = the shipped behavior. Flip this ONE string to switch missions (e.g. to
 	-- "fox_on_the_hill" once THE FOX lands). Every mission field falls back to the current literal, so an
 	-- absent/malformed mission reproduces today's round exactly — the selector is inert by construction.
-	activeMission    = "waterfall_meadow",
+	activeMission    = "fox_on_the_hill",   -- Chad S38: FOX MODE ON for his Play (was "waterfall_meadow" — flip back to revert)
 }
 
 -- ENVIRONMENT-VARIED MISSIONS (Packet-03 §4). One sacred loop (scan→dive→catch→deliver); the WORLD varies
@@ -993,7 +990,7 @@ GameConfig.Missions = {
 			dwell           = 3,    -- s the fox sits ("aw, missed 'em") before trotting home — it visibly loses
 			minTargets      = 2,    -- a grove needs ≥ this many stranded squirrels to be worth a patrol
 			footY           = 4,    -- fox pivot height above the Y=0 baseplate top
-			foxScale        = 2.0,  -- vs squirrelScale 2.4 — readable from altitude, smaller than the hero eagle
+			foxScale        = 3.0,  -- bumped (Chad S38: "no fox seen") — plus a tall danger beacon + 🦊 billboard track it
 		},
 		deliver   = { kind = "waterfall" },                                            -- same ride home
 		placement = { groveCount = 4, perchPerGrove = 5, groveRadius = 130, groveMinGap = 520 },

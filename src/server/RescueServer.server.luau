@@ -482,6 +482,7 @@ local function pushState(player)
 		deliverCombo = ps.deliverCombo,   -- the combo the LAST deliver cashed in (the sentence card's ×N)
 		timeFactor = ps.timeFactor,       -- nil until the PERFECT-TEN finale lands at round end
 		preFactorScore = ps.preFactorScore, -- the round total BEFORE the time factor (the sentence's left side)
+		perfectFactor = ps.perfectFactor, -- the ×N earned for a fast ten, sent AT the perfect-10 deliver (banked; tallied at endRound)
 	})
 end
 
@@ -598,7 +599,7 @@ Remotes.CatchSquirrel.OnServerEvent:Connect(function(player, squirrelId, styleMu
 end)
 
 Remotes.DeliverSquirrels.OnServerEvent:Connect(function(player)
-	if phase ~= "active" then return end
+	if phase ~= "active" and phase ~= "grace" then return end   -- accept buzzer-beater delivers during grace (Chad S38)
 	local ps = stateFor(player)
 	if ps.carry <= 0 then return end
 	local n = ps.carry
@@ -623,6 +624,13 @@ Remotes.DeliverSquirrels.OnServerEvent:Connect(function(player)
 	-- endRound turns it into the TIME FACTOR finale multiplier.
 	if not ps.perfectAt and ps.delivered >= (R.perfectTenAt or 10) then
 		ps.perfectAt = timeLeft
+		-- Compute the earned TIME FACTOR now so the client can REVEAL "fast bonus ×N BANKED" at this delivery
+		-- (Chad S38: make the quick-ten reward apparent at the moment). The actual score multiply stays DEFERRED
+		-- to endRound; endRound reuses this exact value so the banked ×N can never differ from the finale ×N.
+		local f = 2
+		if ps.perfectAt >= (R.timeFactor4At or 60) then f = 4
+		elseif ps.perfectAt >= (R.timeFactor3At or 30) then f = 3 end
+		ps.perfectFactor = f
 	end
 	pushState(player)
 end)
@@ -641,6 +649,7 @@ local function startRound()
 		ps.carry = 0
 		ps.delivered = 0
 		ps.perfectAt = nil
+		ps.perfectFactor = nil
 		ps.timeFactor = nil
 		ps.preFactorScore = nil
 		ps.loadCombo = nil
@@ -665,9 +674,14 @@ local function endRound()
 			-- catch the game lying (red-team B1).
 			local av = R.acornValue or 10
 			ps.score = math.floor(ps.score / av + 0.5) * av
-			local f = 2
-			if ps.perfectAt >= (R.timeFactor4At or 60) then f = 4
-			elseif ps.perfectAt >= (R.timeFactor3At or 30) then f = 3 end
+			-- Reuse the factor already banked at the perfect-10 deliver (single source of truth → the finale ×N
+			-- always equals the "BANKED ×N" the player was shown). Fallback recompute if it's somehow absent.
+			local f = ps.perfectFactor
+			if not f then
+				f = 2
+				if ps.perfectAt >= (R.timeFactor4At or 60) then f = 4
+				elseif ps.perfectAt >= (R.timeFactor3At or 30) then f = 3 end
+			end
 			ps.preFactorScore = ps.score
 			ps.timeFactor = f
 			ps.score *= f
@@ -837,6 +851,48 @@ local function pivotFox(dirUnit, dt)
 	fox.model:PivotTo(CFrame.lookAt(at, at + dirUnit))
 end
 
+-- A tall danger beacon + 🦊 billboard welded to the fox so the player can TRACK the threat crossing the valley
+-- from altitude (Chad S38: "no fox seen anywhere" — a scale-3 fox 1360 studs out on the ground is a speck).
+local function buildFoxBeacon(model)
+	local body = model.PrimaryPart
+	if not body then return end
+	local pillar = Instance.new("Part")
+	pillar.Name = "FoxBeacon"
+	pillar.Size = Vector3.new(3, 80, 3)
+	pillar.Anchored = false
+	pillar.CanCollide = false
+	pillar.CanQuery = false
+	pillar.CanTouch = false
+	pillar.CastShadow = false
+	pillar.Massless = true
+	pillar.Material = Enum.Material.Neon
+	pillar.Color = Color3.fromRGB(255, 90, 40)   -- danger orange-red (distinct from the squirrels' warm beacons)
+	pillar.Transparency = 0.3
+	pillar.CFrame = body.CFrame * CFrame.new(0, 44, 0)
+	pillar.Parent = model
+	local weld = Instance.new("Weld")
+	weld.Part0 = body
+	weld.Part1 = pillar
+	weld.C0 = body.CFrame:ToObjectSpace(pillar.CFrame)
+	weld.Parent = body
+	local bb = Instance.new("BillboardGui")
+	bb.Name = "FoxLabel"
+	bb.Size = UDim2.new(0, 110, 0, 110)
+	bb.StudsOffsetWorldSpace = Vector3.new(0, 12, 0)
+	bb.AlwaysOnTop = true
+	bb.MaxDistance = 3200
+	bb.Parent = body
+	local lbl = Instance.new("TextLabel")
+	lbl.BackgroundTransparency = 1
+	lbl.Size = UDim2.fromScale(1, 1)
+	lbl.Font = Enum.Font.GothamBold
+	lbl.TextScaled = true
+	lbl.TextColor3 = Color3.fromRGB(255, 130, 70)
+	lbl.TextStrokeTransparency = 0.2
+	lbl.Text = "🦊"
+	lbl.Parent = bb
+end
+
 local function spawnFox()
 	if fox and fox.model then fox.model:Destroy() end
 	local hz = mission.hazard or {}
@@ -845,6 +901,7 @@ local function spawnFox()
 	model.Name = "PatrolFox"
 	model:PivotTo(CFrame.new(den))
 	if model.PrimaryPart then model.PrimaryPart.Anchored = true end
+	buildFoxBeacon(model)
 	model.Parent = worldFolder
 	fox = { model = model, pos = den, den = den, state = "den", timer = hz.cadence or 18, flared = false, bob = 0 }
 end
@@ -931,7 +988,8 @@ local function RescueRoundLoop()
 	-- THE FOX (#15b): spawn the patrol + connect its Heartbeat step ONCE, only if this mission's hazard is the
 	-- fox. Inert-by-default: waterfall_meadow never enters here → no fox, no den, no step connected.
 	if (mission.hazard or {}).kind == "fox" then
-		spawnFox()
+		local ok, err = pcall(spawnFox)
+		if not ok then warn("[RescueFox] spawnFox failed: " .. tostring(err)) end
 		RunService.Heartbeat:Connect(stepFox)
 	end
 
@@ -977,9 +1035,17 @@ local function RescueRoundLoop()
 			pushAll()
 		end
 
-		-- RESULTS
+		-- BUZZER GRACE (Chad S38): the clock hit 0, but a deliver the player made JUST before 0:00 can still be
+		-- arriving over the network, and its hop-off ceremony needs to finish. Don't rush to end — hold a grace
+		-- window that still ACCEPTS delivers (and lets the ceremony play) before locking the scoreboard. There is
+		-- no rush to end the game. (timeLeft stays 0, so a grace deliver still lands its base perfect-ten factor.)
+		phase = "grace"
+		pushAll()
+		task.wait(R.buzzerGrace or 4)
+
+		-- RESULTS — hold on the end-of-round SCREEN long enough to read it, then loop to intermission.
 		endRound()
-		task.wait(4)
+		task.wait(R.resultsHold or 8)
 	end
 end
 

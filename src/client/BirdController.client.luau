@@ -1155,6 +1155,8 @@ local rescueState = {
 	timeFactor = nil :: number?, preFactorScore = nil :: number?,
 	-- optional; set at each deliver so the sentence card renders n × n × combo from server truth (S36).
 	deliverN = nil :: number?, deliverCombo = nil :: number?,
+	-- optional; the earned time factor, sent AT the perfect-10 deliver so the "TIME BONUS ×N" reveal fires (S38).
+	perfectFactor = nil :: number?,
 }
 task.spawn(function()
 	if not (RES and RES.enabled) then return end
@@ -1260,63 +1262,60 @@ end
 -- the bird is"). FLAP WHOOSH scales to the sticky positive flapThrottle (a bird left flapping keeps whooshing;
 -- soaring fades it; a dive silences it). WIND is a persistent loop whose volume/pitch rise with SPEED (both
 -- play when you flap AND go fast). Pure audio that LISTENS to the engine — never writes kernel/control/camera.
-local wingPhasePrev = 0
-local flapEffortEnv = 0     -- audio-only exertion envelope (Fable S37): Shift attacks it, release decays it
-local flapSound             -- persistent flap Sound (created lazily), RESTARTED each wingbeat → crisp successive beats
+local flapSound             -- persistent LOOPED flap Sound: created + Played ONCE, never Stopped; Volume recomputed
+                            -- from live physics every frame (Fable-5 stateless-projection architecture, S38).
+local flapAudibleWas = false -- audioDiag: tracks the audible↔silent transition for the diagnostic log
 local windSound             -- persistent looped wind Sound (created lazily), volume scales with speed
 local function updateWingSound(dt)
 	dt = dt or 0.016
 	if not flightEngine then
-		wingPhasePrev = 0
-		flapEffortEnv = 0
+		if flapSound then flapSound.Volume = 0 end   -- projection: silence is a VALUE, never a :Stop()
 		if windSound then windSound.Volume = 0 end
 		return
 	end
-	-- FLAP WHOOSH — one whoosh per wingbeat (flapPhase wraps mod 2π); volume/pitch scale to the bird's flap
-	-- LEVEL (positive flapThrottle). Persists while the sticky throttle stays up; fades as you soar to 0.
-	local fp = flightEngine.flapPhase or 0
-	local eff = math.max(0, flightEngine.flapThrottle or 0)
-
-	-- EXERTION ENVELOPE (Fable S37): the sticky throttle is a TRIM, not effort — a bird holding a cruise
-	-- climb-power isn't audibly laboring, yet `eff` alone kept it whooshing forever (Chad: "I turned down the
-	-- flapping and the sound stayed"). So the whoosh follows this audio-only envelope instead: holding Shift
-	-- (up-thrust intent) ATTACKS it toward 1; releasing DECAYS it toward 0 → the bird settles onto set wings
-	-- over ~2-3 softening strokes. NEVER writes the kernel/throttle; Ctrl (down-thrust) never adds effort.
-	local shiftHeld = UserInputService:IsKeyDown(Enum.KeyCode.LeftShift)
-	local tau = shiftHeld and (RES.effortAttackTau or 0.10) or (RES.effortReleaseTau or 0.55)
-	flapEffortEnv = flapEffortEnv + ((shiftHeld and 1 or 0) - flapEffortEnv) * (1 - math.exp(-dt / math.max(1e-3, tau)))
-	-- NOSE-DOWN FADE: the sticky flapThrottle stays positive in a dive, so `eff` alone kept the whoosh firing
-	-- while the wings were visibly TUCKED. Read the engine's own orientation (never a control write) and fade
-	-- the whoosh out across the same LookVector.Y band the dive-wing-fold uses → the sound tracks the wings:
-	-- 1 at/above the fold onset, 0 at the committed stoop. Multiplied into volume so it ramps, never pops.
-	local ly = flightEngine.orientation and flightEngine.orientation.LookVector.Y or 0
-	local onset = RES.wingNoseFadeOnset or -0.12
-	local full  = RES.wingNoseFadeFull  or -0.92
-	local foldFade = clamp((ly - full) / math.max(1e-3, onset - full), 0, 1)
-	local wrapped = fp < wingPhasePrev
-	local pitch = (RES.wingPitchBase or 1.40) + (RES.wingPitchPower or 0.90) * eff
-	local strokeVol = (RES.wingVolBase or 0.04) + (RES.wingVolPower or 0.42) * eff
-	local gate = RES.effortGate or 0.07
-	-- ONE flap sound path (Chad S37): a wingbeat whooshes only while you're ACTIVELY flapping — the envelope is
-	-- driven by Shift, so releasing it decays past the gate in ~0.5s and the whoosh STOPS. A stroke already
-	-- playing always finishes on its own (we never hard-cut mid-whoosh). No held-throttle "maintenance" beat:
-	-- not holding Shift → no flap sound, full stop. (foldFade also silences it as the wings tuck in a dive.)
-	if wrapped and eff > 0.02 and foldFade > 0.02 and flapEffortEnv > gate then
-		-- Re-trigger ONE persistent Sound each wingbeat (restart from the attack) instead of spawning a
-		-- full-length one-shot per beat: at flap rate the one-shots overlapped into a wash — this gives a
-		-- crisp, SUCCESSIVE whoosh locked to the wingbeat frequency (Chad S37).
-		if not flapSound then
-			flapSound = Instance.new("Sound")
-			flapSound.Name = "FlapWhoosh"
-			flapSound.SoundId = SFX_SWOOSH
-			flapSound.Parent = SoundService
-		end
-		flapSound.Volume = strokeVol * flapEffortEnv * foldFade
-		flapSound.PlaybackSpeed = pitch
-		flapSound.TimePosition = 0
-		flapSound:Play()
+	-- FLAP SOUND (Fable-5 stateless projection, S38): ONE looped Sound, created + Played ONCE, NEVER Stopped or
+	-- seeked. Every frame Volume is recomputed from live physics — so "the flapping persists after I stop" is
+	-- ARITHMETICALLY impossible: when the wings stop beating (throttle→0 via Ctrl) or fold in a dive, a factor of
+	-- `level` is 0, so Volume is 0 the same frame. No triggered sample, no stop-timer, no envelope to desync.
+	if not flapSound then
+		flapSound = Instance.new("Sound")
+		flapSound.Name = "FlapWhoosh"
+		flapSound.SoundId = SFX_SWOOSH
+		flapSound.Looped = true
+		flapSound.Volume = 0
+		flapSound.Parent = SoundService
+		flapSound:Play()                              -- the ONLY :Play() this sound ever needs (+ the watchdog)
 	end
-	wingPhasePrev = fp
+	local eff = math.max(0, flightEngine.flapThrottle or 0)          -- physics truth: are the wings beating at all?
+	local pow = clamp(flightEngine.flapPower or eff, 0, 1)           -- how HARD (drives volume + pitch)
+	-- NOSE-DOWN FADE: 1 at/above the fold onset → 0 at the committed stoop. A factor of `level`, so a dive
+	-- silences the flap exactly as the wings tuck (same LookVector.Y band BirdBuilder folds the wings on).
+	local ly = flightEngine.orientation and flightEngine.orientation.LookVector.Y or 0
+	local onset, full = (RES.wingNoseFadeOnset or -0.12), (RES.wingNoseFadeFull or -0.92)
+	local foldFade = clamp((ly - full) / math.max(1e-3, onset - full), 0, 1)
+	-- EXERT: full voice hands-ON (Shift held); quieter hands-FREE on the sticky throttle (the wings are still
+	-- visibly beating, so it's not silent). flapHandsFree=0 makes releasing Shift fully silent (one knob).
+	local shiftHeld = UserInputService:IsKeyDown(Enum.KeyCode.LeftShift)
+	local exert = shiftHeld and 1.0 or (RES.flapHandsFree or 0.55)
+	-- LEVEL: eff=0 (throttle down) OR foldFade=0 (dive) → 0 → Volume 0 this frame. The whole bug class, deleted.
+	local level = eff * foldFade * exert
+	-- WINGBEAT RHYTHM: a sharp per-beat pulse from flapPhase over a faint air-bed floor (whoosh-whoosh, not a drone).
+	local pulse = math.max(0, math.sin(flightEngine.flapPhase or 0)) ^ (RES.flapPulseExp or 3)
+	local amFloor = RES.flapAmFloor or 0.12
+	local am = amFloor + (1 - amFloor) * pulse
+	flapSound.Volume = ((RES.flapVolBase or 0.55) + (RES.flapVolPow or 0.65) * pow) * level * am
+	flapSound.PlaybackSpeed = (RES.flapPitchBase or 0.85) + (RES.flapPitchPow or 0.55) * pow  -- effort only, never phase
+	if not flapSound.IsPlaying then flapSound:Play() end             -- watchdog: keep the loop alive (silent = Volume 0)
+	if RES.audioDiag then
+		local audible = flapSound.Volume > 0.02
+		if audible ~= flapAudibleWas then
+			flapAudibleWas = audible
+			local cause = (eff <= 0.02 and "eff(throttle)") or (foldFade <= 0.02 and "fold(dive)") or "pulse/level"
+			warn(string.format("[EvC-AUDIO] flap %s thr=%.2f eff=%.2f pow=%.2f fold=%.2f shift=%s vol=%.3f play=%s cause=%s",
+				audible and "ON " or "OFF", flightEngine.flapThrottle or 0, eff, pow, foldFade, tostring(shiftHeld),
+				flapSound.Volume, tostring(flapSound.IsPlaying), cause))
+		end
+	end
 
 	-- WIND — persistent loop; volume + pitch rise with SPEED (roars in a dive; layers under the flap whoosh
 	-- when you flap AND go fast). Eased so it swells rather than pops.
@@ -1371,6 +1370,7 @@ local crewCatches = {}          -- CREW CATCHES (Crew Catch v1): overlapping LIG
                                 -- = { sq, t, airtime, startPos, contactDone }; converts to a rider on contact.
 local riders = {}               -- back-riders: array of { model = Model }
 local deliverCooldown = 0
+local perfectBonusShown = false -- once-per-round: the "TIME BONUS ×N — we'll count it at the END!" reveal fired
 
 local function eagleGlide()
 	return (currentProfile and currentProfile.glideSpeed) or 130
@@ -2057,17 +2057,28 @@ local function stepHopOff(dt)
 				_G.RescueStamp("sentence", nil, nil, nil, n)
 			end
 		end
+		-- TIME BONUS reveal (Chad S38): if THIS deliver completed a fast PERFECT TEN, surface the earned ×N a
+		-- beat after the sentence card (server sent perfectFactor). It's a PROMISE — the actual tally is deferred
+		-- to the round-end finale (Fable-5: future tense, no total/=, no acorns). Once per round.
+		if rescueState.perfectFactor and not perfectBonusShown then
+			perfectBonusShown = true
+			local f = rescueState.perfectFactor
+			task.delay(RES.timeBonusRevealDelay or 1.5, function()
+				if _G.RescueStamp then _G.RescueStamp("timebonus", nil, nil, nil, f) end
+			end)
+		end
 	end
 end
 
 local function updateDeliver(dt)
 	deliverCooldown = math.max(0, deliverCooldown - dt)
+	if not rescueState.perfectFactor then perfectBonusShown = false end   -- server clears it at round start → re-arm
 	-- Don't deliver mid-catch (sacred OR crew — a crew catch still in flight would add a phantom rider
 	-- to a cleared back), mid-hop-off (the ceremony is already paying this batch out), or outside an
 	-- active round (a buzzer-beater the server would reject must not run a zero-payout ceremony —
 	-- red-team R1; the riders just stay aboard into results).
 	if #riders <= 0 or deliverCooldown > 0 or catch or #crewCatches > 0 or hopOff
-		or rescueState.phase ~= "active" then return end
+		or (rescueState.phase ~= "active" and rescueState.phase ~= "grace") then return end   -- grace = buzzer window (Chad S38)
 	local d = RES.deliverPos
 	local flat = Vector3.new(rootPart.Position.X - d.X, 0, rootPart.Position.Z - d.Z).Magnitude
 	if flat < (RES.deliverRadius or 70) and rootPart.Position.Y > (RES.deliverPadY or 250) - 50 then
@@ -2117,11 +2128,17 @@ local function updateMusic(dt)
 		return
 	end
 
-	-- THE DRAMA NUMBER — progress toward the Perfect Ten (delivered this round + what you're carrying).
-	local prog = (rescueState.delivered or 0) + #riders
-	local frac = clamp(prog / (RES.perfectTenAt or 10), 0, 1)
+	-- THE DRAMA NUMBER = your CURRENT LOAD on your back (carry), NOT cumulative delivered (Chad S38). The old
+	-- delivered+carry ratcheted UP all round and never came down, so the hurry-up cue "kept beeping after I
+	-- delivered and only had 3 on me." Tying it to carry makes the music SWELL as you fill up and RESOLVE the
+	-- moment you deliver — and the jingle fires only at a FULL 10/10 load, then stops on the drop.
+	local carry = #riders
+	-- Gate on the AUTHORITATIVE capacity (RES.carryCapacity=10), NOT the client's rescueState.capacity — that one
+	-- defaults to 3 until the first server push, which could fire the "go to the waterfall" jingle early (Chad S38).
+	local cap = RES.carryCapacity or 10
+	local frac = clamp(carry / math.max(1, cap), 0, 1)
 
-	-- BEAT CLOCK — tempo tightens from calm to driving as the round builds.
+	-- BEAT CLOCK — tempo tightens from calm to driving as your load grows.
 	local beatLen = (RES.musicBeatSlow or 0.75)
 		+ ((RES.musicBeatFast or 0.34) - (RES.musicBeatSlow or 0.75)) * frac
 	musicBeatTimer -= dt
@@ -2129,23 +2146,16 @@ local function updateMusic(dt)
 		musicBeatTimer += beatLen
 		musicBeatFlip = not musicBeatFlip
 		local vol = RES.musicLayerVol or 0.16
-		if prog >= (RES.musicHeartAt or 8) then
-			-- @8-9: STRIP the melody — a low double-thump heartbeat drives the tension toward ten.
-			playSound(SFX_SNAP, vol * 1.1, 0.4)
-			-- gate the off-beat thump so a round-end/death mid-beat can't leak one stray thump (audit NOTE).
-			task.delay(beatLen * 0.5, function()
-				if rescueState.phase == "active" then playSound(SFX_SNAP, vol * 0.8, 0.4) end
+		-- ONLY at a FULL 10/10 load: the "get to the waterfall!" JINGLE — a warm rising two-note ("di-dah") on
+		-- every other beat, which STOPS the instant you deliver. There is NO music before 10 now (Chad S38, said
+		-- 3×: "should ONLY be 10/10" — the pizz/rhythm/brass build layers that were firing at 7-8/10 are REMOVED).
+		if carry >= cap and musicBeatFlip then
+			playSound(SFX_PING, vol * 0.7, RES.jingleLo or 1.2)
+			task.delay(0.14, function()
+				if rescueState.phase == "active" and #riders >= cap then
+					playSound(SFX_PING, (RES.musicLayerVol or 0.16) * 0.7, RES.jingleHi or 1.6)
+				end
 			end)
-		else
-			if prog >= (RES.musicPizzAt or 1) and not musicBeatFlip then
-				playSound(SFX_PING, vol, 1.5)              -- PIZZICATO — soft ping on the downbeat
-			end
-			if prog >= (RES.musicRhythmAt or 4) and musicBeatFlip then
-				playSound(SFX_PING, vol * 0.9, 2.0)        -- RHYTHM — an offbeat ping fills the groove
-			end
-			if prog >= (RES.musicBrassAt or 7) and not musicBeatFlip then
-				playSound(SFX_SNAP, vol, 0.7)              -- BRASS — a low swell note on the downbeat
-			end
 		end
 	end
 
@@ -2155,7 +2165,7 @@ local function updateMusic(dt)
 		if chirpTimer <= 0 then
 			chirpTimer = math.max(RES.chirpMinGap or 0.5,
 				(RES.chirpBase or 2.4) - (RES.chirpPerRider or 0.14) * (#riders - 1))
-			local wobble = 1.6 + 0.5 * math.sin(prog * 1.3 + #riders)  -- pitch wanders so it's not a metronome
+			local wobble = 1.6 + 0.5 * math.sin(#riders * 1.3 + #riders)  -- pitch wanders so it's not a metronome
 			playSound(SFX_PING, RES.chirpVol or 0.14, wobble)
 		end
 	else
@@ -2223,7 +2233,10 @@ _G.RescueSnapshot = function()
 	return {
 		phase = rescueState.phase, timeLeft = rescueState.timeLeft,
 		score = rescueState.score, delivered = rescueState.delivered, rescued = rescueState.rescued,
-		carry = #riders, capacity = rescueState.capacity or (RES and RES.carryCapacity) or 3,
+		-- Show catches-IN-FLIGHT immediately (Chad S38: the count only bumped AFTER the ~1s catch/climb animation
+		-- → "makes me think I didn't get it"). Adding the in-flight beat(s) makes the carry number jump on the catch.
+		carry = math.min(rescueState.capacity or (RES and RES.carryCapacity) or 10, #riders + (catch and 1 or 0) + #crewCatches),
+		capacity = rescueState.capacity or (RES and RES.carryCapacity) or 3,
 		style = styleMeter, combo = rescueState.combo or 0,
 		timeFactor = rescueState.timeFactor, preFactorScore = rescueState.preFactorScore,
 	}
@@ -2904,8 +2917,7 @@ local function teardownDrive()
 	-- this the looped wind would FREEZE at its last (loud) volume and roar through the death/respawn window
 	-- (red-team F1: exactly the "sound that won't stop" class this session set out to kill).
 	if windSound then windSound.Volume = 0 end
-	if flapSound then flapSound:Stop() end
-	flapEffortEnv = 0
+	if flapSound then flapSound.Volume = 0 end   -- mute the looped flap (Fable-5: never :Stop() it — the watchdog re-Plays)
 	flightEngine = nil
 	birdModel = nil
 	rootPart = nil
