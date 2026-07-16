@@ -160,27 +160,58 @@ stems + crew chatter; include the SFX_SWOOSH replacement) → #15 MISSION FRAMEW
 Chad's Play gates the routing fun). Known cosmetic follow-up: sticky per-rider seats (red-team F3 one-seat
 pop). Then Fable Packet-04 off Chad's next §E report.**
 
-### ▶ S36 (2026-07-15, autonomous program.md loop): #14 MUSIC ESCALATION BUILT (build-green, Fable-5 audited both ends, UNCOMMITTED)
-Chad launched the autonomous **`program.md`** loop (registered + committed `c926b25` via `/agent-builder`)
-with a directive to bracket the work in **Fable-5 (model: fable) audits before and after** — done.
-- **Pre-work Fable audit → GO-WITH-CAVEATS** (the `playSound` 4s-self-destruct must not carry a LOOP;
-  `deliveredThisRound` = `rescueState.delivered + #riders`; the spec's "S33 drum" isn't in code; use the
-  locally-verified approved `rbxasset://sounds/action_falling.ogg`).
-- **#14a swoosh fix:** `SFX_SWOOSH` → `rbxasset://sounds/action_falling.ogg` (fixes the ×70 "Asset not
-  approved"; pomf/hup/whip audible again; doubles as the wind bed).
-- **#14b music escalation:** new client `updateMusic(dt)`/`fadeMusic()` — a gray-box swell on the drama
-  number `delivered + #riders`: base WIND BED (persistent looped Sound, bypasses the 4s-destroy) → +pizzicato@1
-  → +rhythm@4 → +brass@7 → @8-9 strip to a heartbeat pulse; tempo tightens with progress. Crew choir = rider
-  chirp cadence scales with `#riders`. New `GameConfig.Rescue` music/choir keys (all `or`-defaulted).
-  Hooked after `updateRiders(dt)`; faded in the teardown branch. **Client PRESENTATION only — CS-1..9/kernel/
-  camera/aim untouched by construction; no server-authority path.**
-- **Post-work Fable audit → KEEP** (zero BLOCK/REVISE; 4 cosmetic NOTEs; the one actioned = gated the delayed
-  heartbeat thump on `phase == "active"`). **Verify:** rojo-build PASS; luau-lsp baseline ONLY (0 new);
-  selene UNAVAILABLE (404). Green.
-- **DECIDE = FUN-GATE.** #14's buildable substrate is DONE; **the SWELL is Chad's Play to certify** (7-point
-  LISTEN checklist in `.loop/rescue-phase0/state.md` S36). **UNCOMMITTED — 2 commits prepped, ASK-gated:**
-  (1) #14a swoosh, (2) #14b music+config. **▶ NEXT: #15 mission framework + THE FOX (framework autonomous,
-  fox-routing fun Chad-gated), then sticky per-rider seats (F3), then §E → Packet-04.**
+### ▶ S36 CLOSE (2026-07-15, autonomous program.md loop via /agent-builder + Fable-5 audits) — READ THIS FIRST
+Launched the **`program.md`** loop (registered + committed `c926b25`), worked the queue with **Fable-5
+(model: fable) audits** bracketing the build work, then handled a run of Chad playtest feedback.
+**COMMITTED on `updraft` (NOT pushed):**
+- `424868e` **#14a** SFX_SWOOSH → `rbxasset://sounds/action_falling.ogg` (fixes the ×70 "Asset not approved").
+- `46473a9` **#14b MUSIC ESCALATION** — `updateMusic`/`fadeMusic`: gray-box swell on `delivered + #riders`
+  (wind→pizzicato@1→rhythm@4→brass@7→heartbeat@8-9, tempo tightening) + crew-choir chirp scaling. Pre-audit
+  GO-WITH-CAVEATS, post-audit KEEP.
+- `e39c8c9` **#15a MISSION-FRAMEWORK SCAFFOLD** (inert) — `GameConfig.Missions` data table + `Rescue.activeMission`
+  selector + `RescueServer.resolveMission()` routing hazard/deliver/placement through `mission.*` (fallbacks =
+  current literals → `waterfall_meadow` plays byte-identical). Architect found THE FOX is a genuinely NEW
+  server-AI subsystem (RescueServer has no flight loop) → fox is its own iteration (seam map in ledger S36).
+- `1e85fba` **CATCH-GATE FIX (Chad-confirmed "got all my squirrels")** — the recurring "catches around 8-9/10
+  don't count": a flag-gated diagnostic proved every drop was `REJECT:dist` (the big fast eagle 106-110 studs
+  out when the catch reached the server, over the flat `triggerRadius*2.5=105` gate → client phantoms →
+  premature "full"). Fixed with a VELOCITY-AWARE gate `triggerRadius*catchGateMult(3.5) + speed*catchGateLatency(0.25)`.
+  Red-team CLEAR. `catchDiag` flag left in, OFF.
+- `660f337` **COMBO "MULTIPLIES THE DELIVERY" (Chad-confirmed)** — combo no longer multiplies per-catch
+  (silent); the PEAK combo of a load is banked and the deliver pays **n × n × combo** acorns; the sentence card
+  reveals it ("n × n × 🔥C = n²C"), rendered from server-authoritative `deliverN`+`deliverCombo` so it can't
+  lie (red-team B1 fix). Balance note for Chad's ear: comboMax=6 → a chained trip-of-10 pays ~12× a safe
+  two-trip (knob `comboMax` if too dominant).
+
+**UNCOMMITTED at close (tree GREEN, luau-lsp = baseline only) — pending Chad's Play + commit approval:**
+- **Flight audio v4** (`GameConfig` wing/wind keys + `BirdController.updateWingSound`): flap whoosh + speed-scaled
+  WIND layer. ✅ **S37: BOTH "flapping won't stop" bugs FIXED** (Fable-bracketed, red-teamed). (1) **flap-in-dive**
+  — whoosh fades on a `foldFade` from `orientation.LookVector.Y` across the dive-wing-fold band. (2) **"turned
+  down the flapping and it stayed"** — root cause: the sticky flap throttle HOLDS with no decay (LOCKED feature),
+  so releasing Shift kept the S36 held-throttle whoosh going forever. Per a **Fable consult** the whoosh now
+  follows an AUDIO-ONLY **exertion envelope** (Shift attacks τ0.10 / release decays τ0.20 → whoosh STOPS ~0.5s
+  after you stop actively flapping; trigger-gated at `effortGate`, never cuts a playing stroke). **S37 cont.2:
+  after Chad STILL heard flapping on turn-down, the Fable "maintenance beat" (soft cruise-hold whoosh) was
+  REMOVED — it was the pattering he heard. Now exactly ONE flap-sound path, gated on actively holding Shift;
+  not held → no flap sound.** **S37 cont.3 — THE ACTUAL WALL: after a 4th "still flapping" report, root cause
+  found = the flight WIND LOOP, not the flap whoosh. `windSound` reused the flap sample (SFX_SWOOSH) on
+  Looped=true, scaled to speed → it PULSED like wingbeats whenever fast / in a dive (indistinguishable from
+  flapping). Fix = `windMaxVol` 0.38→0 (wind OFF). Now the ONLY whoosh is a real wingbeat while Shift held.**
+  Restore speed-wind only with a DISTINCT smooth asset. Remaining continuous sound = the quiet low music
+  rumble (`musicBed`/`musicWindVol` 0.10) — flagged; kill via `musicWindVol=0` if it also reads as flapping.
+  Red-team F1 fixed (wind mutes on `teardownDrive`). Build-green. ⚠️ **Now needs Chad's Play**. Separable (audio = GameConfig + BirdController).
+- **HUD declutter** (`GameUI` only): score→top-left, timer-only top-center, combo under it, instruction line
+  auto-fades after first catch (S36 "spread to corners"); **S37 (Chad asks): rescue now HIDES SPD/ALT + ANGLE
+  OF INCIDENCE + the HP/FLY bars; the FLAP throttle indicator moves to BOTTOM-CENTER; the 🐿️ carry count +
+  crew-pop sit BOTTOM-CENTER just above it** (all clear the auto-fading control-hint line). UNCONFIRMED by
+  Chad's eye. Cleanly separable (HUD = GameUI only). Commit note (F2): enumerate the bundled S36 HUD edits in the body.
+- **REBIND to mouse thumb buttons: CLOSED** — Roblox can't read MB4/5; Chad chose KEEP Shift/Ctrl.
+
+**▶ NEXT AGENT:** (1) ✅ flap-in-dive bug FIXED (S37) — let Chad fly audio v4 + the HUD (checklist in ledger
+S37), commit both (2 commits by file). (2) Then **#15b THE FOX** — the next big queue item (new server-AI patrol subsystem;
+`rescue-gameplay-architect` seam-map is in ledger S36: mirror `GameServer.updateAICrows`/Boids Y-locked, grove
+flare + squirrel frantic/relocate P3, then `red-team-reviewer`, then Chad flies the routing fun). Then the §E
+report-back → Fable Packet-04. **Music swell + combo balance are still Chad's ear to certify when he next flies.**
 
 ### ▶ RESCUE PHASE-0 QUEUE (work top-down in the loop)
 - **#0 [DONE S32]** bigger trigger (`triggerRadius` 28→42) + easier snatch (`closingGateFrac` 0.40→0.30) + bigger map (`valleyRadius` 1000→1600, `treeCount`→68, `squirrelCount`→15). *(Chad's two asks — applied; he re-plays to confirm.)*

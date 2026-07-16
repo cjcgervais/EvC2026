@@ -861,13 +861,24 @@ local RESCUE_ON = GameConfig.Rescue and GameConfig.Rescue.enabled
 if RESCUE_ON then
 	teamBanner.Visible = false
 	scoreFrame.Visible = false
+	-- Chad S37: the SPD/ALT readout + the ANGLE OF INCIDENCE gauge are combat instruments that clutter the
+	-- bottom-left in rescue (and the carry meter was landing on top of them). Hide both — rescue doesn't
+	-- need airspeed/attitude numerals. (IncidenceGauge lives in a do-block; fetch it by Name.)
+	flightDataFrame.Visible = false
+	local incGauge = screenGui:FindFirstChild("IncidenceGauge")
+	if incGauge then incGauge.Visible = false end
+	-- Chad S37: rescue has no combat HP/stamina — hide the HP + FLY bars entirely, and drop the FLAP throttle
+	-- indicator to the BOTTOM CENTER (the 🐿️ count is placed just above it below). FlapFrame is in a do-block → by Name.
+	barsFrame.Visible = false
+	local flapFrameRef = screenGui:FindFirstChild("FlapFrame")
+	if flapFrameRef then flapFrameRef.Position = UDim2.new(0.5, -150, 1, -42) end
 	controlHint.Text = "<b><font color=\"#ffd24a\">FLY FAST past a squirrel</font></b> to catch it!   \194\183   Carry them up the <b><font color=\"#8fd8ff\">WATERFALL</font></b> to safety   \194\183   SPACE = look around"
 
-	-- TIMER + PHASE (top center)
+	-- TIMER (top center — timer only; score moved to the top-left corner to declutter the center, Chad S36)
 	local topFrame = Instance.new("Frame")
 	topFrame.Name = "RescueTop"
 	topFrame.AnchorPoint = Vector2.new(0.5, 0)
-	topFrame.Size = UDim2.new(0, 360, 0, 84)
+	topFrame.Size = UDim2.new(0, 200, 0, 52)
 	topFrame.Position = UDim2.new(0.5, 0, 0, 8)
 	topFrame.BackgroundColor3 = UI.hudColor
 	topFrame.BackgroundTransparency = UI.hudTransparency
@@ -877,17 +888,30 @@ if RESCUE_ON then
 
 	local timerLabel = Instance.new("TextLabel")
 	timerLabel.Name = "Timer"
-	timerLabel.Size = UDim2.new(1, -16, 0, 44); timerLabel.Position = UDim2.new(0, 8, 0, 4)
+	timerLabel.Size = UDim2.new(1, -16, 1, -8); timerLabel.Position = UDim2.new(0, 8, 0, 4)
 	timerLabel.BackgroundTransparency = 1; timerLabel.Font = Enum.Font.GothamBlack; timerLabel.TextScaled = true
 	timerLabel.TextColor3 = Color3.fromRGB(255, 255, 255); timerLabel.TextStrokeTransparency = 0.4
 	timerLabel.Text = "2:00"; timerLabel.Parent = topFrame
 
+	-- SCORE (top-LEFT corner)
+	local scoreFrame2 = Instance.new("Frame")
+	scoreFrame2.Name = "RescueScore"
+	scoreFrame2.AnchorPoint = Vector2.new(0, 0)
+	scoreFrame2.Size = UDim2.new(0, 240, 0, 52)
+	scoreFrame2.Position = UDim2.new(0, 12, 0, 10)
+	scoreFrame2.BackgroundColor3 = UI.hudColor
+	scoreFrame2.BackgroundTransparency = UI.hudTransparency
+	scoreFrame2.BorderSizePixel = 0
+	scoreFrame2.Parent = screenGui
+	local sf2c = Instance.new("UICorner"); sf2c.CornerRadius = UDim.new(0, 10); sf2c.Parent = scoreFrame2
+
 	local scoreLabel = Instance.new("TextLabel")
 	scoreLabel.Name = "Score"
-	scoreLabel.Size = UDim2.new(1, -16, 0, 30); scoreLabel.Position = UDim2.new(0, 8, 0, 50)
+	scoreLabel.Size = UDim2.new(1, -16, 1, -8); scoreLabel.Position = UDim2.new(0, 8, 0, 4)
 	scoreLabel.BackgroundTransparency = 1; scoreLabel.Font = Enum.Font.GothamBold; scoreLabel.TextScaled = true
 	scoreLabel.TextColor3 = Color3.fromRGB(255, 214, 120); scoreLabel.TextStrokeTransparency = 0.5
-	scoreLabel.Text = "🐿️ 0"; scoreLabel.Parent = topFrame
+	scoreLabel.TextXAlignment = Enum.TextXAlignment.Left
+	scoreLabel.Text = "🌰 0"; scoreLabel.Parent = scoreFrame2
 
 	-- CARRY + STYLE (bottom center, above the control hint)
 	-- COMBO banner (Chad S34): consecutive catches build a x N combo — the SHOWN reward for boom-and-zoom
@@ -896,7 +920,7 @@ if RESCUE_ON then
 	comboLabel.Name = "RescueCombo"
 	comboLabel.AnchorPoint = Vector2.new(0.5, 0)
 	comboLabel.Size = UDim2.new(0, 340, 0, 46)
-	comboLabel.Position = UDim2.new(0.5, 0, 0, 98)
+	comboLabel.Position = UDim2.new(0.5, 0, 0, 66)   -- just under the (now shorter) timer frame
 	comboLabel.BackgroundTransparency = 1
 	comboLabel.Font = Enum.Font.GothamBlack
 	comboLabel.TextScaled = true
@@ -909,9 +933,9 @@ if RESCUE_ON then
 
 	local carryFrame = Instance.new("Frame")
 	carryFrame.Name = "RescueCarry"
-	carryFrame.AnchorPoint = Vector2.new(0.5, 1)
-	carryFrame.Size = UDim2.new(0, 320, 0, 56)
-	carryFrame.Position = UDim2.new(0.5, 0, 1, -64)
+	carryFrame.AnchorPoint = Vector2.new(0.5, 1)               -- BOTTOM-CENTER, just above the flap indicator
+	carryFrame.Size = UDim2.new(0, 320, 0, 56)                 -- (Chad S37: squirrel count down-centered over FLAP)
+	carryFrame.Position = UDim2.new(0.5, 0, 1, -94)
 	carryFrame.BackgroundColor3 = UI.hudColor
 	carryFrame.BackgroundTransparency = UI.hudTransparency
 	carryFrame.BorderSizePixel = 0
@@ -976,9 +1000,9 @@ if RESCUE_ON then
 	-- center stamps (a crew catch usually fires WHILE a sacred GOTCHA is on screen).
 	local crewPop = Instance.new("TextLabel")
 	crewPop.Name = "RescueCrewPop"
-	crewPop.AnchorPoint = Vector2.new(0.5, 1)
+	crewPop.AnchorPoint = Vector2.new(0.5, 1)                  -- just ABOVE the bottom-center carry meter (Chad S37)
 	crewPop.Size = UDim2.new(0, 300, 0, 34)
-	crewPop.Position = UDim2.new(0.5, 0, 1, -126)
+	crewPop.Position = UDim2.new(0.5, 0, 1, -154)
 	crewPop.BackgroundTransparency = 1
 	crewPop.Font = Enum.Font.GothamBlack
 	crewPop.TextScaled = true
@@ -1130,9 +1154,16 @@ if RESCUE_ON then
 	-- Per-frame rescue HUD update.
 	local ACORN = (GameConfig.Rescue and GameConfig.Rescue.acornValue) or 10
 	local finaleShown = false
+	local hintFaded = false
 	RunService.RenderStepped:Connect(function()
 		local snap = _G.RescueSnapshot and _G.RescueSnapshot()
 		if type(snap) ~= "table" then return end
+		-- Fade the instruction line once the player has caught their first squirrel — they've got it (Chad S36).
+		if not hintFaded and ((snap.carry or 0) > 0 or (snap.rescued or 0) > 0) then
+			hintFaded = true
+			TweenService:Create(controlHint, TweenInfo.new(1.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+				{ TextTransparency = 1, TextStrokeTransparency = 1 }):Play()
+		end
 		local t = math.max(0, math.floor((snap.timeLeft or 0)))
 		timerLabel.Text = string.format("%d:%02d", math.floor(t / 60), t % 60)
 		if snap.phase == "active" then
