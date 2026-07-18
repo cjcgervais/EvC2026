@@ -49,15 +49,21 @@ Otherwise: fix trivially or **revert** (git is the undo button) and log why.
    and a budget (e.g. "3–4 iterations, stop on 2 no-improvement or the first FUN gate").
 
 **The queue, in order (top-down):**
-- **#14 MUSIC ESCALATION** (Packet-03 slice 3, *autonomous*) — layered stems crossfaded on
-  `delivered + carry` progress-to-ten; crew chatter scales with crew size; **includes the
-  `SFX_SWOOSH` replacement** (`rbxasset://sounds/swoosh.wav` = "Asset is not approved" ×70 —
-  pomf/hup/whip are half-silent; find an approved id).
-- **#15 MISSION FRAMEWORK + THE FOX** (Packet-03 slice 4) — build the framework autonomously;
-  **the fox-pressure routing FUN is Chad-gated → STOP at that boundary.**
-- **Cosmetic follow-up:** sticky per-rider seats (red-team **F3** one-seat pop when a crew
-  catch lands during a sacred slow-mo climb).
-- Then: feel-knob VALUES gated on Chad's Play, and the **#GATE** §E report-back → Fable Packet-04.
+- **#16 ANIMATIONS PASS** (Chad S39 — the current headline; *autonomous, batch-buildable*).
+  Build out the catch-beat animations, **Fable-designed + Fable-audited before AND after**:
+  - **#16a EAGLE TALON CATCH ANIM** — the eagle visibly reaches its talons down-and-forward,
+    splays, and clenches when catching a squirrel (the legs/talons are built but static-welded
+    today; rig them like `AnimateWings`). "use fable for this" (Chad).
+  - **#16b SQUIRREL JUMP ANIM** — the leaping squirrels get a real "jumping to be helped"
+    animation (currently bare `starfish` for the whole arc).
+  These are **cosmetic Motor6D presentation** on the catch beat — batch them, Fable-audit the
+  batch, and only surface for Chad's Play when the whole animation batch is ready (see the
+  ANIMATION-BATCH rule under STOP conditions — do NOT stop per-item for a flight test).
+- **🦊 THE FOX — SHELVED** (Chad S39: "Forget the fox for now"). Do not build fox work this
+  cycle. The `#15a` mission-framework scaffold stays inert; leave it.
+- **Deferred queue (after the animation pass, still autonomous):** #14 music escalation polish ·
+  sticky per-rider seats (red-team **F3** one-seat pop when a crew catch lands during a sacred
+  slow-mo climb) · feel-knob VALUES + the **#GATE** §E report-back → Fable Packet-04.
 
 ---
 
@@ -99,16 +105,20 @@ feather/tumble FX, SpatialHash). A change that deletes or reuses beats a change 
 
 1. **PICK** the next buildable queue item (top of the queue that isn't blocked on Chad's Play).
    If the *only* remaining items are FUN-gated → go to **STOP**.
-2. **DESIGN** — for a new mechanic, spawn **`rescue-gameplay-architect`** with the current code
-   + the bible/Packet-03 to get the single next build-or-tune step (what to build, where it hooks
-   `file:line`, the pillar it serves, kid-floor/kernel-safety, the predicted felt result, the
-   revert). For a small tune, skip to 3.
+2. **DESIGN + FABLE "BEFORE" AUDIT** — for a new mechanic, spawn **`rescue-gameplay-architect`
+   on `model: fable`** (the S37 pattern, Chad-directed) with the current code + the bible/Packet-03
+   to get the single next build-or-tune step (what to build, where it hooks `file:line`, the pillar
+   it serves, kid-floor/kernel-safety, the predicted felt result, the revert). This IS the "before"
+   half of the Fable bracket. For a small tune, skip to 3.
 3. **LOCKED-SPEC GATE** — if the change comes anywhere near controls/camera/input/kernel, grep the
    CS-1…CS-9 registry and confirm no locked behavior moves. If it must touch one → **STOP and ASK**.
 4. **BUILD** the ONE change. Refine the module; do not regenerate. All Luau starts `--!nonstrict`.
-5. **RED-TEAM** — spawn **`red-team-reviewer`** for anything touching control/camera/kernel/combat/
-   balance, or a new server-authority path. For client-presentation-only edits, a self-red-team
-   (documented in the ledger, the S33+ pattern) is sufficient. **Fix or surface every BLOCK/REVISE.**
+5. **RED-TEAM + FABLE "AFTER" AUDIT** — spawn **`red-team-reviewer`** for anything touching
+   control/camera/kernel/combat/balance, or a new server-authority path. For client-presentation-
+   only edits (e.g. the animation pass), a self-red-team (documented in the ledger, the S33+
+   pattern) is sufficient. Then, for anything Fable-designed in step 2, spawn a **Fable-5 "after"
+   audit** (`rescue-gameplay-architect`, `model: fable`) — faithfulness (did the build match the
+   spec?) + a feel/read sanity check — closing the bracket. **Fix or surface every BLOCK/REVISE.**
 6. **VERIFY** — run:
    ```
    .\verify.ps1
@@ -147,9 +157,16 @@ audit trail — a fresh agent must be able to cold-start from it and continue.
 Unlike an autoresearch loop, this one **must not run forever** — feel is Chad's to certify. Stop and
 report the moment ANY of these fires:
 
-- **FUN-GATE** — the next item's payoff is *fun/feel/readability* (e.g. "does the fox routing feel
-  fun?", a Chad-gated feel knob like `slowmoScale`, the **#GATE** §E report-back). Build the
-  buildable substrate, then **STOP and write the playtest checklist.** Never self-certify FUN.
+- **FUN-GATE** — the next item's payoff is *fun/feel/readability* (e.g. a Chad-gated feel knob
+  like `slowmoScale`, the **#GATE** §E report-back). Build the buildable substrate, then **STOP
+  and write the playtest checklist.** Never self-certify control FEEL.
+  - **ANIMATION-BATCH exception (Chad S39 — "build on a loop without flight testing so much"):**
+    COSMETIC animation/visual-presentation work (Motor6D poses, FX, model polish — anything that
+    does NOT touch the kernel/camera/aim/CS-1..9 or a balance number) is **NOT** a per-item FUN
+    gate. Build the whole batch autonomously, let the **Fable "before"/"after" audits stand in for
+    the feel-read** (that's their job here), keep it build-green, and only **STOP for Chad's Play
+    once the BATCH is ready** — one checklist for the batch, not one flight test per pose. Do not
+    halt after each animation. (Kernel/control/aim edits are still hard-gated — those always ASK.)
 - **LOCKED-SPEC RISK** — a change cannot be made without touching CS-1…CS-9 or the kernel/camera/aim
   law. **STOP and ASK Chad** — do not guess on control feel.
 - **QUEUE EXHAUSTED** — every remaining item is FUN-gated or needs Chad. Close the session.

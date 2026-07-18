@@ -4,7 +4,141 @@ Read this first. It tells the next agent exactly where the project stands, the o
 
 ---
 
-## ▶▶ S38 CLOSE (2026-07-15) — READ THIS FIRST (supersedes the stale audio/HUD notes further down)
+## ▶▶ S41 (2026-07-17) — 🔁 master-loop resumed: plan audited/hardened · A0 · empty-map self-diagnosis · A6 smoke boot
+
+**Chad:** *"keep building eagle rescue, fully autonomous, one component at a time, audit our vision and our plan, this
+harness, everything with Fable… I am tired of testing broken game components."* Then flew and reported **"no squirrels
+or talon animations."** All S41 work is **UNCOMMITTED, ASK-gated, ladder-green** (rojo PASS · Tier-4 13/13 · luau-lsp
+17=baseline/0 NEW).
+
+- **Fable VISION+PLAN+HARNESS audit** (rescue-gameplay-architect, model fable): vision INTACT, stabilize-first is the
+  right answer to "tired of testing broken." **4 plan-text hardenings applied** (docs only): §3.1 **A2 amendment** — the
+  plan's server catch-gate was TIGHTER than the live gate; a verbatim A2 extraction would resurrect bug 2c ("8-9/10
+  don't count"); pinned the live formula as source of truth. + Gate-C-requires-B7 + A6 packet + A-RULE/B5 squeak.
+- **A0 DONE:** `activeMission` "fox_on_the_hill" → "waterfall_meadow" (fox shelved; subsystem inert).
+- **Empty-map self-diagnosis:** `populateSquirrels` now per-squirrel pcall + prints `[Rescue] populated N/15` → an empty
+  map is a 1-glance Output verdict, not a test session. **Static sweep found NO code cause of "no squirrels"** (spawn/
+  beacon/BuildSquirrel/enabled/dual-server all healthy) → almost certainly a **STALE/UNSYNCED Studio build**.
+- **A6 Tier-4.5 smoke boot BUILT** (Chad-approved): `run-in-roblox` v0.3.0 launches Studio headlessly. **Hard limit
+  found:** it's EDIT-mode/plugin-security (no Play/Run) → can't observe the live server round; repurposed to a
+  REAL-ENGINE load+build gate (modules load + real models build — catches what lune's approximation misses). GREEN.
+  It immediately caught a lune-vs-Studio discrepancy (see MASTER-PLAN A-FINDING). Live-runtime classes stay Tier 5 /
+  a future Open Cloud packet. Run: `.\tools\Smoke-Boot.ps1` or `.\verify.ps1 -Smoke`.
+
+**▶ NEXT / for Chad:** the 30-sec confirm on "no squirrels" — `.\serve.ps1` → reconnect Rojo plugin → Play → Output
+should show `[Rescue] populated 15/15`. If present, it was stale build → approve the S39+S40+S41 commits and the loop
+runs A2 (RescueRules keystone, now de-risked). If `0/15`/absent, it's a real bug and the line says which. **Autonomous
+loop stands by at the A2 keystone; see MASTER-PLAN §4.**
+
+---
+
+## ▶▶ S40 (2026-07-15) — 🗺️ THE MASTER PLAN + /master-loop (READ THIS FIRST — new work model)
+
+**Chad's directive:** *"stop chasing bugs / go back to the drawing board / create the master plan / automate the
+build, Opus where it saves tokens, keep it tunable."* Delivered (docs + harness only — ZERO game-code edits; the
+S39 batch diff is untouched):
+
+- **`docs/MASTER-PLAN.md` — the work queue of record** (supersedes the COLD-START queue below + `program.md`'s
+  item list). Phases: **A STABILIZE** (Lune Tier-4 headless tests + `RescueRules` pure-module extraction — grounded
+  in a 14-bug autopsy: ~70% of all playtest churn was headless-testable logic) → **B THE ROUND** (fire-cell grid,
+  simulation-tuned before it renders; crash→bounce; trails; FTUE; touch=B7 CHAD-GATED) → **C THE LEVELED GAME**
+  (persistence, level track, The Den, art pass) → **D META**. Includes the numbers workbook (catch-gate chain,
+  acorn economy → level thresholds, fire-spread math) — derived AND asserted by headless SIM once A1 lands.
+- **Headless verification PROVEN:** Lune v0.10.5 (bootstrapped in `tools/bin/`, gitignored) ran the unmodified
+  `FlightPhysics`+`GameConfig` 200 frames, exit-code gated. Loader pattern on record in the plan §2 + the S40
+  feasibility report. This becomes verify.ps1 **Tier 4** (packet A1).
+- **`.claude/skills/master-loop/SKILL.md` — the executing harness** (/master-loop): per packet = design (Fable,
+  per the plan's `[model:]` tags) → implement (OPUS subagents — Chad's token policy) → red-team → ladder → ledger →
+  ASK-gated checkpoint. Stops at phase gates / Chad decisions / LOCKED-spec risk. Plan is Chad-editable live.
+- ⚠️ Known config/intent mismatch: `activeMission="fox_on_the_hill"` vs fox SHELVED → packet **A0** (blocked until
+  the S39 commit lands, to keep diffs separate).
+
+**▶ NEXT:** Gate 0 = Chad flies the S39 animation batch (below) → approves the S39 commit (prepared) + an S40 commit
+(plan + skill + this block) → then run **`/master-loop`** and Phase A executes autonomously.
+
+### ▶ S40 VISUAL-QUALITY (2026-07-17) — Chad set a QUALITY BAR; the machine now enforces it
+Chad flew S39 and rejected it: *"all the talons do is change angles… how does an eagle catch something in talons?
+Also… its just a light cylinder. I dont even see squirrels. This is supposed to be an autonomous programmatic build.
+It needs to have quality standards before I judge it."* Root cause both bugs reached him: S39 used a Fable CODE-audit
+as the visual read — code can't see pixels. Response = build a real VISUAL gate + fix both, all machine-verified:
+- **QUALITY GATE (the meta-ask):** @lune/roblox builds the REAL BirdBuilder models headlessly →
+  `tests/models.spec.luau` (squirrel visible/non-degenerate; **beacon-must-not-occlude-squirrel**, teeth proven —
+  the S39 beacon FAILS it) + `tests/talon.spec.luau` (**grasp-closure gate**: forward-kinematics on the joint chain
+  asserts the fist OPENS→CLOSES→CONVERGES + rest-pose preserved; a rotating paddle fails by construction). Nothing
+  structurally broken/invisible reaches Chad again.
+- **FIX 1 — squirrels VISIBLE:** the S39 beacon was a fat opaque 110-tall column centered +40 (base -15) that
+  ENGULFED the squirrel. Now ONE config source (`GameConfig.Rescue.beaconWidth/Height/beaconBaseY`), a THIN beam
+  ABOVE the head (+8), and the client fades it to invisible up close (transparency-only; no more per-frame fattening).
+- **FIX 2 — a REAL talon grasp:** Fable-designed articulated rig (14 Motor6Ds: split toes + hallux, open→wrap→clench),
+  Opus-implemented, gate-verified (open 1.09 → closed 0.27, a 4× collapse). The gate caught a curl-sign inversion
+  before Chad ever saw it. Gated `Rescue.talonAnim` (false = instant revert).
+- **Verify:** Tier-4 13/13 GREEN · rojo-build PASS · luau-lsp 0 NEW (17 = baseline). UNCOMMITTED, ASK-gated.
+- **▶ CHAD'S PLAY (the only thing the machine can't judge — beauty/feel):** ① fly low over squirrels — do you SEE
+  them now (animated, not a cylinder)? ② on a catch, does the open hand read in slow-mo and the fist read as
+  GRABBING the squirrel (registration = `TALON_LOCAL`; gate proves the fist closes, not where the squirrel sits)?
+
+### ▶ S40 A1 (2026-07-17) — 🟢 Tier-4 headless testing is LIVE (first master-loop packet, commit-ready)
+Ran `/master-loop` on Chad's "continue to build … programmatically looping with fable consults." Under Gate 0
+(S39 batch unflown), the only Gate-0-safe packet is **A1** — pure tooling, all-new files + a `verify.ps1` edit
+(not in the S39 diff), machine-gated, foundation for the whole STABILIZE phase. **DONE + GREEN:**
+- `tools/Bootstrap-Lune.ps1` (pins Lune v0.10.5; `tools/bin/` gitignored) · `tests/_loader.luau` (runs the
+  UNMODIFIED src/shared modules outside Roblox) · `tests/_harness.luau` · `tests/kernel.spec.luau`
+  (spawn/glide/flap + **no-NaN storm, 200 frames, Eagle+Crow**) · `tests/run.luau` · `verify.ps1` **Tier 4**
+  (`lune run tests/run.luau`, exit-gated, UNAVAILABLE-degrading).
+- **Ladder:** rojo-build PASS · **Tier-4 PASS 5/5** · selene UNAVAILABLE(404) · luau-lsp = documented baseline
+  ONLY (A1 edits no `src/` → 0 NEW). The gate has teeth (a real bug produced 5 FAILs + exit 1 mid-build).
+- **A1 commit is prepared + separable** from the S39 game-code commit (no shared files). Self-red-team CLEAR.
+- **STOP = Gate 0:** every remaining Phase-A packet (A0 config flip, A2 RescueRules keystone, A3 acquisition FSM)
+  refactors/depends on S39-dirty files → they unblock only once the S39 commit lands. Fly S39 → commit → the loop
+  runs A0→A2→A3→A4→A5 autonomously (A2 lands with its regression specs, gated by the now-live Tier 4).
+
+---
+
+## ▶▶ S39 (2026-07-15) — 🎬 ANIMATIONS PASS built (supersedes S38 CLOSE's "NEXT")
+
+**Chad's directive:** *"build out the games animations now. Forget the fox for now. I want eagles talons (use fable
+for this) to be animated when catching squirrels. Also give me animated squirrels jumping to be helped."* + three
+PROCESS asks. **All built, build-GREEN, Fable-bracketed (before+after), UNCOMMITTED on `updraft`. One commit prepared,
+ASK-gated. This is an ANIMATION BATCH awaiting Chad's Play.**
+
+**Process fixes (Chad's asks) — DONE:**
+- `.claude/settings.json`: `Bash`+`PowerShell` broadly allowed (git commit/push still `ask`) → the autonomous loop no
+  longer prompts for bash; commit still asks.
+- `program.md`: **ANIMATION-BATCH exception** to the FUN-GATE (cosmetic anim/visual work is NOT a per-item Play gate —
+  build the whole batch, Fable audits stand in for the feel-read, STOP for Play once the batch is ready). **🦊 FOX
+  SHELVED + dropped from the queue** (Chad "forget the fox"). Fable before/after audits codified as loop steps 2 & 5.
+
+**What landed (the batch — cosmetic Motor6D presentation, kernel/camera/aim/CS all untouched):**
+- **#16a EAGLE TALON CATCH ANIM.** `BirdBuilder` eagle legs rewritten as a Path-A rig (per side: `<Side>HipJoint` +
+  `<Side>FootJoint` Motor6Ds, world-pivot form; a new `Foot` hub; toes weld to it). New `BirdBuilder.AnimateTalons`.
+  Driven from `stepCatch`: REACH down-and-forward + toes open during the leap → GRAB (clench) on the pomf → re-TUCK
+  during the climb. Rest pose (`Transform=I`) byte-identical to the old static weld; only the possessed eagle is
+  driven (crows/riders/other birds unchanged). Gated `GameConfig.Rescue.talonAnim=true`.
+- **#16b SQUIRREL JUMP ANIM.** New `"leap"` pose in `PoseSquirrel` (athletic push-off → arms reaching overhead for
+  the talons), replacing the static `"starfish"` in both the sacred and crew leap branches.
+- **#16c DROP THE ICONS** (Chad "drop the icons lets go with animated squirrels"). Removed the floating "🐿️!" emoji
+  BillboardGui from stranded squirrels (`RescueServer.buildBeacon`). **🐞→✅ REGRESSION FIXED (S39 cont.2):** Chad
+  "map is empty / no squirrels" — Fable-5 diagnosed it was NOT a crash; the deleted billboard was `AlwaysOnTop` +
+  constant-pixel + 1400-stud, the ONLY long-range/through-canopy read → squirrels spawned but were invisible from the
+  air. FIX: the beacon is now a BRIGHT TALL pulsing neon SHAFT (server pillar 3.2 wide × 110 tall, transp 0.15, center
+  +40; client tell-loop idle/tell/frantic all widened + held tall — the client overrides the beacon each frame, so
+  BOTH had to change). Emoji icon stays gone; a light shaft is the "fly to the glow → see the animated squirrel" read.
+  If still hard to spot: raise height / lower transparency, or re-add a non-emoji dot. Studio check:
+  `print("SQ:", #workspace.Squirrels:GetChildren())` → ~10-11.
+
+**Fable-5 "after" audit = NOTES (no BLOCK/REVISE):** faithful to spec, pivot-math verified (valid single-root tree,
+no cross-through, ScaleTo holds). **One WATCH = Chad's-Play call, deliberately NOT pre-tuned:** `TALON_LOCAL` (where
+the squirrel freezes on contact) sits a touch aft of the clenched feet → the grab could read slightly ahead of the
+squirrel (masked by the feather burst + hit-stop + climb). Fix if it reads off: nudge `TALON_LOCAL` forward/down or
+raise the clench pull-back. Full checklist + revert in `.loop/rescue-phase0/state.md` (S39).
+
+**▶ NEXT:** Chad flies the S39 animation-batch checklist (does the GRAB land inside slow-mo? does the JUMP read?) →
+keep/nudge the one registration knob → commit. Then the deferred queue (music polish · sticky per-rider seats F3 ·
+feel-knob values · Fable Packet-04). **Autonomous loop:** `program.md` #16 done; fox shelved.
+
+---
+
+## ▶▶ S38 CLOSE (2026-07-15) — (superseded by S39 above for "NEXT"; audio/fox context still valid)
 
 **All committed on `updraft` (NOT pushed). HEAD = `17c3deb`.** Fox mode is LIVE (`GameConfig.activeMission = "fox_on_the_hill"`). `audioDiag` OFF.
 

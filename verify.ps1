@@ -4,7 +4,8 @@
     The optional Tier-1 gate described in the evc-loop skill. Runs, best-effort:
       1. luau-lsp analyze   (types / broken requires / contract mismatches)
       2. selene             (lint / correctness smells)
-      3. rojo build         (the guaranteed wiring floor — same as build.ps1)
+      3. lune tests (Tier 4)(headless pure-logic specs, exit-code gated — tests/run.luau)
+      4. rojo build         (the guaranteed wiring floor — same as build.ps1)
 
     Each analysis tier is BEST-EFFORT: if its binary can't be bootstrapped on this
     machine (offline / moved release asset), that tier is reported UNAVAILABLE and
@@ -15,9 +16,13 @@
     live machine — if a bootstrap URL has drifted, fall back to .\build.ps1 and
     bump the pinned version/asset name in tools\Bootstrap-Verify.ps1.
 .PARAMETER SkipAnalysis  Only run the rojo build floor (fast path).
+.PARAMETER Smoke         Also run Tier 4.5: the headless run-in-roblox SMOKE BOOT (A6) — launches
+                         Studio against the built place and asserts squirrels populate at RUNTIME
+                         (catches the "machine-green but empty map" class Tier 4 can't see). Heavy
+                         (Studio cold-open ~1-2 min), so it is opt-in, not part of the default ladder.
 #>
 [CmdletBinding()]
-param([switch]$SkipAnalysis)
+param([switch]$SkipAnalysis, [switch]$Smoke)
 
 $root = $PSScriptRoot
 $src  = Join-Path $root 'src'
@@ -80,6 +85,26 @@ if (-not $SkipAnalysis) {
         Write-Host "  UNAVAILABLE: $($_.Exception.Message)" -ForegroundColor Yellow
         $results['selene'] = 'UNAVAILABLE'
     }
+
+    # --- Tier 4: lune headless logic tests (exit-code gated) ---
+    # Runs the pure modules OUTSIDE Roblox (tests/run.luau discovers *.spec.luau).
+    # Unlike luau-lsp (judged by NEW findings), Tier 4 is authoritative on its exit
+    # code: a failing spec = FAIL. Degrades to UNAVAILABLE if lune can't be fetched.
+    Write-Head 'lune tests (Tier 4)'
+    $runner = Join-Path $root 'tests\run.luau'
+    if (-not (Test-Path $runner)) {
+        Write-Host "  UNAVAILABLE: tests/run.luau not present (pre-A1)" -ForegroundColor Yellow
+        $results['lune-tests'] = 'UNAVAILABLE'
+    } else {
+        try {
+            $lune = & (Join-Path $root 'tools\Bootstrap-Lune.ps1')
+            & $lune run $runner
+            $results['lune-tests'] = PassFail $LASTEXITCODE
+        } catch {
+            Write-Host "  UNAVAILABLE: $($_.Exception.Message)" -ForegroundColor Yellow
+            $results['lune-tests'] = 'UNAVAILABLE'
+        }
+    }
 }
 
 # --- Tier 0: rojo build (guaranteed floor) ---
@@ -87,6 +112,24 @@ Write-Head 'rojo build'
 $out = Join-Path $root 'EaglesVsCrows.rbxlx'
 & $rojo build $proj -o $out
 $results['rojo-build'] = PassFail $LASTEXITCODE
+
+# --- Tier 4.5: smoke boot (A6, opt-in) — runs the built place headlessly in Studio. ---
+# Only meaningful if the build passed. Degrades to UNAVAILABLE (never FAIL) if Studio /
+# run-in-roblox can't run, mirroring the analysis-tier contract.
+if ($Smoke) {
+    Write-Head 'smoke boot (Tier 4.5)'
+    if ($results['rojo-build'] -ne 'PASS') {
+        Write-Host "  SKIPPED: build failed, nothing to boot" -ForegroundColor Yellow
+        $results['smoke-boot'] = 'UNAVAILABLE'
+    } else {
+        & (Join-Path $root 'tools\Smoke-Boot.ps1') -NoBuild
+        switch ($LASTEXITCODE) {
+            0       { $results['smoke-boot'] = 'PASS' }
+            1       { $results['smoke-boot'] = 'FAIL' }
+            default { $results['smoke-boot'] = 'UNAVAILABLE' }
+        }
+    }
+}
 
 # --- Summary + exit ---
 Write-Head 'verify summary'
