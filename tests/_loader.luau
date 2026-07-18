@@ -36,6 +36,7 @@ local MODULES = {
 	GameConfig    = "src/shared/GameConfig.luau",
 	FlightPhysics = "src/shared/FlightPhysics.luau",
 	BirdBuilder   = "src/shared/BirdBuilder.luau",
+	RescueRules   = "src/shared/RescueRules.luau",
 }
 
 -- Preload every source string (before any luau.load; fs yields).

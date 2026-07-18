@@ -100,7 +100,7 @@ end
 
 -- Fresh eagle + spread measurement at a given (reach, clench). dt=1 → AnimateTalons converges in one call.
 local function spreadAt(sideName, reach, clench)
-	local eagle = BirdBuilder.Build(GameConfig.Profiles.Eagle, Vector3.new(0, 200, 0))
+	local eagle = BirdBuilder.Build("Eagle", GameConfig.Profiles.Eagle)
 	if reach ~= nil then
 		BirdBuilder.AnimateTalons(eagle, reach, clench, 1)
 	end
@@ -145,7 +145,7 @@ end
 -- leg part — the exact invariant the Motor6D C1-inversion red-team guards. If C0/C1 were wrong the rig
 -- would deform at rest (crossed toes) even before any animation.
 H.test("rest pose is preserved (FK at Transform=I reproduces every built leg part)", function()
-	local eagle = BirdBuilder.Build(GameConfig.Profiles.Eagle, Vector3.new(0, 200, 0))
+	local eagle = BirdBuilder.Build("Eagle", GameConfig.Profiles.Eagle)
 	local body = eagle.PrimaryPart
 	local worldOf = makeResolver(eagle)
 	local names = {}

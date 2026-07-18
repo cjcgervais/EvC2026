@@ -85,7 +85,7 @@ H.test("beacon must NOT occlude the squirrel (the S39 'light cylinder' bug)", fu
 end)
 
 H.test("eagle: builds with the talon rig joints present", function()
-	local eg = BirdBuilder.Build(GameConfig.Profiles.Eagle, Loader.Vector3.new(0, 200, 0))
+	local eg = BirdBuilder.Build("Eagle", GameConfig.Profiles.Eagle)
 	local body = eg.PrimaryPart
 	H.ok(body ~= nil, "eagle has a PrimaryPart")
 	for _, j in ipairs({ "LeftHipJoint", "RightHipJoint", "LeftFootJoint", "RightFootJoint" }) do
@@ -100,7 +100,7 @@ H.test("eagle: builds with the talon rig joints present", function()
 end)
 
 H.test("AnimateTalons is a safe no-op on a jointless model (crow / old models)", function()
-	local crow = BirdBuilder.Build(GameConfig.Profiles.Crow, Loader.Vector3.new(0, 200, 0))
+	local crow = BirdBuilder.Build("Crow", GameConfig.Profiles.Crow)
 	-- must not error even though the crow has no talon joints
 	BirdBuilder.AnimateTalons(crow, 1, 1, 1 / 60)
 	H.ok(true, "AnimateTalons tolerated a jointless model")

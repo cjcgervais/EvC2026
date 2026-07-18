@@ -26,6 +26,9 @@ local okB, BirdBuilder = pcall(require, RS:WaitForChild("BirdBuilder", 10))
 need(okB, "BirdBuilder failed to load: " .. tostring(BirdBuilder))
 local okF = pcall(require, RS:WaitForChild("FlightPhysics", 10))
 need(okF, "FlightPhysics failed to load")
+-- A2.1: the new PURE rescue-rules module must compile + load in the REAL engine too.
+local okR = pcall(require, RS:WaitForChild("RescueRules", 10))
+need(okR, "RescueRules failed to load")
 pass[#pass + 1] = "shared modules load"
 
 -- 2. A real squirrel builds, non-degenerate + sized (the "I see no squirrels" class at the BUILD layer).

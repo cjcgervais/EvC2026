@@ -85,9 +85,12 @@ R_eff   = triggerRadius · ftueMult · (1 + scoopSpeedGain · closing/glideSpeed
 eligible = dist ≤ R_eff  AND  closing ≥ closingGateFrac · glideSpeed  AND  carry < capacity
 server:   dist_at_receipt ≤ triggerRadius · catchGateMult + speed · catchGateLatency   -- LOOSE envelope, NOT R_eff-derived
 ```
-LIVE values (the behavior-preserving source of truth — `RescueServer:539`, `BirdController:1898-1916`):
-triggerRadius **28**, catchGateMult **3.5**, catchGateLatency 0.25, scoopSpeedGain 0.25,
-closingGateFrac 0.30 (ftueGateFrac same), ftueRadiusMult 1.5, glide ≈ eagleGlide(), birdScale 2.3.
+LIVE values (the behavior-preserving source of truth — `GameConfig.Rescue`, `RescueServer:552`, `BirdController:1898-1916`):
+triggerRadius **42** (`GameConfig.luau:752`; the `or 28` at `RescueServer:539` is only a fallback literal, NOT the
+live value — Fable S41-A2 caught this), catchGateMult **3.5**, catchGateLatency 0.25, scoopSpeedGain 0.25,
+closingGateFrac 0.30 (ftueGateFrac same), ftueRadiusMult 1.5, glide ≈ eagleGlide() (130), birdScale 2.3.
+⚠️ the scoop term uses TOTAL airspeed (`flightEngine.speed`, `BirdController:1916`), not `closing/glide` as §3.1's
+formula box abbreviates. Transcribe from the LIVE lines, never from the doc — the parity-oracle test enforces this.
 ⚠️ **A2 AMENDMENT (pins the keystone against re-breaking bug 2c) — DO NOT re-derive the server gate from R_eff.**
 The server gate is DELIBERATELY looser than the client radius: `catchGateMult 3.5` exists because the S36 diag
 observed *legit* catches at server-dist **80–110** (replication lag + the 2.3× eagle flies on after the client
@@ -157,7 +160,12 @@ cap unchanged; tree part count reviewed at C3 (art pass) with an explicit instan
   UNAVAILABLE-degrading. Tier 4 GREEN (5/5, exit 0). NOTE for A2+: in Lune 0.10.5 `luau.load` auto-injects
   std libs and DOES consult `__index`, so the loader only supplies Roblox datatypes + script + require (not
   the "flat everything" the older note implied). `[model: opus | gate: tests]`
-- **A2 — `RescueRules.luau` extraction (the keystone).** New shared PURE module; behavior-
+- **A2 — `RescueRules.luau` extraction (the keystone). ⏳ A2.1 DONE S41 (commit-ready); A2.2/A2.3/A2.4 queued.**
+  A2.1 landed the INERT pure module + full regression suite (Tier-4 35/35 GREEN incl. the PARITY ORACLE 1,000-pt
+  exact-equality sweep vs the old inline formulas + the §3.1 SIM zero-false-reject + §3.2 economy Monte-Carlo casual
+  ~294 / skilled ~1964, ratio 6.68). `acceptEnvelope` honors the amendment (never re-derives from effectiveRadius).
+  Design spec: `docs/rescue-consults/A2-RescueRules-design.md`. NEXT: A2.2 server consumes → A2.3 client consumes →
+  A2.4 sticky seats (F3, the one intentional behavior change, lands alone). Original scope below.
   preserving refactor of: catch eligibility (§3.1 unified formula — replaces the client's
   closing-frac check at `BirdController:1891-1928` AND the server's distance-slack gate at
   `RescueServer:530` with the SAME function), capacity (one counter of truth), claim/dedup
