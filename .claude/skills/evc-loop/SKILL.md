@@ -43,6 +43,14 @@ are the contract and the current state. This skill governs *how* you work them.*
    exactly this. Change one module/feature, then verify.
 7. **LOG every playtest note + outcome** into the HANDOFF session block / CS
    registry so decisions are durable and never re-litigated.
+8. **VET THE APPROACH before building any perceptual change (FX / animation /
+   procedural geometry).** Reason away from mediocre techniques: name the *read*
+   in Chad's words, kill any technique whose ceiling is below it (a soft particle
+   puff can never be discrete falling feathers), headless-gate the one that can
+   reach it, and bring Chad a vetted + gated WORKING result — not a menu of
+   approaches, not an untested guess. "Which of two mediocre options?" is never a
+   valid question; reason past both. Chad flies to confirm a *refinement*, never
+   the viability of an approach. → `references/fx-approach-vetting.md`
 
 ## The session lifecycle (this is the loop)
 
@@ -54,7 +62,9 @@ START     → orient: read HANDOFF cold-start + MEMORY.md + the LOCKED CS regist
             Open a session log from templates/session-log.template.md.
 ─── loop one change at a time ───────────────────────────────────────────────
 PLAN      → the single next change. If it touches controls/kernel → LOCKED-SPEC
-            GATE first; if intent is fuzzy → ASK.
+            GATE first; if it's a perceptual read (FX/animation/geometry) →
+            APPROACH-VETTING gate first (reason away from mediocre techniques,
+            fx-approach-vetting.md); if intent is fuzzy → ASK.
 ACT       → make the one change (or delegate heavy work to a subagent).
 VERIFY    → run the verify ladder (build/analysis) + write a crisp Chad-playtest
             checklist for anything only Studio can judge.
@@ -97,4 +107,7 @@ These are safety nets, not substitutes for the discipline above.
   headless static-analysis tier (`verify.ps1`), and writing a Studio-playtest checklist.
 - `references/memory-and-handoff.md` — memory-maintenance + context-clear handoff SOPs.
 - `references/red-team.md` — the adversarial-review protocol + the reviewer subagent.
+- `references/fx-approach-vetting.md` — the PLAN-time gate for perceptual changes
+  (FX/animation/geometry): vet the technique against the read, reject mediocre
+  approaches, headless-gate + propose a working result instead of asking.
 - `templates/session-log.template.md` — copy to `.loop/<session-slug>/state.md` to start.
