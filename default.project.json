@@ -31,6 +31,9 @@
       },
       "FireVisuals": {
         "$path": "src/shared/FireVisuals.luau"
+      },
+      "BounceRules": {
+        "$path": "src/shared/BounceRules.luau"
       }
     },
 

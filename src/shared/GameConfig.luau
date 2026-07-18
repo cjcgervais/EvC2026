@@ -747,6 +747,22 @@ GameConfig.Rescue = {
 	-- Y < GROUND_FAILSAFE_Y (-200) kill still applies (nothing legitimately flies that low in the valley).
 	nonLethalTerrain = true,
 
+	-- TERRAIN "OOF" BOUNCE (Packet B3 — PRESENTATION ONLY). A hard terrain contact now reads as a cartoon
+	-- "oof" (feather poof + a brief dazed effect over the bird) instead of a silent slide. This is FX ONLY:
+	-- the graze-SLIDE math (BirdCollision.resolve → newVel/newPos) is byte-identical, flightEngine is never
+	-- touched, no control/camera/kernel change. IMPACT HARDNESS is measured from the resolve output — the
+	-- into-surface closing speed the eagle smacked terrain with (-velocity:Dot(hit.Normal)); a glancing
+	-- brush is ~0 and skips, a boom-and-zoom faceplant is large. Only the POSSESSED eagle shows this, and
+	-- only while nonLethalTerrain is on (inert otherwise). Fires the shared feather pool (no new particle sys).
+	bounceEnabled    = true,   -- master switch for the bounce presentation (false → silent slide, as before).
+	bounceMinSpeed   = 55,     -- studs/s of into-surface closing speed to trigger the "oof" (below = quiet graze).
+	bounceDebounce   = 0.6,    -- s cooldown so sliding along a slope doesn't machine-gun the FX every frame.
+	                           -- ALSO requires the eagle to have left terrain (a graze-free frame) since the last
+	                           -- bounce — so a sustained scrape fires once, not once per debounce tick.
+	dazeTime         = 1.5,    -- s the world-space dazed "stars" read hovers over the bird after a hard contact.
+	bounceFeathers   = 24,     -- feather count in the contact poof (reuses burstFeathers; brown eagle feathers).
+	dazeStarCount    = 4,      -- little "stars" orbiting the bird's head during the daze (procedural gray-box).
+
 	-- THE CATCH TRIGGER (Fable §A). Any fast flyby through the sphere fires — no aiming, guaranteed.
 	-- S32 Chad playtest: "a little hard to snatch the squirrels" → BIGGER trigger + easier gate.
 	triggerRadius    = 42,     -- studs; flyby sphere around the squirrel (was 28). Bigger = easier to snatch.

@@ -39,6 +39,7 @@ local MODULES = {
 	RescueRules   = "src/shared/RescueRules.luau",
 	FireGrid      = "src/shared/FireGrid.luau",
 	FireVisuals   = "src/shared/FireVisuals.luau",
+	BounceRules   = "src/shared/BounceRules.luau",
 }
 
 -- Preload every source string (before any luau.load; fs yields).

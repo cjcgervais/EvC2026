@@ -49,6 +49,7 @@ local FlightPhysics = require(ReplicatedStorage:WaitForChild("FlightPhysics"))
 local BirdBuilder   = require(ReplicatedStorage:WaitForChild("BirdBuilder"))
 local BirdCollision = require(ReplicatedStorage:WaitForChild("BirdCollision"))
 local RescueRules   = require(ReplicatedStorage:WaitForChild("RescueRules"))
+local BounceRules   = require(ReplicatedStorage:WaitForChild("BounceRules"))  -- B3: pure hard-contact/debounce predicate
 
 local CAM = GameConfig.Camera
 
@@ -1010,6 +1011,94 @@ CombatFX.OnClientEvent:Connect(function(cause, position, victimTeam, _killed)
 	end
 	burstFeathers(position, color, count)
 end)
+
+--------------------------------------------------------------------------------
+-- TERRAIN "OOF" BOUNCE (Packet B3) — PRESENTATION ONLY. A hard terrain contact reads as a cartoon
+-- "oof": a feather poof at the contact point (reuses the pool above) + a brief world-space DAZED read
+-- (little "stars" that orbit the bird's head) — WITHOUT ANY change to flight. The slide math in
+-- BirdCollision.resolve is byte-identical; flightEngine.velocity/.orientation are never touched here;
+-- no camera shake, no control damp (out of scope). Only the possessed eagle triggers it (the collision
+-- block that calls triggerTerrainBounce runs only for this client's own bird), and only in rescue mode.
+--------------------------------------------------------------------------------
+local DAZE_STAR_TEX = "rbxasset://textures/particles/sparkles_main.dds" -- gray-box "stars"; swap for art later.
+local dazeState = { t = 0, gui = nil, stars = nil }   -- t>0 while dazed; gui = the anchored world billboard.
+local bounceCooldown = 0     -- s left before another bounce may fire (debounce).
+local bounceGrazeGap  = true -- true once a graze-free frame has passed since the last bounce (leave-terrain gate).
+
+-- Build (once) a small anchored world part carrying a BillboardGui of orbiting "star" labels. Reused each
+-- daze — never re-allocated. Cosmetic; anchored, no-collide, no-query — never affects physics.
+local function buildDazeGui()
+	if dazeState.gui then return end
+	local R = GameConfig.Rescue   -- `RES` local is declared further down; read the table directly here.
+	local n = (R and R.dazeStarCount) or 4
+	local anchor = Instance.new("Part")
+	anchor.Name = "DazeAnchor"
+	anchor.Size = Vector3.new(0.2, 0.2, 0.2)
+	anchor.Transparency = 1
+	anchor.Anchored = true
+	anchor.CanCollide = false
+	anchor.CanQuery = false
+	anchor.CanTouch = false
+	anchor.Locked = true
+	local bb = Instance.new("BillboardGui")
+	bb.Name = "DazeStars"
+	bb.Size = UDim2.fromScale(6, 6)          -- world-space size (studs) — a small halo over the head.
+	bb.AlwaysOnTop = false
+	bb.LightInfluence = 0
+	bb.Parent = anchor
+	local stars = {}
+	for i = 1, n do
+		local s = Instance.new("ImageLabel")
+		s.Name = "Star" .. i
+		s.Size = UDim2.fromScale(0.28, 0.28)
+		s.AnchorPoint = Vector2.new(0.5, 0.5)
+		s.BackgroundTransparency = 1
+		s.Image = DAZE_STAR_TEX
+		s.ImageColor3 = Color3.fromRGB(255, 240, 140)  -- cartoon "seeing stars" yellow.
+		s.Parent = bb
+		stars[i] = s
+	end
+	anchor.Parent = workspace
+	dazeState.gui = anchor
+	dazeState.stars = stars
+end
+
+-- Fire the "oof" at a hard terrain contact. `contactPos` = the surface hit point, `hardness01` = the
+-- impact hardness in [0,1] (into-surface closing speed over ~2× the min speed). PRESENTATION ONLY.
+local function triggerTerrainBounce(contactPos, hardness01)
+	local R = GameConfig.Rescue
+	-- Feather poof at the contact point (reuse the pooled emitter — no new particle system).
+	local n = (R and R.bounceFeathers) or 24
+	burstFeathers(contactPos, FEATHER_EAGLE, math.floor(n * (0.6 + 0.4 * hardness01)))
+	-- Arm the world-space daze read (rendered/advanced in onFlightStep, positioned over the bird's head).
+	buildDazeGui()
+	dazeState.t = (R and R.dazeTime) or 1.5
+end
+
+-- Advance the daze read one frame: hover the star halo over the bird's head and spin the stars. Called
+-- from onFlightStep. Touches ONLY the cosmetic anchor/labels — never flightEngine, camera, or input.
+local function updateDaze(dt)
+	local g = dazeState.gui
+	if not g then return end
+	if dazeState.t <= 0 then
+		for _, s in ipairs(dazeState.stars or {}) do s.Visible = false end   -- hide, keep pooled.
+		return
+	end
+	dazeState.t = math.max(0, dazeState.t - dt)
+	-- Park the halo just above the bird's head (world-space, follows the bird — NOT the camera).
+	local head = rootPart and (rootPart.Position + rootPart.CFrame.UpVector * 5) or g.Position
+	g.Position = head
+	local total = (GameConfig.Rescue and GameConfig.Rescue.dazeTime) or 1.5
+	local fade = math.clamp(dazeState.t / math.max(0.01, total), 0, 1)   -- fade out as the daze ends.
+	local stars = dazeState.stars or {}
+	local spin = os.clock() * 4                                          -- orbit angular position.
+	for i, s in ipairs(stars) do
+		s.Visible = true
+		local ang = spin + (i / math.max(1, #stars)) * math.pi * 2
+		s.Position = UDim2.fromScale(0.5 + 0.35 * math.cos(ang), 0.35 + 0.18 * math.sin(ang * 2))
+		s.ImageTransparency = 1 - fade
+	end
+end
 
 --------------------------------------------------------------------------------
 -- UPDRAFT PROXIMITY SCORE (S31 Phase 0 — "is line-riding FUN?"). Fly CLOSE to terrain → combo grows
@@ -2909,7 +2998,9 @@ local function onFlightStep(dt)
 		-- (combat byte-identical if un-shelved); the server mirrors this gate in processCrashes.
 		local crashSpd = (GameConfig.Rescue and GameConfig.Rescue.enabled and GameConfig.Rescue.nonLethalTerrain)
 			and 1e9 or GameConfig.Flight.CRASH_SPEED
-		local newPos, newVel, crashed = BirdCollision.resolve(
+		local incomingVel = flightEngine.velocity   -- B3: capture the PRE-slide velocity for the bounce hardness
+		                                             -- (the slide below strips the into-surface component from it).
+		local newPos, newVel, crashed, hitInfo = BirdCollision.resolve(
 			rootPart.Position, target, flightEngine.velocity, r, cparams, crashSpd
 		)
 		crashedThisFrame = crashed
@@ -2918,7 +3009,35 @@ local function onFlightStep(dt)
 			flightEngine.orientation = (cf - cf.Position) + newPos
 			flightEngine.velocity = newVel
 		end
+
+		-- ==== TERRAIN "OOF" BOUNCE (Packet B3) — PRESENTATION ONLY (does NOT read newPos/newVel above) ====
+		-- Fire the cartoon "oof" (feather poof + dazed stars) on a HARD graze. Gated to the possessed EAGLE
+		-- in rescue mode with the bounce enabled. IMPACT HARDNESS is measured from the resolve output itself:
+		-- the into-surface closing speed = how hard we smacked terrain = -velocity·hit.Normal (BirdCollision
+		-- uses the SAME quantity for its lethal gate). A glancing brush ≈ 0 → skipped; a faceplant is large.
+		-- Debounced: a cooldown PLUS a "left terrain since last bounce" gate, so scraping a slope fires once.
+		if bounceCooldown > 0 then bounceCooldown = math.max(0, bounceCooldown - dt) end
+		local rescueOn = GameConfig.Rescue and GameConfig.Rescue.enabled and GameConfig.Rescue.nonLethalTerrain
+		if rescueOn and (RES and RES.bounceEnabled ~= false) and currentTeam == "Eagles" then
+			if hitInfo then
+				-- Impact hardness comes straight from the resolve output: the into-surface closing speed
+				-- (-velocity·hit.Normal) — the SAME quantity BirdCollision uses for its lethal gate.
+				-- Read the INCOMING (pre-slide) velocity: the slide above already stripped the into-surface component.
+				local closing = BounceRules.closingSpeed(incomingVel, hitInfo.Normal)
+				local minSpd = (RES and RES.bounceMinSpeed) or 55
+				if BounceRules.shouldBounce(closing, minSpd, bounceCooldown, bounceGrazeGap) then
+					triggerTerrainBounce(hitInfo.Position, BounceRules.hardness01(closing, minSpd))
+					bounceCooldown = (RES and RES.bounceDebounce) or 0.6
+					bounceGrazeGap = false   -- must leave terrain (a graze-free frame) before the next bounce.
+				end
+			else
+				bounceGrazeGap = true    -- no contact this frame → re-arm the leave-terrain gate.
+			end
+		end
+		-- ==== END TERRAIN "OOF" BOUNCE ====
 	end
+	-- Advance the world-space dazed read (cosmetic only; positions the star halo over the bird's head).
+	updateDaze(dt)
 
 	-- UPDRAFT line-riding score (legacy; disabled via config — SUPERSEDED by the rescue style meter).
 	updateUpdraft(dt, crashedThisFrame)
