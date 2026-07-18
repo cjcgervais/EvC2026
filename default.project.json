@@ -22,6 +22,9 @@
       },
       "SpatialHash": {
         "$path": "src/shared/SpatialHash.luau"
+      },
+      "RescueRules": {
+        "$path": "src/shared/RescueRules.luau"
       }
     },
 

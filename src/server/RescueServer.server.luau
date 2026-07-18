@@ -27,6 +27,7 @@ local RunService        = game:GetService("RunService")   -- THE FOX (#15b): dri
 
 local GameConfig  = require(ReplicatedStorage:WaitForChild("GameConfig"))
 local BirdBuilder = require(ReplicatedStorage:WaitForChild("BirdBuilder"))
+local RescueRules = require(ReplicatedStorage:WaitForChild("RescueRules"))
 
 local R = GameConfig.Rescue
 if not (R and R.enabled) then
@@ -533,27 +534,50 @@ Remotes.CatchSquirrel.OnServerEvent:Connect(function(player, squirrelId, styleMu
 		warn(string.format("[RescueDIAG] %s  id=%s carry=%s/%d%s", reason, tostring(squirrelId),
 			tostring(psx and psx.carry), R.carryCapacity or 3, dist and string.format(" dist=%.0f", dist) or ""))
 	end
+	-- Cheap type pre-guards stay local (Instance/type concerns, and they precede the `s` lookup live). Their
+	-- order + diag strings are preserved exactly (phase → badId), then the accept envelope is delegated to
+	-- RescueRules.eligibility (mode="accept": acceptEnvelope band ONLY — no ftue / no closing gate).
 	if phase ~= "active" then diag("REJECT:phase"); return end
 	if typeof(squirrelId) ~= "number" then diag("REJECT:badId"); return end
 	local s = squirrels[squirrelId]
-	if not s or s.state ~= "stranded" then diag("REJECT:gone(" .. tostring(s and s.state) .. ")"); return end
+	-- `not s` (id already reaped) must read as gone — eligibility tolerates a nil state, so pre-catch it here
+	-- to preserve the live `not s or s.state ~= "stranded"` gate + its exact diag string.
+	if not s then diag("REJECT:gone(" .. tostring(nil) .. ")"); return end
 	local ps = stateFor(player)
-	if ps.carry >= (R.carryCapacity or 3) then diag("REJECT:FULL"); return end   -- full — must deliver first
-	-- Distance sanity: the eagle must actually be near the squirrel (bounds teleport-catching).
+	-- eaglePos/eagleVel come from the possessed Body; squirrelPos from the world model. When there is no body
+	-- or no squirrel PrimaryPart, the live code skipped the distance sanity entirely ("ACCEPT(nobody)"): we
+	-- reproduce that by passing dist=0/speed=0 so the tooFar rung can never trigger — gone/full still gate.
 	local body = eagleBodyOf(player)
-	if body and s.model and s.model.PrimaryPart then
-		local dist = (body.Position - s.model.PrimaryPart.Position).Magnitude
-		-- VELOCITY-AWARE gate (S36 fix): the client legitimately triggers within its ftue/scoop-widened
-		-- radius, but by the time this fires the big (2.3×) eagle has flown on — at boom-and-zoom speed the
-		-- server sees it much farther (diag: legit catches at dist 80-110, clipped by the old flat 105 gate
-		-- → phantoms → "8-9/10 don't count"). Gate = base slack + how far the eagle travels during
-		-- ~catchGateLatency. Still bounds a gross teleport-claim; scales with the actual cause (speed).
-		local speed = body.AssemblyLinearVelocity.Magnitude
-		local gate = (R.triggerRadius or 28) * (R.catchGateMult or 3.5) + speed * (R.catchGateLatency or 0.25)
-		if dist > gate then
-			diag(string.format("REJECT:dist(gate=%.0f)", gate), dist)
-			return
+	local hasGeom = body and s.model and s.model.PrimaryPart
+	local dist, speed = 0, 0
+	if hasGeom then
+		dist = (body.Position - s.model.PrimaryPart.Position).Magnitude
+		speed = body.AssemblyLinearVelocity.Magnitude
+	end
+	local verdict = RescueRules.eligibility(R, {
+		mode = "accept",
+		phase = phase,
+		state = s.state,
+		dist = dist,
+		speed = speed,
+		glideSpeed = GameConfig.Profiles.Eagle.glideSpeed,
+		carried = ps.carry,
+		inFlight = 0,
+		capacity = R.carryCapacity or 3,
+	})
+	if not verdict.eligible then
+		-- Preserve the live diag strings verbatim, keyed on verdict.reason.
+		if verdict.reason == "gone" then
+			diag("REJECT:gone(" .. tostring(s.state) .. ")")
+		elseif verdict.reason == "full" then
+			diag("REJECT:FULL")   -- full — must deliver first
+		elseif verdict.reason == "tooFar" then
+			diag(string.format("REJECT:dist(gate=%.0f)", verdict.radius), dist)
 		end
+		return
+	end
+	-- Accepted. The "nobody" branch (no body/PrimaryPart) keeps its own diag — an Instance concern, not rules.
+	if hasGeom then
 		diag("ACCEPT", dist)
 	else
 		diag("ACCEPT(nobody)")
@@ -563,29 +587,21 @@ Remotes.CatchSquirrel.OnServerEvent:Connect(function(player, squirrelId, styleMu
 	s.state = "caught"
 	ps.carry += 1
 
-	-- Score: base × rarity × style × ENERGY. The ENERGY multiplier rewards a high-velocity retrieval —
-	-- a fast catch means you converted altitude into speed (boom-and-zoom), so the dive multiplies the
-	-- rescue (Chad S34: teach energy dynamics). Tiered: BLAZING > SWIFT. Style/speed come from the client
-	-- (Phase-0 feel trust); clamped to sane bounds so a bad packet can't inflate the score.
-	local mult = math.clamp(tonumber(styleMult) or 1, 1, R.styleMultMax or 3)
+	-- Score: base × rarity × style × ENERGY (RescueRules.catchScore). The ENERGY multiplier rewards a
+	-- high-velocity retrieval — a fast catch means you converted altitude into speed (boom-and-zoom), so the
+	-- dive multiplies the rescue (Chad S34: teach energy dynamics). Tiered: BLAZING > SWIFT. Style/speed come
+	-- from the client (Phase-0 feel trust); catchScore clamps style to sane bounds so a bad packet can't
+	-- inflate the score. `tonumber(styleMult)` coerces the untrusted client param before the module clamps it.
 	local rarityMult = s.rarity.mult or 1
-	local energyMult = 1
-	if speedTier == "BLAZING" then energyMult = R.blazingMult or 2.0
-	elseif speedTier == "SWIFT" then energyMult = R.swiftMult or 1.5 end
-	-- COMBO (Chad S34): consecutive catches within comboWindow build a streak ×2..×comboMax. Boom-and-zoom
-	-- (fast flight + the speed-widened scoop) keeps the chain alive; flying off to deliver lets it lapse.
+	local pts = RescueRules.catchScore(R, rarityMult, tonumber(styleMult), speedTier)
+	-- COMBO (Chad S34): consecutive catches within comboWindow build a streak ×2..×comboMax (RescueRules.
+	-- comboOnCatch). Boom-and-zoom (fast flight + the speed-widened scoop) keeps the chain alive; flying off
+	-- to deliver lets it lapse. The clock stays os.clock() at the call site (purity: the module takes `now`).
+	-- The combo now pays at DELIVER, not per-catch (Chad S36: "multiply the delivery"): comboOnCatch returns
+	-- the PEAK combo reached during THIS carry load (max of loadCombo, combo); the deliver multiplies n² by it.
 	local now = os.clock()
-	if now - (ps.lastCatchAt or -1e9) <= (R.comboWindow or 4) then
-		ps.combo = math.min((ps.combo or 0) + 1, R.comboMax or 6)
-	else
-		ps.combo = 1
-	end
+	ps.combo, ps.loadCombo = RescueRules.comboOnCatch(R, now, ps.lastCatchAt, ps.combo, ps.loadCombo)
 	ps.lastCatchAt = now
-	-- The combo now pays at DELIVER, not per-catch (Chad S36: "multiply the delivery"). Bank the PEAK combo
-	-- reached during THIS carry load; the deliver multiplies n² by it. Per-catch score stays combo-free so
-	-- the streak's whole payoff lands at the waterfall — "bank now or keep chaining for a bigger drop?".
-	ps.loadCombo = math.max(ps.loadCombo or 1, ps.combo)
-	local pts = math.floor((R.basePoints or 100) * rarityMult * mult * energyMult + 0.5)
 	ps.score += pts
 
 	-- Remove the world squirrel (the client already flew the catch locally) + schedule a fresh one.
@@ -609,7 +625,8 @@ Remotes.CatchSquirrel.OnServerEvent:Connect(function(player, squirrelId, styleMu
 end)
 
 Remotes.DeliverSquirrels.OnServerEvent:Connect(function(player)
-	if phase ~= "active" and phase ~= "grace" then return end   -- accept buzzer-beater delivers during grace (Chad S38)
+	-- Deliver accepted in "active" OR "grace" (buzzer-beater delivers, Chad S38) — RescueRules.phaseAccepts.
+	if not RescueRules.phaseAccepts(phase).deliver then return end
 	local ps = stateFor(player)
 	if ps.carry <= 0 then return end
 	local n = ps.carry
@@ -620,27 +637,23 @@ Remotes.DeliverSquirrels.OnServerEvent:Connect(function(player)
 	-- and round). n² is the genius knob: two trips of 5 pay 50 acorns, one brave trip of 10 pays 100 —
 	-- "one more before the waterfall?" becomes a computable lesson that multiplication beats addition.
 	-- COMBO CASH-IN (Chad S36 "multiply the delivery"): × the PEAK combo you built while chaining this load
-	-- → the drop pays n × n × combo acorns. deliverCombo is sent so the client sentence card is EXACTLY the
-	-- payout (the sentence must never lie — red-team B1). Reset the streak for the next load.
-	local cmb = math.max(1, math.floor(ps.loadCombo or 1))
-	ps.score += n * n * (R.acornValue or 10) * cmb
-	-- Send BOTH the authoritative n and the combo so the client sentence renders from SERVER truth, not the
-	-- local rider count (which can diverge from ps.carry — red-team B1). The two land in the same push.
-	ps.deliverN = n
-	ps.deliverCombo = cmb
+	-- → the drop pays n × n × combo acorns (RescueRules.deliverPayout). deliverN/deliverCombo are sent so the
+	-- client sentence card is EXACTLY the payout — server truth, not the local rider count (red-team B1).
+	local payout = RescueRules.deliverPayout(R, ps.carry, ps.loadCombo)
+	ps.score += payout.points
+	ps.deliverN = payout.n
+	ps.deliverCombo = payout.combo
 	ps.loadCombo = nil
 	ps.carry = 0
 	-- PERFECT TEN (Chad: "10/10 in good time"): stamp the clock the moment the 10th rescue lands;
 	-- endRound turns it into the TIME FACTOR finale multiplier.
 	if not ps.perfectAt and ps.delivered >= (R.perfectTenAt or 10) then
 		ps.perfectAt = timeLeft
-		-- Compute the earned TIME FACTOR now so the client can REVEAL "fast bonus ×N BANKED" at this delivery
-		-- (Chad S38: make the quick-ten reward apparent at the moment). The actual score multiply stays DEFERRED
-		-- to endRound; endRound reuses this exact value so the banked ×N can never differ from the finale ×N.
-		local f = 2
-		if ps.perfectAt >= (R.timeFactor4At or 60) then f = 4
-		elseif ps.perfectAt >= (R.timeFactor3At or 30) then f = 3 end
-		ps.perfectFactor = f
+		-- Compute the earned TIME FACTOR now (RescueRules.perfectFactor) so the client can REVEAL "fast bonus
+		-- ×N BANKED" at this delivery (Chad S38: make the quick-ten reward apparent at the moment). The actual
+		-- score multiply stays DEFERRED to endRound; endRound reuses this exact value so the banked ×N can
+		-- never differ from the finale ×N (ONE perfectFactor call replaces both copies of the ladder).
+		ps.perfectFactor = RescueRules.perfectFactor(R, ps.perfectAt)
 	end
 	pushState(player)
 end)
@@ -650,7 +663,7 @@ end)
 --------------------------------------------------------------------------------
 local function startRound()
 	phase = "active"
-	timeLeft = R.roundLength or 120
+	timeLeft = RescueRules.phaseDuration(R, "active")
 	usedPerches = {}
 	populateSquirrels()
 	for _, player in ipairs(Players:GetPlayers()) do
@@ -679,22 +692,17 @@ local function endRound()
 	for _, player in ipairs(Players:GetPlayers()) do
 		local ps = stateFor(player)
 		if ps.perfectAt and not ps.timeFactor then
-			-- Quantize to WHOLE ACORNS first (style multipliers leave ragged points) so the finale
-			-- sentence is EXACTLY true in acorns — a kid who verifies "139 × 2" in-head must never
-			-- catch the game lying (red-team B1).
-			local av = R.acornValue or 10
-			ps.score = math.floor(ps.score / av + 0.5) * av
 			-- Reuse the factor already banked at the perfect-10 deliver (single source of truth → the finale ×N
-			-- always equals the "BANKED ×N" the player was shown). Fallback recompute if it's somehow absent.
-			local f = ps.perfectFactor
-			if not f then
-				f = 2
-				if ps.perfectAt >= (R.timeFactor4At or 60) then f = 4
-				elseif ps.perfectAt >= (R.timeFactor3At or 30) then f = 3 end
-			end
-			ps.preFactorScore = ps.score
+			-- always equals the "BANKED ×N" the player was shown). Fallback recompute (RescueRules.perfectFactor
+			-- — the ONE ladder that also ran at the deliver) if it's somehow absent.
+			local f = ps.perfectFactor or RescueRules.perfectFactor(R, ps.perfectAt)
+			-- RescueRules.finaleApply quantizes to WHOLE ACORNS FIRST (style multipliers leave ragged points) so
+			-- the finale sentence is EXACTLY true in acorns — a kid who verifies "139 × 2" in-head must never
+			-- catch the game lying (red-team B1) — then multiplies by the banked factor.
+			local finale = RescueRules.finaleApply(R, ps.score, f)
+			ps.preFactorScore = finale.preFactorScore
 			ps.timeFactor = f
-			ps.score *= f
+			ps.score = finale.finalScore
 		end
 	end
 	pushAll()
@@ -1006,7 +1014,7 @@ local function RescueRoundLoop()
 	while true do
 		-- INTERMISSION
 		phase = "intermission"
-		timeLeft = R.intermission or 6
+		timeLeft = RescueRules.phaseDuration(R, "intermission")
 		clearSquirrels()
 		pushAll()
 		while timeLeft > 0 do
@@ -1026,19 +1034,24 @@ local function RescueRoundLoop()
 			-- to safety every few seconds (fakes the fire cutting some off — Phase 1 replaces with the fire grid).
 			-- Driven by mission.hazard (kind "triage"); falls back to the shipped literals.
 			local hz = mission.hazard or {}
-			if (hz.kind or "triage") == "triage" and timeLeft <= (hz.triageAt or R.triageAt or 60) then
+			if (hz.kind or "triage") == "triage" then
 				if not triageStarted then triageStarted = true end
-				triageBucket += dt
-				if triageBucket >= (hz.cadence or 4) then
-					triageBucket = 0
-					-- pick a random stranded squirrel to expire
-					local candidates = {}
-					for id, s in pairs(squirrels) do
-						if s.state == "stranded" then candidates[#candidates + 1] = id end
-					end
-					if #candidates > (hz.minStranded or 2) then -- always leave a couple to catch
-						expireSquirrel(candidates[rng:NextInteger(1, #candidates)])
-					end
+				-- Bucket arithmetic + the expire-decision go to RescueRules.triageTick (pure); candidate
+				-- collection + the rng pick + expireSquirrel stay SERVER-side. The hazard table preserves the
+				-- live fallback chains verbatim: triageAt = hz.triageAt or R.triageAt (module's `or 60` covers the
+				-- final rung), cadence = hz.cadence, minStranded = hz.minStranded.
+				local candidates = {}
+				for id, s in pairs(squirrels) do
+					if s.state == "stranded" then candidates[#candidates + 1] = id end
+				end
+				local expire
+				triageBucket, expire = RescueRules.triageTick(triageBucket, dt, timeLeft, #candidates, {
+					triageAt = hz.triageAt or R.triageAt,
+					cadence = hz.cadence,
+					minStranded = hz.minStranded,
+				})
+				if expire then
+					expireSquirrel(candidates[rng:NextInteger(1, #candidates)]) -- always leave a couple to catch
 				end
 			end
 			-- periodic state push (~1 Hz)
@@ -1051,11 +1064,11 @@ local function RescueRoundLoop()
 		-- no rush to end the game. (timeLeft stays 0, so a grace deliver still lands its base perfect-ten factor.)
 		phase = "grace"
 		pushAll()
-		task.wait(R.buzzerGrace or 4)
+		task.wait(RescueRules.phaseDuration(R, "grace"))
 
 		-- RESULTS — hold on the end-of-round SCREEN long enough to read it, then loop to intermission.
 		endRound()
-		task.wait(R.resultsHold or 8)
+		task.wait(RescueRules.phaseDuration(R, "results"))
 	end
 end
 
