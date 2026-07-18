@@ -2928,10 +2928,12 @@ local function onFlightStep(dt)
 			flightEngine.orientation = (cf - cf.Position) + newPos
 			flightEngine.velocity = newVel
 		end
-		-- The B3 oof is gated to the possessed EAGLE in rescue mode with the bounce enabled; hand the graze
-		-- hit to BounceFX below (nil = no eligible contact, which re-arms its leave-terrain gate).
+		-- The B3 oof fires in rescue mode with the bounce enabled. NOTE (S41 fix): the old `currentTeam ==
+		-- "Eagles"` guard silently blocked it — in the RESCUE game the eagle is possessed via RescueServer's
+		-- `Possessed` attribute and GameServer never fires TeamAssigned, so `currentTeam` is nil. The guard was
+		-- redundant anyway: onFlightStep runs only for THIS client's possessed bird, which in rescue is the eagle.
 		local rescueOn = GameConfig.Rescue and GameConfig.Rescue.enabled and GameConfig.Rescue.nonLethalTerrain
-		if rescueOn and (RES and RES.bounceEnabled ~= false) and currentTeam == "Eagles" then
+		if rescueOn and (RES and RES.bounceEnabled ~= false) then
 			eligibleHit = hitInfo
 		end
 	end
