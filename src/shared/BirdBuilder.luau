@@ -347,39 +347,125 @@ function BirdBuilder.Build(teamName, profile)
 	local thighLen = r * 0.32
 	local tarsusLen = r * 0.38
 	local toeLen = r * 0.30
+	-- The leg is now a Path-A RIG (S39 talon-catch anim): two Motor6Ds per side (HIP swings the whole leg
+	-- down-and-forward for the reach; FOOT pitches the toes open→shut for splay/clench). At Transform = I
+	-- the rest silhouette is byte-identical to the old static weld — BirdBuilder.AnimateTalons drives it,
+	-- and nothing ever drives a crow's leg motors, so the crow (and any un-animated eagle) looks unchanged.
 	for _, s in ipairs({ -1, 1 }) do
+		local sideName = s < 0 and "Left" or "Right"
+		-- HIP pivot: the body-space attach point (before the forward lean). The thigh becomes Part1 of the
+		-- HIP joint (no longer welded to the body), so the whole leg swings about this point.
+		local hipPivot = body.CFrame * CFrame.new(s * r * 0.22, hipY, -r * 0.04)
 		-- THIGH: feathered upper leg (body colour), leaned slightly forward so the foot sits ahead of the vent.
 		local thigh = makePart("Leg", Vector3.new(r * 0.22, thighLen, r * 0.22), bodyColor)
-		thigh.CFrame = body.CFrame
-			* CFrame.new(s * r * 0.22, hipY, -r * 0.04)
+		thigh.CFrame = hipPivot
 			* CFrame.Angles(math.rad(12), 0, 0)              -- lean the whole leg slightly forward
 			* CFrame.new(0, -thighLen * 0.5, 0)
 		thigh.Parent = model
-		weldTo(body, thigh)
-		-- TARSUS: bare, thick, near-vertical shank (yellow on the eagle) — the segment that extends for a strike.
+		-- TARSUS: bare, thick, near-vertical shank (yellow on the eagle). Welded to the THIGH so it rides
+		-- the hip swing rigidly (was welded to the body).
 		local tarsus = makePart("Tarsus", Vector3.new(r * 0.16, tarsusLen, r * 0.16), talonColor)
 		tarsus.CFrame = thigh.CFrame
 			* CFrame.new(0, -thighLen * 0.5, 0)
 			* CFrame.Angles(math.rad(-5), 0, 0)              -- straighten toward vertical below the "knee"
 			* CFrame.new(0, -tarsusLen * 0.5, 0)
 		tarsus.Parent = model
-		weldTo(body, tarsus)
-		-- FOOT: three forward toes splayed across the foot, each curled down into a grip. Black claws.
+		weldTo(thigh, tarsus)
+		-- FOOT hub: a small block at the ankle — the moving root of the toes (Part1 of the FOOT joint).
+		-- Pitching it back "opens the hand" (toes flare forward); pitching down "snaps the grab" shut.
 		local footHub = tarsus.CFrame * CFrame.new(0, -tarsusLen * 0.5, 0)
-		for _, yaw in ipairs({ -22, 0, 22 }) do
-			local toe = makePart("Talon", Vector3.new(r * 0.09, r * 0.09, toeLen), clawColor)
-			toe.CFrame = footHub
-				* CFrame.Angles(0, math.rad(yaw), 0)         -- splay across the foot
-				* CFrame.Angles(math.rad(-45), 0, 0)         -- curl the toe down-and-forward
-				* CFrame.new(0, 0, -toeLen * 0.5)
-			toe.Parent = model
-			weldTo(body, toe)
+		local foot = makePart("Foot", Vector3.new(r * 0.20, r * 0.12, r * 0.26), talonColor)
+		foot.CFrame = footHub
+		foot.Parent = model
+		-- THREE forward toes splayed across the foot, each now ARTICULATED into a proximal segment + a
+		-- distal claw (S39b: a REAL grasp — the toe folds at a mid-knuckle, not a rigid paddle). Each toe
+		-- box (old single length-toeLen box along -Z after the -45° curl) is SPLIT into two collinear
+		-- boxes tiling the SAME volume: proximal 55% + distal 45%, laid end-to-end along the built axis,
+		-- same r*0.09 cross-section. Their union at rest == the old box exactly, so the rest silhouette is
+		-- unchanged. Each hangs off a Motor6D (no longer a weld) so it can OPEN/WRAP/CLENCH.
+		local proxFrac = 0.55
+		local distFrac = 1 - proxFrac
+		local proxLen  = toeLen * proxFrac
+		local distLen  = toeLen * distFrac
+		for ti, yaw in ipairs({ -22, 0, 22 }) do
+			-- knuckle = the toe base pivot (splay applied, BEFORE the -45° curl) = Part1 pivot of ToeJoint.
+			local knuckle = footHub * CFrame.Angles(0, math.rad(yaw), 0)
+			-- the built toe axis: curl -45° then run along -Z. The proximal segment centres proxLen*0.5 in.
+			local curl = knuckle * CFrame.Angles(math.rad(-45), 0, 0)
+			local prox = makePart("Talon", Vector3.new(r * 0.09, r * 0.09, proxLen), clawColor)
+			prox.CFrame = curl * CFrame.new(0, 0, -proxLen * 0.5)
+			prox.Parent = model
+			-- mid-toe joint pivot = end of the proximal segment, on the same axis.
+			local midPivot = curl * CFrame.new(0, 0, -proxLen)
+			local claw = makePart("Talon", Vector3.new(r * 0.09, r * 0.09, distLen), clawColor)
+			claw.CFrame = midPivot * CFrame.new(0, 0, -distLen * 0.5)
+			claw.Parent = model
+			-- ToeJoint: foot → proximal, world pivot at the knuckle. -1 curl sign (more-neg pitch = under).
+			local toeJoint = Instance.new("Motor6D")
+			toeJoint.Name = sideName .. "Toe" .. ti .. "Joint"
+			toeJoint.Part0 = foot
+			toeJoint.Part1 = prox
+			toeJoint.C0 = foot.CFrame:ToObjectSpace(knuckle)
+			toeJoint.C1 = prox.CFrame:ToObjectSpace(knuckle)
+			toeJoint.Transform = CFrame.new()
+			toeJoint:SetAttribute("Side", s)
+			-- CurlSign +1: the OPEN/CLOSE pitch table is ALREADY signed in this joint's raw sense
+			-- (open +deg UNCURLS/spreads the built -45° toe, close -deg folds it under). The pivot X is
+			-- the knuckle's own axis, so no extra flip is needed. (Grasp-closure gate verified.)
+			toeJoint:SetAttribute("CurlSign", 1)
+			toeJoint:SetAttribute("OuterYawSign", (yaw > 0) and 1 or (yaw < 0) and -1 or 0)
+			toeJoint.Parent = body
+			-- ToeClawJoint: proximal → claw, world pivot at the mid-toe joint.
+			local clawJoint = Instance.new("Motor6D")
+			clawJoint.Name = sideName .. "Toe" .. ti .. "ClawJoint"
+			clawJoint.Part0 = prox
+			clawJoint.Part1 = claw
+			clawJoint.C0 = prox.CFrame:ToObjectSpace(midPivot)
+			clawJoint.C1 = claw.CFrame:ToObjectSpace(midPivot)
+			clawJoint.Transform = CFrame.new()
+			clawJoint:SetAttribute("Side", s)
+			clawJoint:SetAttribute("CurlSign", 1)       -- same raw-signed sense as the proximal joint
+			clawJoint:SetAttribute("OuterYawSign", 0)   -- the distal claw takes no yaw
+			clawJoint.Parent = body
 		end
-		-- HALLUX: the rear "killing" claw, shorter, curling down-and-BACK (+Z), so +45° pitch here.
+		-- HALLUX: the rear "killing" claw, shorter, curling down-and-BACK (+Z), so +45° pitch here. Now on a
+		-- Motor6D (foot → hallux) at the hallux base pivot = footHub, so it hooks under-forward on clench.
 		local hallux = makePart("Talon", Vector3.new(r * 0.09, r * 0.09, r * 0.20), clawColor)
 		hallux.CFrame = footHub * CFrame.Angles(math.rad(45), 0, 0) * CFrame.new(0, 0, r * 0.11)
 		hallux.Parent = model
-		weldTo(body, hallux)
+		local halluxJoint = Instance.new("Motor6D")
+		halluxJoint.Name = sideName .. "HalluxJoint"
+		halluxJoint.Part0 = foot
+		halluxJoint.Part1 = hallux
+		halluxJoint.C0 = foot.CFrame:ToObjectSpace(footHub)
+		halluxJoint.C1 = hallux.CFrame:ToObjectSpace(footHub)
+		halluxJoint.Transform = CFrame.new()
+		halluxJoint:SetAttribute("Side", s)
+		halluxJoint:SetAttribute("CurlSign", 1)   -- hallux extends along +Z: +pitch hooks it under-forward
+		halluxJoint:SetAttribute("OuterYawSign", 0)
+		halluxJoint.Parent = body
+		-- HIP joint: body → thigh. World-pivot form (mirrors the squirrel buildLimb, which the wing-C1
+		-- red-team proved is the safe pattern): body*C0 == thigh*C1 == hipPivot ⇒ Transform = I is the
+		-- built rest pose exactly.
+		local hip = Instance.new("Motor6D")
+		hip.Name = sideName .. "HipJoint"
+		hip.Part0 = body
+		hip.Part1 = thigh
+		hip.C0 = body.CFrame:ToObjectSpace(hipPivot)
+		hip.C1 = thigh.CFrame:ToObjectSpace(hipPivot)
+		hip.Transform = CFrame.new()
+		hip:SetAttribute("Side", s)
+		hip.Parent = body                                    -- parented to the Body so AnimateTalons finds it there
+		-- FOOT joint: tarsus → foot. Same world-pivot form at footHub.
+		local footJoint = Instance.new("Motor6D")
+		footJoint.Name = sideName .. "FootJoint"
+		footJoint.Part0 = tarsus
+		footJoint.Part1 = foot
+		footJoint.C0 = tarsus.CFrame:ToObjectSpace(footHub)
+		footJoint.C1 = foot.CFrame:ToObjectSpace(footHub)
+		footJoint.Transform = CFrame.new()
+		footJoint:SetAttribute("Side", s)
+		footJoint.Parent = body                              -- Part0 = tarsus; parent to Body for the same lookup
 	end
 
 	-- WINGS: the arm wing (broad inner slab) carries a covert feather row on top and a fan of
@@ -550,6 +636,87 @@ function BirdBuilder.AnimateWings(model, isFlapping, isDiving, flapPhase, dt)
 
 	drive("LeftWingJoint")
 	drive("RightWingJoint")
+end
+
+--------------------------------------------------------------------------------
+-- AnimateTalons  (S39 — the eagle's talon CATCH animation)
+--------------------------------------------------------------------------------
+-- BirdBuilder.AnimateTalons(model, reach01, clench01, dt)
+--   Swings the two leg rigs down-and-forward (reach) and snaps the toes open→shut (clench) for the
+--   sacred squirrel catch. Cosmetic Motor6D.Transform ONLY — never touches physics/collision (Body is
+--   the only massed part; FlightPhysics reads no instances). Safe on missing joints (crows, old models).
+--   reach01  : 0 = legs tucked in the flight pose · 1 = fully swung down-and-forward, "hand" open.
+--   clench01 : 0 = open · 1 = the grab (foot snaps under, hip pulls the snatch back through).
+-- Sign convention verified from Build(): +X hip pitch swings the leg down-and-forward (the built +12°
+-- forward lean); +X foot pitch flares the (built -45° curled) toes forward/open, -X curls them under.
+local TALON_SMOOTH = 16   -- reach ease: the legs swing down smoothly.
+local CLENCH_SNAP  = 40   -- clench ease: the fist must SNAP shut within ~2 frames of contact.
+function BirdBuilder.AnimateTalons(model, reach01, clench01, dt)
+	if not model then return end
+	dt = tonumber(dt) or (1 / 60)
+	reach01 = math.clamp(tonumber(reach01) or 0, 0, 1)
+	clench01 = math.clamp(tonumber(clench01) or 0, 0, 1)
+	local body = model.PrimaryPart or model:FindFirstChild("Body")
+	if not body then return end
+	-- Two eases: reach is smooth (TALON_SMOOTH); the digits close fast (CLENCH_SNAP) so the grasp reads
+	-- as a snatch, not a slow squeeze. The digit target blends the two so a mid-close frame still tracks.
+	local reachAlpha  = math.clamp(dt * TALON_SMOOTH, 0, 1)
+	local clenchAlpha = math.clamp(dt * CLENCH_SNAP, 0, 1)
+	local digitAlpha  = math.max(reachAlpha, clenchAlpha * clench01)   -- snap the closing, still smooth-open
+
+	-- hip: swing down-and-forward as reach grows; the clench PULLS BACK slightly = the snatch-through.
+	local hipX  = math.rad(58) * reach01 - math.rad(24) * clench01
+	-- foot: REDUCED now that the digits carry the read — open a touch, then a small snap under on clench.
+	local footX = math.rad(30) * reach01 * (1 - clench01) + math.rad(-18) * clench01
+
+	-- Linear OPEN(reach=1,clench=0) → CLOSE(clench=1) for each digit angle. Open side scaled by reach01
+	-- so the fingers only spread as the foot swings out. `lerpAngle` picks the pose from clench01.
+	local function lerpAngle(openDeg, closeDeg)
+		local open = math.rad(openDeg) * reach01
+		return open + (math.rad(closeDeg) - open) * clench01
+	end
+	-- digit pitch magnitudes (before CurlSign): proximal +40 open / -35 close; distal claw +25 / -65.
+	-- Applying CurlSign makes forward toes (-1) and the hallux (+1) both curl their TIPS toward one
+	-- point below the foot: forward toes need a more-NEGATIVE pitch to fold under (CurlSign -1 flips the
+	-- +open/-close sense so open SPREADS, close FOLDS UNDER); the hallux (+Z, CurlSign +1) hooks with +pitch.
+	local proxPitch  = lerpAngle(54, -35)
+	local clawPitch  = lerpAngle(32, -65)
+	local halluxPitch = lerpAngle(-30, 55)   -- already in the hallux's +Z sense; CurlSign +1 = identity
+	-- outer-toe yaw: fan the ±22° toes apart when open, converge when closed (OuterYawSign gives the side).
+	local outerYaw   = lerpAngle(26, -8)
+
+	local function driveHip(jointName)
+		local motor = body:FindFirstChild(jointName)
+		if not motor or not motor:IsA("Motor6D") then return end
+		local side = motor:GetAttribute("Side") or 1
+		local target = CFrame.Angles(hipX, 0, side * math.rad(6) * reach01)   -- slight outward set, feet apart
+		motor.Transform = approachCFrame(motor.Transform, target, reachAlpha)
+	end
+	local function driveFoot(jointName)
+		local motor = body:FindFirstChild(jointName)
+		if not motor or not motor:IsA("Motor6D") then return end
+		motor.Transform = approachCFrame(motor.Transform, CFrame.Angles(footX, 0, 0), reachAlpha)
+	end
+	-- driveDigit: one articulated toe/claw/hallux joint. `pitchMag` is the digit's pitch magnitude in the
+	-- pivot's own sense; CurlSign folds it toward the grasp centre; OuterYawSign fans the outer toes.
+	local function driveDigit(jointName, pitchMag, yawMag)
+		local motor = body:FindFirstChild(jointName)
+		if not motor or not motor:IsA("Motor6D") then return end
+		local curl = motor:GetAttribute("CurlSign") or -1
+		local yawSign = motor:GetAttribute("OuterYawSign") or 0
+		local target = CFrame.Angles(curl * pitchMag, yawSign * (yawMag or 0), 0)
+		motor.Transform = approachCFrame(motor.Transform, target, digitAlpha)
+	end
+
+	for _, side in ipairs({ "Left", "Right" }) do
+		driveHip(side .. "HipJoint")
+		driveFoot(side .. "FootJoint")
+		for ti = 1, 3 do
+			driveDigit(side .. "Toe" .. ti .. "Joint", proxPitch, outerYaw)   -- proximal (+ outer yaw)
+			driveDigit(side .. "Toe" .. ti .. "ClawJoint", clawPitch, 0)       -- distal claw
+		end
+		driveDigit(side .. "HalluxJoint", halluxPitch, 0)
+	end
 end
 
 --------------------------------------------------------------------------------
@@ -862,6 +1029,23 @@ function BirdBuilder.PoseSquirrel(model, pose, dt, phase)
 				return CFrame.Angles(math.rad(125) + side * scurry * math.rad(55), 0, side * math.rad(38))
 			else
 				return CFrame.Angles(math.rad(25) - side * scurry * math.rad(45), 0, side * math.rad(30))
+			end
+		elseif pose == "leap" then
+			-- THE JUMP (S39, Chad "animated squirrels jumping to be helped"): a real athletic leap toward
+			-- the eagle's talons. `phase` carries arc progress u ∈ [0,1] (NOT radians). Launch push-off
+			-- (arms flung back, continuous with `plant`'s -40° tell) → both arms sweeping OVERHEAD to reach
+			-- for the talons; legs stream behind with a small kick. The leaper is already oriented look-at
+			-- the eagle, so the overhead reach points AT it automatically. A tiny tremble keeps it alive.
+			local u = math.clamp(phase, 0, 1)
+			local k = math.clamp((u - 0.12) / 0.50, 0, 1)
+			k = k * k * (3 - 2 * k)                                            -- smoothstep 0.12 → 0.62
+			if isArm then
+				local eager = math.sin(u * 24) * math.rad(5)
+				return CFrame.Angles(math.rad(-38) + (math.rad(168) - math.rad(-38)) * k,
+					0, side * (math.rad(26) - math.rad(11) * k) + side * eager)
+			else
+				local kick = math.sin(u * 22) * math.rad(6)
+				return CFrame.Angles(math.rad(-42) + math.rad(20) * k + kick, 0, side * math.rad(12))
 			end
 		else -- idle
 			if isArm then return CFrame.Angles(math.rad(6), 0, side * math.rad(8)) end

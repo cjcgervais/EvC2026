@@ -312,9 +312,20 @@ local function buildBeacon(model, rarity)
 	local body = model.PrimaryPart
 	if not body then return end
 	-- Vertical sparkle column above the squirrel — visible from altitude.
+	-- S39 (Chad "drop the icons"): the emoji billboard is gone, so this beacon is now the SOLE long-range
+	-- read — a tall, bright neon shaft rising well above the squirrel/canopy (the client tell-loop pulses it).
+	-- S40 FIX (Chad "its just a light cylinder, I don't even see squirrels"): the S39 beacon was a
+	-- 3.2-wide × 110-tall near-opaque column centered +40 → its BASE sat at Y≈-15, BELOW the squirrel,
+	-- so the glowing tube ENGULFED the critter. Now it's a THIN marker beam whose base sits ABOVE the
+	-- squirrel's head (center +40, height 70 → base ≈ +5, clearing the ~+3 head/tail), and the client
+	-- FADES it to invisible up close (see BirdController tell-loop) so the squirrel + its animation
+	-- are never occluded. Long-range "fly to the glow" read is kept by the thin bright shaft.
+	local bw = R.beaconWidth or 1.6
+	local bh = R.beaconHeight or 70
+	local baseY = R.beaconBaseY or 8
 	local pillar = Instance.new("Part")
 	pillar.Name = "Beacon"
-	pillar.Size = Vector3.new(2.2, 44, 2.2)
+	pillar.Size = Vector3.new(bw, bh, bw)
 	pillar.Anchored = false
 	pillar.CanCollide = false
 	pillar.CanQuery = false
@@ -323,8 +334,8 @@ local function buildBeacon(model, rarity)
 	pillar.Massless = true
 	pillar.Material = Enum.Material.Neon
 	pillar.Color = rarity.beacon
-	pillar.Transparency = 0.55
-	pillar.CFrame = body.CFrame * CFrame.new(0, 24, 0)
+	pillar.Transparency = 0.15
+	pillar.CFrame = body.CFrame * CFrame.new(0, baseY + bh / 2, 0)   -- base = +baseY (above the squirrel)
 	pillar.Parent = model
 	local weld = Instance.new("Weld")
 	weld.Part0 = body
@@ -347,23 +358,9 @@ local function buildBeacon(model, rarity)
 	sparkle.Acceleration = Vector3.new(0, 20, 0)
 	sparkle.Parent = att
 
-	-- A friendly floating label so hidden ones read at a glance.
-	local bb = Instance.new("BillboardGui")
-	bb.Name = "Label"
-	bb.Size = UDim2.new(0, 90, 0, 44)
-	bb.StudsOffsetWorldSpace = Vector3.new(0, 6, 0)
-	bb.AlwaysOnTop = true
-	bb.MaxDistance = 1400
-	bb.Parent = body
-	local lbl = Instance.new("TextLabel")
-	lbl.BackgroundTransparency = 1
-	lbl.Size = UDim2.fromScale(1, 1)
-	lbl.Font = Enum.Font.GothamBold
-	lbl.TextScaled = true
-	lbl.TextColor3 = rarity.beacon
-	lbl.TextStrokeTransparency = 0.3
-	lbl.Text = (rarity.name == "Brown") and "🐿️!" or ("🐿️ " .. string.upper(rarity.name) .. "!")
-	lbl.Parent = bb
+	-- S39 (Chad "drop the icons, lets go with animated squirrels"): the floating "🐿️!" emoji billboard
+	-- is GONE — the animated squirrel itself (wave/plant/panic tell) + the neon beacon column + the
+	-- rarity-tinted body/sparkle now carry the read. Rare squirrels still read by beacon HUE + body tint.
 end
 
 local function spawnSquirrel(perch)
@@ -440,15 +437,28 @@ end
 
 local function populateSquirrels()
 	clearSquirrels()
-	for _ = 1, (R.squirrelCount or 10) do
+	local want = (R.squirrelCount or 10)
+	local got, fails, noPerch = 0, 0, 0
+	for _ = 1, want do
 		local perch, idx = pickFreePerch()
 		if perch then
-			spawnSquirrel(perch)
-			-- record perch index on the freshest squirrel so we can free it on despawn
-			local newest = squirrels[nextSquirrelId]
-			if newest then newest.perchIndex = idx end
+			-- Per-squirrel pcall (S41 STABILIZE): one bad squirrel can no longer zero out the whole
+			-- population — the classic "empty map" failure. A failure warns with its cause; the rest spawn.
+			local ok, err = pcall(function()
+				spawnSquirrel(perch)
+				-- record perch index on the freshest squirrel so we can free it on despawn
+				local newest = squirrels[nextSquirrelId]
+				if newest then newest.perchIndex = idx end
+			end)
+			if ok then got += 1 else fails += 1; warn("[Rescue] spawnSquirrel failed: " .. tostring(err)) end
+		else
+			noPerch += 1
 		end
 	end
+	-- STABILIZE diag: ONE server-console line that turns an "empty map" into a 1-glance verdict.
+	-- got>0  → squirrels ARE spawning (an empty VIEW is then a render/beacon/sync issue, not spawning).
+	-- got==0 → a real spawn failure (read the warn above) or no free perches (noPerch=want → world/grove gen).
+	print(string.format("[Rescue] populated %d/%d squirrels (%d spawn-fail, %d no-perch)", got, want, fails, noPerch))
 end
 
 --------------------------------------------------------------------------------

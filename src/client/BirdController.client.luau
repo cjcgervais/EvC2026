@@ -1362,6 +1362,9 @@ local function isClaimed(id)
 	return true
 end
 local catch = nil               -- the SACRED talon catch beat (single; slow-mo) or nil
+-- Talon catch-anim drive (S39): stepCatch writes these each frame of a catch; the flight loop eases the
+-- eagle's leg rig toward them (BirdBuilder.AnimateTalons) and resets to 0 (tucked) when no catch is active.
+local talonReach, talonClench = 0, 0
 local hopOff = nil              -- MATH-DELIVERY dismount ceremony: { n, i, t } while riders hop off one
                                 -- per beat at the safe pad (Packet-03 §3 layer 1), or nil
 local crewCheer = 0             -- s left of the whole-crew "we got one!" cheer after a crew catch lands
@@ -1382,9 +1385,13 @@ end
 -- neutral: bodyRadius (collision/reach) is unchanged; this only moves cosmetic attach points.
 local BIRD_SCALE = (GameConfig.Visual and GameConfig.Visual.birdScale) or 1
 
--- The talon "basket" — a point just under the belly the leap intercepts (scaled with the visual body).
+-- The talon "basket" in the eagle's LOCAL frame (a point just under the belly the leap intercepts,
+-- scaled with the visual body). ONE constant — talonPos() and the climb path (#9) both key off it.
+local TALON_LOCAL = Vector3.new(0, -2.4, 0.3) * BIRD_SCALE
+
+-- The talon "basket" in world space (scaled with the visual body).
 local function talonPos()
-	return rootPart.CFrame * (Vector3.new(0, -2.4, 0.3) * BIRD_SCALE)
+	return rootPart.CFrame * TALON_LOCAL
 end
 
 -- Grid-packed seats on the back so up to `carryCapacity` (10) riders fit as a little pile of clinging
@@ -1415,8 +1422,7 @@ local function bezier3(p0, p1, p2, t)
 	return a:Lerp(b, t)
 end
 
--- The talon "basket" in the eagle's LOCAL frame (matches talonPos()'s SCALED offset). Start of the climb.
-local TALON_LOCAL   = Vector3.new(0, -2.4, 0.3) * BIRD_SCALE
+-- (TALON_LOCAL is defined once, up by talonPos() — the climb path (#9 p0) reuses it.)
 local SCRAMBLE_FREQ = 26                 -- rad/s; how fast the limbs scurry during the climb-up.
 
 -- LIVING BACK-RIDERS (Fable §C) — cosmetic per-rider life applied on TOP of the seat CFrame + ride pose.
@@ -1565,7 +1571,13 @@ local function stepCatch(dt)
 		local look = rootPart.Position - pos
 		local ori = (look.Magnitude > 1e-3) and CFrame.lookAt(pos, rootPart.Position) or CFrame.new(pos)
 		if catch.sq and catch.sq.PrimaryPart then catch.sq:PivotTo(ori) end
-		BirdBuilder.PoseSquirrel(catch.sq, "starfish", dt, 0)
+		-- SQUIRREL JUMP (S39): a real athletic leap — launch push-off → both arms sweeping overhead to
+		-- reach for the talons (keyed by arc progress u). Replaces the static spread-eagle.
+		BirdBuilder.PoseSquirrel(catch.sq, "leap", dt, u)
+		-- TALON REACH (S39): the eagle sees the leaper and swings its feet down-and-forward, toes flaring
+		-- open — ramps in over the back half of the leap, mostly inside the slow-mo window. No grab yet.
+		talonReach = clamp((u - 0.35) / 0.50, 0, 1)
+		talonClench = 0
 	elseif catch.t < contactEnd then
 		-- CONTACT + HIT-STOP: fire the juice ONCE, then hold frozen at the talon.
 		if not catch.contactDone then
@@ -1578,7 +1590,14 @@ local function stepCatch(dt)
 			if _G.RescueStamp then _G.RescueStamp("gotcha", catch.tier, catch.rarity, catch.styleMult, nil, big) end
 			task.delay(contactEnd - catch.airtime + (RES.slowmoSnapBack or 0.2) + (RES.woohooDelay or 0.5), playWoohoo)
 		end
-		if catch.sq and catch.sq.PrimaryPart then catch.sq:PivotTo(CFrame.new(tp)) end  -- frozen
+		-- THE GRAB (S39): foot snaps from open to curled, hip pulls back — the snatch, right on the pomf frame.
+		talonReach = 1
+		talonClench = 1
+		-- Freeze the squirrel IN the grasp, carrying the eagle's rotation so it tracks the banked body
+		-- (identity read as level-locked when the eagle rolled). Position unchanged (the talon point tp).
+		if catch.sq and catch.sq.PrimaryPart then
+			catch.sq:PivotTo(rootPart.CFrame.Rotation + tp)
+		end  -- frozen, in the grasp
 	else
 		-- CLIMB-AND-LATCH (Chad's #9 vision: "eagle catches with talon → squirrel scrambles up to the
 		-- eagle's back"). After the hit-stop the caught squirrel scurries up the flank from the talon to
@@ -1586,6 +1605,11 @@ local function stepCatch(dt)
 		-- slow-mo snap-back (≤0.2s) rides down underneath the first part of the climb, so no extra tail.
 		local climbDur = RES.climbDur or 0.5
 		local ct = catch.t - contactEnd
+		-- TALON RE-TUCK (S39): haul the legs back into the flight tuck over the first ~45% of the climb,
+		-- still gripping ("got you") — then tucked-and-still for the rest while the squirrel scrambles up.
+		local tuck = 1 - clamp(ct / (climbDur * 0.45), 0, 1)
+		talonReach = tuck
+		talonClench = tuck
 		if not catch.climbStarted then
 			catch.climbStarted = true
 			catch.seatIndex = #riders + 1          -- the seat this rider is climbing toward (stable: single catch slot)
@@ -1677,7 +1701,8 @@ local function stepCrewCatches(dt)
 			local pos = flat + Vector3.new(0, apex, 0)
 			local look = rootPart.Position - pos
 			cc.sq:PivotTo((look.Magnitude > 1e-3) and CFrame.lookAt(pos, rootPart.Position) or CFrame.new(pos))
-			BirdBuilder.PoseSquirrel(cc.sq, "starfish", dt, 0)
+			-- same eager JUMP as the sacred leaper (S39) — reaching arms into the crew's `reach` net.
+			BirdBuilder.PoseSquirrel(cc.sq, "leap", dt, u)
 		elseif cc.t >= cc.airtime then
 			-- contact IN THE CREW'S ARMS → light poof + pomf + the crew cheers ("CREW CATCH! +1").
 			if not cc.contactDone then
@@ -1976,21 +2001,29 @@ local function scanSquirrels(dt)
 			elseif isFrantic then pose = "waveBig"; phase = squirrelPhase * 3.4 end -- panic: even faster
 			BirdBuilder.PoseSquirrel(m, pose, dt, phase)
 			-- Local cosmetic flare (client-only property writes; the server never re-touches these).
+			-- S40 FIX (Chad "its just a light cylinder, I don't even see squirrels"): the beacon is now a
+			-- THIN server-sized beam ABOVE the squirrel (RescueServer.buildBeacon). We NO LONGER fatten it
+			-- here (the old width 3.2-4 / height 110-130 writes engulfed the critter). Instead we modulate
+			-- ONLY transparency: bright from altitude, and FADED TO INVISIBLE as the eagle closes so the
+			-- squirrel and its animation are never occluded. "Fly to the glow → see the animated squirrel."
 			local beacon = m:FindFirstChild("Beacon")
 			if beacon then
-				if isTell then
-					beacon.Transparency = 0.05 + 0.15 * (1 - flarePulse)
-					local w = 2.2 * (1.7 + 0.5 * flarePulse)
-					beacon.Size = Vector3.new(w, 54, w)
-				elseif isFrantic then
-					-- fast urgent flicker + taller than the tell (the orange grove-flare column is the hue cue)
-					local fp = 0.5 + 0.5 * math.sin(squirrelPhase * 6)
-					beacon.Transparency = 0.0 + 0.25 * fp
-					local w = 2.2 * (1.6 + 0.7 * fp)
-					beacon.Size = Vector3.new(w, 60, w)
+				local dist = (rootPart.Position - m.PrimaryPart.Position).Magnitude
+				local NEAR, FAR = 70, 260
+				local farVis = clamp((dist - NEAR) / (FAR - NEAR), 0, 1)   -- 0 = up close, 1 = far
+				if farVis <= 0 then
+					beacon.Transparency = 1                                -- fully out of the way at catch range
 				else
-					beacon.Transparency = 0.55
-					beacon.Size = Vector3.new(2.2, 44, 2.2)
+					local baseT
+					if isTell then
+						baseT = 0.05 + 0.15 * (1 - flarePulse)             -- brightest: about to catch
+					elseif isFrantic then
+						local fp = 0.5 + 0.5 * math.sin(squirrelPhase * 6) -- urgent flicker
+						baseT = 0.0 + 0.25 * fp
+					else
+						baseT = 0.1 + 0.14 * (1 - flarePulse)              -- idle gentle pulse
+					end
+					beacon.Transparency = 1 - farVis * (1 - baseT)         -- baseT far → 1 (gone) near
 				end
 			end
 		end
@@ -2865,6 +2898,12 @@ local function onFlightStep(dt)
 			flightEngine.flapPhase,
 			dt
 		)
+		-- Talon catch animation (S39): stepCatch set talonReach/talonClench this frame; ease the leg rig
+		-- toward them (0/0 = tucked flight pose when no catch is active). Cosmetic Motor6D only.
+		if not catch then talonReach, talonClench = 0, 0 end
+		if RES.talonAnim ~= false then
+			BirdBuilder.AnimateTalons(birdModel, talonReach, talonClench, dt)
+		end
 	end
 	updateVortexTrails()
 

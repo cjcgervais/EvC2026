@@ -788,6 +788,20 @@ GameConfig.Rescue = {
 	claimTTL         = 3,      -- s a fired-for squirrel stays locally unclaimable (covers the server's
 	                           -- destroy replication window; a server-REJECTED catch frees up after this).
 
+	talonAnim        = true,   -- S39: animate the eagle's TALONS on a catch — reach down-and-forward, splay
+	                           -- open, then clench/grab on contact, tucking back during the climb (Chad "I want
+	                           -- eagles talons to be animated when catching squirrels"). Cosmetic Motor6D only;
+	                           -- false → legs stay in the static tucked pose (instant revert).
+
+	-- STRANDED-SQUIRREL BEACON geometry (S40 fix — Chad "its just a light cylinder, I don't even see
+	-- squirrels"): a THIN marker beam whose base sits ABOVE the squirrel's head so it never occludes the
+	-- critter (the client fades it to invisible up close). ONE source of truth: RescueServer.buildBeacon
+	-- reads these AND the headless model-build gate (tests/models.spec.luau) asserts the base clears the
+	-- actual built squirrel's top. beaconBaseY is measured from the squirrel Body origin (studs).
+	beaconWidth      = 1.6,
+	beaconHeight     = 70,
+	beaconBaseY      = 8,      -- base this far above Body origin; clears the ~+5 head/tail at squirrelScale 4.4.
+
 	-- CLIENT SLOW-MO PRESENTATION (Fable §B) — dilates anim/FX/audio/camera ONLY; the sim runs real-time.
 	slowmoScale      = 0.25,   -- presentation timescale during the catch window.
 	slowmoEaseIn     = 0.11,   -- s; fast attack into slow-mo.
@@ -950,7 +964,7 @@ GameConfig.Rescue = {
 	-- "waterfall_meadow" = the shipped behavior. Flip this ONE string to switch missions (e.g. to
 	-- "fox_on_the_hill" once THE FOX lands). Every mission field falls back to the current literal, so an
 	-- absent/malformed mission reproduces today's round exactly — the selector is inert by construction.
-	activeMission    = "fox_on_the_hill",   -- Chad S38: FOX MODE ON for his Play (was "waterfall_meadow" — flip back to revert)
+	activeMission    = "waterfall_meadow",   -- A0 (S41): fox SHELVED (S39) → back to the shipped round; fox subsystem now fully inert.
 }
 
 -- ENVIRONMENT-VARIED MISSIONS (Packet-03 §4). One sacred loop (scan→dive→catch→deliver); the WORLD varies
