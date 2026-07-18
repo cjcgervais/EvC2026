@@ -32,7 +32,17 @@ client consumes · A2.4 sticky-seat F3 fix) — each red-teamed CLEAR, Tier-4 35
 committed on updraft (NOT pushed). Client+server now share ONE catch/score/seat/phase module; the two-authority
 gate-divergence bug factory is closed. **A3 (acquisition FSM) still queued; A4-remainder MOOT (fox shelved); A5 audio
 DEFERRED (specced rule conflicts w/ the intentional shared-SFX_SWOOSH design — re-scope, don't reopen audio).**
-**▶ NEXT = GATE A:** Chad flies ONE round to confirm nothing FEELS different (Phase A was behavior-preserving) + the
+**▶ S41 cont.2 — GATE A PASSED ("feels good") → PHASE B started, B1 COMPLETE.** The loop then designed + built the
+fire: **B1 FireGrid** — a pure fire-cell-grid module (`src/shared/FireGrid.luau`) SIM-tuned to the §3.3 bands over 100
+seeded rounds (front 5.2 studs/s, grove-threat 42%, cut-off 3.8, never total theft), Fable-designed + Fable-after-audited
+(one fix applied: seed a fire LINE via seed-geometry, not crossFrac), + inert mission wiring (`ember_valley`; the shipped
+round is byte-identical). Both commits red-teamed CLEAR, Tier-4 **48/48**, real-engine smoke green, committed on updraft
+(UNPUSHED). Cut-off squirrels rescue on the existing non-lethal Ranger Balloon. **▶ NEXT = B2** (fire VISUALS — the
+`burningCells` render layer + cut-off countdown ring; the fire becomes visible/flyable) → then **Gate B** (Chad flies
+`ember_valley`: "did the fire change your route; did losing squirrels feel like triage, not theft?"). B1 design +
+consults in `docs/rescue-consults/B1-FireGrid-design.md`; full detail in the ledger.
+<!-- superseded Gate-A note below -->
+**▶ (Gate A, now passed):** Chad flew ONE round to confirm nothing FELT different (Phase A was behavior-preserving) + the
 F3 seat fix. The 10-point checklist is at the top of the current ledger block (`.loop/rescue-phase0/state.md`).
 After Gate A: push (if wanted) + Phase B (the fire round) or A3. Deferred-to-push per SOP.
 
