@@ -35,6 +35,9 @@ need(okFG, "FireGrid failed to load")
 -- B2: the fire visual layer must compile + load in the REAL engine (RescueServer requires it at boot).
 local okFV = pcall(require, RS:WaitForChild("FireVisuals", 10))
 need(okFV, "FireVisuals failed to load")
+-- B3-fix: the terrain-oof FX module (BirdController requires it at boot; its require chain must resolve).
+local okBFX = pcall(require, RS:WaitForChild("BounceFX", 10))
+need(okBFX, "BounceFX failed to load")
 pass[#pass + 1] = "shared modules load"
 
 -- 2. A real squirrel builds, non-degenerate + sized (the "I see no squirrels" class at the BUILD layer).

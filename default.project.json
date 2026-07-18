@@ -34,6 +34,9 @@
       },
       "BounceRules": {
         "$path": "src/shared/BounceRules.luau"
+      },
+      "BounceFX": {
+        "$path": "src/shared/BounceFX.luau"
       }
     },
 
