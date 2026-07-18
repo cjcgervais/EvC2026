@@ -28,6 +28,9 @@
       },
       "FireGrid": {
         "$path": "src/shared/FireGrid.luau"
+      },
+      "FireVisuals": {
+        "$path": "src/shared/FireVisuals.luau"
       }
     },
 

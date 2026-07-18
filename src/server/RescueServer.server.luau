@@ -29,6 +29,7 @@ local GameConfig  = require(ReplicatedStorage:WaitForChild("GameConfig"))
 local BirdBuilder = require(ReplicatedStorage:WaitForChild("BirdBuilder"))
 local RescueRules = require(ReplicatedStorage:WaitForChild("RescueRules"))
 local FireGrid    = require(ReplicatedStorage:WaitForChild("FireGrid"))  -- THE FIRE (B1): pure fire-cell clock; driven per-round only in fire missions (inert otherwise)
+local FireVisuals = require(ReplicatedStorage:WaitForChild("FireVisuals"))  -- THE FIRE (B2): pooled server-side render layer; built per-round only in fire missions (inert otherwise)
 
 local R = GameConfig.Rescue
 if not (R and R.enabled) then
@@ -108,6 +109,9 @@ local fireGroveRadius = 130
 local fireSeeded = false            -- seedUpwind fires exactly ONCE per round (at igniteAt)
 local fireCutOffSeen = {}           -- [g] = true once we've reacted to grove g being cut off (diff latch)
 local fireGraceUntil = {}           -- [g] = round-elapsed time at which grove g's stranded squirrels get lifted
+local fireVisuals = nil             -- THE FIRE (B2): pooled FireVisuals controller (nil unless a fire mission)
+local fireVisualsFolder = nil       -- Workspace.FireVisuals (replicates to clients); nil under waterfall_meadow
+local fireVisualTick = 0            -- fire-tick counter for the visual refresh cadence (visualEvery)
 
 -- `queryable=true` makes the part participate in the flight collision spherecast + the style/updraft
 -- proximity rays (a SOLID surface the eagle slides on, non-lethally). Visual-only parts stay CanQuery=false
@@ -1040,6 +1044,22 @@ local function initFire()
 	end
 
 	fireState = FireGrid.new(GameConfig.Fire, rng:NextInteger(1, 2 ^ 30), wind, groves, R.deliverPos)
+
+	-- THE FIRE (B2): stand up the POOLED visual layer in a replicated Workspace folder (fire missions
+	-- only — we're already past the hz.kind~="fire" guard above). The pool is allocated ONCE here; stepFire
+	-- only repositions/recolors it (no per-tick create/destroy). Folder is dropped in teardownFire.
+	fireVisualTick = 0
+	fireVisualsFolder = Instance.new("Folder")
+	fireVisualsFolder.Name = "FireVisuals"
+	fireVisualsFolder.Parent = Workspace
+	local ok, ctrl = pcall(FireVisuals.new, FireGrid, GameConfig.Fire, fireState.cellSize, fireVisualsFolder)
+	if ok then
+		fireVisuals = ctrl
+	else
+		warn("[Fire] FireVisuals.new failed: " .. tostring(ctrl))
+		fireVisualsFolder:Destroy()
+		fireVisualsFolder = nil
+	end
 end
 
 -- Balloon-lift every STILL-stranded squirrel that belongs to grove `g` (its perch's groveIndex). Reuses
@@ -1063,12 +1083,37 @@ local function stepFire(dt, elapsed)
 	if not fireState then return end
 	local hz = mission.hazard or {}
 
-	FireGrid.step(fireState, dt)
+	local ticksRun = FireGrid.step(fireState, dt)
 
 	-- seed the burn ONCE when the round clock passes igniteAt (a calm opening before the clock starts).
 	if not fireSeeded and elapsed >= (hz.igniteAt or GameConfig.Fire.igniteAt or 10) then
 		fireSeeded = true
 		FireGrid.seedUpwind(fireState)
+	end
+
+	-- THE FIRE (B2): render the POOLED visuals off the grid every `visualEvery` fire-ticks. Decoupled from
+	-- the 0.25s loop and the 2 Hz sim so the per-render cost (reposition/recolor ≤30 sets + a coarse ember
+	-- pass, no allocation) stays well under the ≤1.5ms/tick server budget — at visualEvery=2 that's ~1 Hz.
+	-- We only sync on ticks the sim actually advanced (a fresh burning set) and gate on the visual cadence.
+	if fireVisuals and ticksRun > 0 then
+		local every = math.max(1, GameConfig.Fire.visualEvery or 2)
+		fireVisualTick += ticksRun
+		if fireVisualTick >= every then
+			fireVisualTick = 0
+			local perf = GameConfig.Fire.perfDiag == true
+			local t0 = perf and os.clock() or 0
+			-- pcall-guard the render (symmetry with the guarded FireVisuals.new): a cosmetic visual error must
+			-- NEVER kill the round-loop coroutine. On failure, tear the pool down and drop to logic-only fire.
+			local okSync, cells = pcall(function() return fireVisuals:sync(fireState, fireGraceUntil, elapsed) end)
+			if not okSync then
+				warn("[Fire] visual sync failed, disabling fire visuals: " .. tostring(cells))
+				pcall(function() fireVisuals:destroy() end)
+				fireVisuals = nil
+			elseif perf then
+				print(("[Fire] tick %d cells=%d ms=%.2f"):format(
+					fireState.tickCount or 0, cells or 0, (os.clock() - t0) * 1000))
+			end
+		end
 	end
 
 	-- diff cut-off groves: a NEWLY cut-off grove starts a cutoffGraceS countdown; when it elapses, lift.
@@ -1094,6 +1139,16 @@ local function teardownFire()
 	fireSeeded = false
 	table.clear(fireCutOffSeen)
 	table.clear(fireGraceUntil)
+	-- THE FIRE (B2): drop the pooled visuals + the replicated folder so nothing lingers between rounds.
+	if fireVisuals then
+		pcall(function() fireVisuals:destroy() end)
+		fireVisuals = nil
+	end
+	if fireVisualsFolder then
+		fireVisualsFolder:Destroy()
+		fireVisualsFolder = nil
+	end
+	fireVisualTick = 0
 end
 
 local triageBucket = 0

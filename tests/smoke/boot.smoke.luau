@@ -32,6 +32,9 @@ need(okR, "RescueRules failed to load")
 -- B1: the fire grid must compile + load in the REAL engine too (RescueServer requires it at boot).
 local okFG = pcall(require, RS:WaitForChild("FireGrid", 10))
 need(okFG, "FireGrid failed to load")
+-- B2: the fire visual layer must compile + load in the REAL engine (RescueServer requires it at boot).
+local okFV = pcall(require, RS:WaitForChild("FireVisuals", 10))
+need(okFV, "FireVisuals failed to load")
 pass[#pass + 1] = "shared modules load"
 
 -- 2. A real squirrel builds, non-degenerate + sized (the "I see no squirrels" class at the BUILD layer).

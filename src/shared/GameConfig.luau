@@ -1057,6 +1057,20 @@ GameConfig.Fire = {
 	igniteAt        = 10,      -- t≈10s into the round the seeds light (a calm opening before the clock starts).
 	cutoffCheckEvery= 4,       -- run the BFS cut-off check every N ticks (O(2916); cached between).
 	maxVisualBurning= 30,      -- B2 hard-cap: at most 30 BURNING cells get a flipbook+emitter+light.
+
+	-- B2 VISUAL layer (FireVisuals.luau). Server-side, replicates via a Workspace folder; INERT under
+	-- waterfall_meadow (built only when the fire is active). The pool is created ONCE at maxVisualBurning
+	-- and re-positioned/re-colored each render — no per-tick create/destroy.
+	visualEvery     = 2,       -- render the fire visuals every N fire-ticks (fire steps at tickHz=2; N=2 → ~1 Hz
+	                           -- visual refresh). Keeps the per-render cost well under the ≤1.5ms/tick server budget.
+	markerHeight    = 34,      -- studs the burning marker column stands (base at ground → reads over low canopy).
+	lightRange      = 90,      -- warm PointLight range per burning marker (modest — 30 lights hard-capped).
+	lightBrightness = 2.0,
+	smokeRate       = 6,       -- particles/sec per burning marker's ONE smoke emitter.
+	emberTint       = Color3.fromRGB(46, 34, 28),  -- charred-ground tint for EMBER cells (cheap color swap, NO light/emitter).
+	maxVisualEmber  = 40,      -- coarse cap on ember tint patches (a pooled subset — ember is a free color, but instances aren't free).
+	ringColor       = Color3.fromRGB(255, 90, 40),  -- cut-off countdown warning ring (grove about to be ranger-rescued).
+	perfDiag        = false,   -- print "[Fire] tick N cells=%d ms=%.2f" per render when true (OFF by default).
 }
 
 -- Backfill ember_valley's fire ignite time from GameConfig.Fire (Fire is defined AFTER Missions, so the

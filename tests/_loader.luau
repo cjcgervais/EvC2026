@@ -38,6 +38,7 @@ local MODULES = {
 	BirdBuilder   = "src/shared/BirdBuilder.luau",
 	RescueRules   = "src/shared/RescueRules.luau",
 	FireGrid      = "src/shared/FireGrid.luau",
+	FireVisuals   = "src/shared/FireVisuals.luau",
 }
 
 -- Preload every source string (before any luau.load; fs yields).
@@ -124,5 +125,8 @@ Loader.Vector2 = roblox.Vector2
 Loader.CFrame = roblox.CFrame
 Loader.Color3 = roblox.Color3
 Loader.Enum = roblox.Enum
+-- Re-export Instance so SPEC files can build/inspect real Instances headlessly (the FireVisuals
+-- geometry gate constructs a container Folder and reads Enum.Material/Enum.PartType directly).
+Loader.Instance = roblox.Instance
 
 return Loader
