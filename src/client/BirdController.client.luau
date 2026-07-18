@@ -48,6 +48,7 @@ local GameConfig    = require(ReplicatedStorage:WaitForChild("GameConfig"))
 local FlightPhysics = require(ReplicatedStorage:WaitForChild("FlightPhysics"))
 local BirdBuilder   = require(ReplicatedStorage:WaitForChild("BirdBuilder"))
 local BirdCollision = require(ReplicatedStorage:WaitForChild("BirdCollision"))
+local RescueRules   = require(ReplicatedStorage:WaitForChild("RescueRules"))
 
 local CAM = GameConfig.Camera
 
@@ -1356,10 +1357,7 @@ local lastFullHint = -1e9       -- os.clock() of the last "WINGS FULL" HUD nudge
 -- whose catch the server genuinely rejected becomes catchable again instead of permanently dead.
 local claimedIds = {}
 local function isClaimed(id)
-	local at = id and claimedIds[id]
-	if not at then return false end
-	if os.clock() - at > (RES.claimTTL or 3) then claimedIds[id] = nil; return false end
-	return true
+	return RescueRules.claimActive(claimedIds, id, os.clock(), RES)
 end
 local catch = nil               -- the SACRED talon catch beat (single; slow-mo) or nil
 -- Talon catch-anim drive (S39): stepCatch writes these each frame of a catch; the flight loop eases the
@@ -1509,7 +1507,7 @@ end
 local function triggerCatch(sqModel, closing)
 	local id = sqModel:GetAttribute("SquirrelId")
 	if type(id) ~= "number" then return end
-	claimedIds[id] = os.clock()      -- claim BEFORE anything else — one fire per squirrel, ever
+	RescueRules.markClaim(claimedIds, id, os.clock())      -- claim BEFORE anything else — one fire per squirrel, ever
 	local body = sqModel.PrimaryPart
 	local startPos = body and body.Position or (rootPart.Position + rootPart.CFrame.LookVector * 20)
 	local color = (body and body.Color) or Color3.fromRGB(150, 96, 52)
@@ -1517,9 +1515,7 @@ local function triggerCatch(sqModel, closing)
 	catchCount += 1
 	local styleMult = clamp(1 + styleMeter, 1, RES.styleMultMax or 3)
 	local glide = eagleGlide()
-	local tier = ""
-	if closing >= (RES.blazingFrac or 0.9) * glide then tier = "BLAZING"
-	elseif closing >= (RES.swiftFrac or 0.6) * glide then tier = "SWIFT" end
+	local tier = RescueRules.speedTier(RES, closing, glide)
 
 	if catchRemote then catchRemote:FireServer(id, styleMult, tier) end
 
@@ -1662,17 +1658,14 @@ end
 local function triggerCrewCatch(sqModel, closing)
 	local id = sqModel:GetAttribute("SquirrelId")
 	if type(id) ~= "number" then return end
-	claimedIds[id] = os.clock()      -- claim BEFORE anything else — one fire per squirrel, ever
+	RescueRules.markClaim(claimedIds, id, os.clock())      -- claim BEFORE anything else — one fire per squirrel, ever
 	local body = sqModel.PrimaryPart
 	local startPos = body and body.Position or (rootPart.Position + rootPart.CFrame.LookVector * 20)
 	local color = (body and body.Color) or Color3.fromRGB(150, 96, 52)
 
 	catchCount += 1
 	local styleMult = clamp(1 + styleMeter, 1, RES.styleMultMax or 3)
-	local glide = eagleGlide()
-	local tier = ""
-	if closing >= (RES.blazingFrac or 0.9) * glide then tier = "BLAZING"
-	elseif closing >= (RES.swiftFrac or 0.6) * glide then tier = "SWIFT" end
+	local tier = RescueRules.speedTier(RES, closing, eagleGlide())
 	if catchRemote then catchRemote:FireServer(id, styleMult, tier) end
 	styleMeter = 0
 	tellId = nil
@@ -1893,27 +1886,18 @@ local function scanSquirrels(dt)
 	squirrelPhase += dt * 3
 	local eaglePos = rootPart.Position
 	local vel = flightEngine.velocity
-	-- FTUE eases the closing gate (Fable §D) so a slow/wobbly beginner still catches.
-	local isFtue = catchCount < (RES.ftueCatches or 3)
-	local gateFrac = isFtue and (RES.ftueGateFrac or RES.closingGateFrac or 0.3) or (RES.closingGateFrac or 0.3)
-	local gate = gateFrac * eagleGlide()
 	-- CREW CATCH v1: catches now OVERLAP — a trigger while the sacred `catch` is busy becomes a CREW catch
-	-- (the single-slot lock that silently dropped chained catches is gone). haveRoom counts the sacred catch
-	-- + every in-flight crew catch + the riders, so we never exceed carry capacity.
+	-- (the single-slot lock that silently dropped chained catches is gone). inFlight counts the sacred catch
+	-- + every in-flight crew catch; the eligibility verdict counts those + the riders vs carry capacity.
+	-- A2.3: the predict geometry (effectiveRadius / closingGate / hasRoom / phase) now lives in RescueRules;
+	-- this scan branches off the per-squirrel VERDICT (behavior-preserving vs the old inline formulas).
 	local inFlight = (catch and 1 or 0) + #crewCatches
-	local haveRoom = (#riders + inFlight) < (rescueState.capacity or RES.carryCapacity or 3)
-	-- No new catches during the hop-off ceremony (riders are mid-dismount; the tally is counting).
-	local canCatch = haveRoom and rescueState.phase == "active" and not hopOff
-	-- Tells only when a catch could actually follow — a FULL eagle must not wind up squirrels it can't
-	-- take (anticipation with no payoff reads as "my catch didn't count"; Chad S35).
-	local roomForTell = haveRoom and not hopOff and rescueState.phase == "active"
-
-	local effRadius = (RES.triggerRadius or 28)
-	if isFtue then effRadius = effRadius * (RES.ftueRadiusMult or 1.5) end
-	-- TRADE SECRET (Chad S34): flying FASTER widens the catch scoop a little — rewards boom-and-zoom
-	-- without telling the player. 1× at glide → up to 1+scoopSpeedGain at ~2× glide. No UI, no announce.
-	local glideSp = eagleGlide()
-	effRadius = effRadius * (1 + clamp((flightEngine.speed - glideSp) / math.max(1, glideSp), 0, 1) * (RES.scoopSpeedGain or 0.25))
+	local cap = rescueState.capacity or RES.carryCapacity or 3
+	local glide = eagleGlide()
+	local speed = flightEngine.speed
+	-- No new catches / tells during the hop-off ceremony (riders are mid-dismount; the tally is counting).
+	-- hopOff is a client-only presentation gate the verdict doesn't model, so it stays an explicit flag.
+	local canCatch = not hopOff   -- room/phase come from the verdict; this only holds off during hop-off
 
 	local bestTellId, bestTellTime = nil, math.huge
 	tellTimer = math.max(0, tellTimer - dt)
@@ -1927,20 +1911,34 @@ local function scanSquirrels(dt)
 			if dist < 260 then
 				local dir = (dist > 1e-3) and toVec.Unit or rootPart.CFrame.LookVector
 				local closing = vel:Dot(dir)
-				if canCatch and dist <= effRadius and closing >= gate then
+				local v = RescueRules.eligibility(RES, {
+					mode = "predict",
+					phase = rescueState.phase,
+					state = m:GetAttribute("State"),
+					dist = dist,
+					closing = closing,
+					speed = speed,
+					glideSpeed = glide,
+					catchCount = catchCount,
+					carried = #riders,
+					inFlight = inFlight,
+					capacity = cap,
+				})
+				local within = v.dist <= v.radius
+				local fast = v.closing >= (v.gate or 0)
+				if canCatch and v.reason == "ok" then
 					if catch then triggerCrewCatch(m, closing) else triggerCatch(m, closing) end
 					canCatch = false
-					-- this trigger may have taken the LAST seat — recompute room so a second squirrel
+					-- this trigger may have taken the LAST seat — recompute in-flight so a second squirrel
 					-- scanned this same frame can't plant a no-payoff tell (red-team F4).
-					haveRoom = (#riders + (catch and 1 or 0) + #crewCatches) < (rescueState.capacity or RES.carryCapacity or 3)
-					roomForTell = roomForTell and haveRoom
-				elseif canCatch and dist <= effRadius and closing < gate then
+					inFlight = (catch and 1 or 0) + #crewCatches
+				elseif canCatch and v.reason == "tooSlow" then
 					-- SOFT-FAIL (Fable §D): you flew right through the sphere but weren't closing fast
 					-- enough — the squirrel waves "come back!" so the miss has a face, never silence.
 					softFailId = m:GetAttribute("SquirrelId")
 					softFailTimer = 1.3
-				elseif (not haveRoom or hopOff) and rescueState.phase == "active"
-					and dist <= effRadius and closing >= gate then
+				elseif (v.reason == "full" or (hopOff and rescueState.phase == "active"))
+					and within and fast then
 					-- FULL (or mid-hop-off): a REAL catch line (closing ≥ gate) flown with no room
 					-- aboard. This was total silence — Chad S35: "around 7 to 10 a lot of the catches
 					-- dont get counted". The squirrel waves "come back!" always; the HUD hint fires only
@@ -1957,11 +1955,12 @@ local function scanSquirrels(dt)
 					-- the SERVER doesn't share? (phantom-inflated #riders). Compare to the server carry.
 					if RES.catchDiag then
 						warn(string.format("[RescueDIAG-C] FULL-suppress: riders=%d inFlight=%d serverCarry=%s cap=%d",
-							#riders, inFlight, tostring(rescueState.carry), rescueState.capacity or RES.carryCapacity or 3))
+							#riders, inFlight, tostring(rescueState.carry), cap))
 					end
-				elseif roomForTell and closing >= gate then
-					local toSurface = math.max(0, dist - effRadius)
-					local tte = toSurface / math.max(closing, 1e-3)
+				elseif not hopOff and v.reason == "tooFar" and fast then
+					-- ROOM + active but not yet inside the sphere: plant the anticipation TELL.
+					local toSurface = math.max(0, v.dist - v.radius)
+					local tte = toSurface / math.max(v.closing, 1e-3)
 					if tte <= (RES.tellLeadTime or 0.4) and tte < bestTellTime then
 						bestTellTime = tte
 						bestTellId = m:GetAttribute("SquirrelId")
@@ -2111,7 +2110,7 @@ local function updateDeliver(dt)
 	-- active round (a buzzer-beater the server would reject must not run a zero-payout ceremony —
 	-- red-team R1; the riders just stay aboard into results).
 	if #riders <= 0 or deliverCooldown > 0 or catch or #crewCatches > 0 or hopOff
-		or (rescueState.phase ~= "active" and rescueState.phase ~= "grace") then return end   -- grace = buzzer window (Chad S38)
+		or not RescueRules.phaseAccepts(rescueState.phase).deliver then return end   -- grace = buzzer window (Chad S38)
 	local d = RES.deliverPos
 	local flat = Vector3.new(rootPart.Position.X - d.X, 0, rootPart.Position.Z - d.Z).Magnitude
 	if flat < (RES.deliverRadius or 70) and rootPart.Position.Y > (RES.deliverPadY or 250) - 50 then
