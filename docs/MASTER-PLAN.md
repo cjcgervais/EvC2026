@@ -192,6 +192,18 @@ cap unchanged; tree part count reviewed at C3 (art pass) with an explicit instan
   is a pure function (volume == 0 the frame effective flap is 0; monotone with throttle; dive
   fade applies); static check that no sample id is reused by ≥2 looped Sounds (the SFX_SWOOSH
   rule). DO NOT touch the shipped audio design — tests only. `[model: opus | gate: tests]`
+  ⚠️ **A5 RE-SCOPE (S41 finding — DEFERRED, do NOT build as written):** the "no sample id reused by ≥2 looped
+  Sounds" rule is WRONG for the shipped design — `flapSound` (`BirdController:1284`), `windSound` (`:1326`) and
+  `musicBed` (`:2192`) ALL intentionally share `SFX_SWOOSH` (musicBed pitched into a rumble bed). The flap-saga was
+  closed by the STATELESS PER-FRAME VOLUME PROJECTION (Chad-confirmed; memory: "don't reopen audio"), not unique
+  samples. A naive rule would red the approved design. The REAL invariant to test is "each looped SFX sound's Volume
+  is driven every frame and is never `:Stop()`-gated" (silence = arithmetic) — but that needs the projection
+  extracted to a pure fn (scope) or a careful source-scan, and must not pressure the shipped audio. Re-scope with
+  Chad before building; A5 is NOT a Phase-A exit blocker.
+- **A4-remainder note (S41):** the fox-class marker check is MOOT while the fox is shelved (A0 set
+  `activeMission="waterfall_meadow"`; the fox subsystem is inert). Bug-8 (deliver phase gate) is already covered by
+  A2's `phaseAccepts` regression test. Only a "results stamped exactly once" guard (bug 14) might still add value —
+  defer until a results-flow packet, not a Phase-A blocker.
 - **A6 — Tier 4.5 smoke boot. ✅ BUILT S41 (commit-ready) — but SCOPED DOWN by a hard tool limit.** Wired
   `run-in-roblox` v0.3.0 (`tools/Bootstrap-RunInRoblox.ps1`, pinned, `tools/bin/` gitignored) + `tests/smoke/boot.smoke.luau`
   + `tools/Smoke-Boot.ps1` (build → launch Studio headlessly → sentinel-gated, time-boxed, UNAVAILABLE-degrading) +
