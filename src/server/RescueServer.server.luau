@@ -28,6 +28,7 @@ local RunService        = game:GetService("RunService")   -- THE FOX (#15b): dri
 local GameConfig  = require(ReplicatedStorage:WaitForChild("GameConfig"))
 local BirdBuilder = require(ReplicatedStorage:WaitForChild("BirdBuilder"))
 local RescueRules = require(ReplicatedStorage:WaitForChild("RescueRules"))
+local FireGrid    = require(ReplicatedStorage:WaitForChild("FireGrid"))  -- THE FIRE (B1): pure fire-cell clock; driven per-round only in fire missions (inert otherwise)
 
 local R = GameConfig.Rescue
 if not (R and R.enabled) then
@@ -99,6 +100,14 @@ end
 local worldFolder
 local perchList = {}   -- array of { pos = Vector3, underCanopy = bool }
 local groveList = {}   -- THE FOX (#15b): grove centres, hoisted from buildWorld so the fox can target a grove
+-- THE FIRE (B1, Commit 2): per-round fire state + geometry, set only in a hazard.kind=="fire" mission (nil
+-- otherwise → the shipped round is byte-identical). fireGroveRadius is the round's grove radius (parallels
+-- groveList's centres 1:1) so FireGrid.new can build its {center,radius} grove records.
+local fireState = nil
+local fireGroveRadius = 130
+local fireSeeded = false            -- seedUpwind fires exactly ONCE per round (at igniteAt)
+local fireCutOffSeen = {}           -- [g] = true once we've reacted to grove g being cut off (diff latch)
+local fireGraceUntil = {}           -- [g] = round-elapsed time at which grove g's stranded squirrels get lifted
 
 -- `queryable=true` makes the part participate in the flight collision spherecast + the style/updraft
 -- proximity rays (a SOLID surface the eagle slides on, non-lethally). Visual-only parts stay CanQuery=false
@@ -192,12 +201,15 @@ end
 
 -- Build a tree at `pos` and seed a squirrel perch on it: a treetop perch on ~55% of trees, else a
 -- low under-canopy clearing perch nearby. Shared by grove trees (backdrop trees skip this = no perch).
-local function plantPerchTree(pos)
+-- THE FIRE (B1): `groveIndex` tags each perch with the grove it belongs to, so a fire cut-off can map
+-- grove→its stranded squirrels without a distance search (squirrel carries its perch → perch carries the
+-- grove). nil for pure backdrop trees (which never get perches anyway). Inert for non-fire missions.
+local function plantPerchTree(pos, groveIndex)
 	local crownY = buildTree(pos)
 	if rng:NextNumber() < 0.55 then
-		perchList[#perchList + 1] = { pos = Vector3.new(pos.X, crownY + 6, pos.Z), underCanopy = false }
+		perchList[#perchList + 1] = { pos = Vector3.new(pos.X, crownY + 6, pos.Z), underCanopy = false, groveIndex = groveIndex }
 	else
-		perchList[#perchList + 1] = { pos = Vector3.new(pos.X + (rng:NextNumber() - 0.5) * 40, 22 + rng:NextNumber() * 16, pos.Z + (rng:NextNumber() - 0.5) * 40), underCanopy = true }
+		perchList[#perchList + 1] = { pos = Vector3.new(pos.X + (rng:NextNumber() - 0.5) * 40, 22 + rng:NextNumber() * 16, pos.Z + (rng:NextNumber() - 0.5) * 40), underCanopy = true, groveIndex = groveIndex }
 	end
 end
 
@@ -261,15 +273,17 @@ local function buildWorld()
 		mound.CFrame = CFrame.new(den.X, 2, den.Z)
 	end
 
-	-- 2) Each grove = a tight cluster of perch-trees around its centre.
+	-- 2) Each grove = a tight cluster of perch-trees around its centre. THE FIRE (B1): tag each perch with
+	-- its grove index (gi) so cut-off can map grove→squirrels; also stash the grove radius for FireGrid.
+	fireGroveRadius = groveRad
 	local groveTrees = 0
-	for _, c in ipairs(groveCentres) do
+	for gi, c in ipairs(groveCentres) do
 		for _ = 1, perchPerGrove do
 			-- disc-uniform offset within groveRad
 			local a = rng:NextNumber() * math.pi * 2
 			local r = groveRad * math.sqrt(rng:NextNumber())
 			local pos = Vector3.new(c.X + math.cos(a) * r, 0, c.Z + math.sin(a) * r)
-			plantPerchTree(pos)
+			plantPerchTree(pos, gi)
 			groveTrees += 1
 		end
 	end
@@ -995,6 +1009,93 @@ local function stepFox(dt)
 	end
 end
 
+--------------------------------------------------------------------------------
+-- THE FIRE (B1, Commit 2) — wire the pure FireGrid clock into the round. INERT unless the active
+-- mission's hazard.kind=="fire" (waterfall_meadow stays byte-identical: none of this runs). Per-ROUND
+-- (unlike the fox's once-at-boot spawn) — the burn + wind reset each round. The fire is NON-LETHAL: a
+-- cut-off grove's still-stranded squirrels leave on the EXISTING Ranger Balloon (expireSquirrel, verbatim)
+-- after a short cutoffGraceS countdown. The wind is FICTIONAL — it NEVER touches FlightPhysics/WIND_BASE.
+--------------------------------------------------------------------------------
+
+-- Build the per-round fire state right after the squirrels populate. Called from startRound (fire missions
+-- only). A fresh random wind bearing per round reshapes the burn (replayability); groves come from the
+-- round's groveList centres + fireGroveRadius.
+local function initFire()
+	fireState = nil
+	fireSeeded = false
+	table.clear(fireCutOffSeen)
+	table.clear(fireGraceUntil)
+	local hz = mission.hazard or {}
+	if hz.kind ~= "fire" then return end   -- inert guard (belt-and-braces; caller also gates)
+
+	-- FICTIONAL wind bearing: a unit XZ direction from a per-round random angle. Shapes the burn ONLY —
+	-- never fed to FlightPhysics:SetWind / GameConfig WIND_BASE. The kernel is untouched.
+	local ang = rng:NextNumber() * math.pi * 2
+	local wind = Vector3.new(math.cos(ang), 0, math.sin(ang))
+
+	-- assemble the grove records {center, radius} from this round's centres (groveList) + radius.
+	local groves = {}
+	for _, c in ipairs(groveList) do
+		groves[#groves + 1] = { center = c, radius = fireGroveRadius }
+	end
+
+	fireState = FireGrid.new(GameConfig.Fire, rng:NextInteger(1, 2 ^ 30), wind, groves, R.deliverPos)
+end
+
+-- Balloon-lift every STILL-stranded squirrel that belongs to grove `g` (its perch's groveIndex). Reuses
+-- expireSquirrel VERBATIM (the Ranger Balloon — non-lethal; NEVER harms a squirrel).
+local function liftGroveSquirrels(g)
+	local ids = {}
+	for id, s in pairs(squirrels) do
+		if s.state == "stranded" and s.perch and s.perch.groveIndex == g then
+			ids[#ids + 1] = id
+		end
+	end
+	for _, id in ipairs(ids) do
+		expireSquirrel(id)
+	end
+end
+
+-- One fire tick from the round loop's 0.25s cadence. `elapsed` = seconds since the round went active.
+-- Steps the grid, seeds the upwind line ONCE at igniteAt, diffs newly-cut-off groves into a cutoffGraceS
+-- countdown, and (once a grace elapses) lifts that grove's stranded squirrels via the Ranger Balloon.
+local function stepFire(dt, elapsed)
+	if not fireState then return end
+	local hz = mission.hazard or {}
+
+	FireGrid.step(fireState, dt)
+
+	-- seed the burn ONCE when the round clock passes igniteAt (a calm opening before the clock starts).
+	if not fireSeeded and elapsed >= (hz.igniteAt or GameConfig.Fire.igniteAt or 10) then
+		fireSeeded = true
+		FireGrid.seedUpwind(fireState)
+	end
+
+	-- diff cut-off groves: a NEWLY cut-off grove starts a cutoffGraceS countdown; when it elapses, lift.
+	local cut = FireGrid.cutOffGroves(fireState)
+	local graceS = hz.cutoffGraceS or 8
+	for g, isCut in ipairs(cut) do
+		if isCut and not fireCutOffSeen[g] then
+			fireCutOffSeen[g] = true
+			fireGraceUntil[g] = elapsed + graceS   -- B2 will draw the warning ring during this window
+		end
+	end
+	for g, deadline in pairs(fireGraceUntil) do
+		if elapsed >= deadline then
+			fireGraceUntil[g] = nil
+			liftGroveSquirrels(g)
+		end
+	end
+end
+
+-- Per-round teardown (grace/results): drop the fire state so nothing steps between rounds.
+local function teardownFire()
+	fireState = nil
+	fireSeeded = false
+	table.clear(fireCutOffSeen)
+	table.clear(fireGraceUntil)
+end
+
 local triageBucket = 0
 local function RescueRoundLoop()
 	resolveMission()
@@ -1027,9 +1128,16 @@ local function RescueRoundLoop()
 		startRound()
 		triageBucket = 0
 		local triageStarted = false
+		-- THE FIRE (B1): build this round's fire state after the squirrels populate (fire missions only —
+		-- initFire self-gates on hazard.kind and leaves fireState nil otherwise → shipped round untouched).
+		local roundActive = RescueRules.phaseDuration(R, "active")
+		initFire()
 		while timeLeft > 0 do
 			local dt = task.wait(0.25)
 			timeLeft -= dt
+			-- THE FIRE (B1): step the burn from this same 0.25s tick. elapsed = seconds since round went
+			-- active (the fire seeds/cuts off on elapsed, not on the countdown clock). No-op if fireState nil.
+			if fireState then stepFire(dt, roundActive - timeLeft) end
 			-- TRIAGE: once inside the last `triageAt` seconds, a stranded squirrel is balloon-lifted
 			-- to safety every few seconds (fakes the fire cutting some off — Phase 1 replaces with the fire grid).
 			-- Driven by mission.hazard (kind "triage"); falls back to the shipped literals.
@@ -1063,6 +1171,7 @@ local function RescueRoundLoop()
 		-- window that still ACCEPTS delivers (and lets the ceremony play) before locking the scoreboard. There is
 		-- no rush to end the game. (timeLeft stays 0, so a grace deliver still lands its base perfect-ten factor.)
 		phase = "grace"
+		teardownFire()   -- THE FIRE (B1): drop the fire state at round end (per-round teardown; no-op if nil)
 		pushAll()
 		task.wait(RescueRules.phaseDuration(R, "grace"))
 

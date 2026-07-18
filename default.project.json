@@ -25,6 +25,9 @@
       },
       "RescueRules": {
         "$path": "src/shared/RescueRules.luau"
+      },
+      "FireGrid": {
+        "$path": "src/shared/FireGrid.luau"
       }
     },
 

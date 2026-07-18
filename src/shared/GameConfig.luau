@@ -1010,6 +1010,21 @@ GameConfig.Missions = {
 		placement = { groveCount = 4, perchPerGrove = 5, groveRadius = 130, groveMinGap = 520 },
 		verb      = nil,
 	},
+	-- EMBER VALLEY (packet B1, Commit 2) — the FIRE mission. hazard.kind="fire" swaps the fake triage
+	-- balloon-lift for the real FireGrid clock: a wind-driven burn sweeps the valley; when the fire ring
+	-- walls a grove off from safety (cut-off), a short cutoffGraceS countdown then lifts THAT grove's
+	-- still-stranded squirrels on the SAME Ranger Balloon (P3 non-lethal — no damage path, ever). The fire
+	-- wind is FICTIONAL (shapes the burn only); it NEVER touches FlightPhysics/WIND_BASE/the kernel. This
+	-- mission is INERT-by-default: activeMission STAYS "waterfall_meadow" → the shipped round is byte-identical.
+	-- Flip activeMission to "ember_valley" at Gate B to Play it. Same FLY/CATCH/deliver as waterfall_meadow
+	-- (P8: missions change how you FLY, never how you CATCH); only the hazard differs. All dials → GameConfig.Fire.
+	ember_valley = {
+		displayName = "Ember Valley",
+		hazard    = { kind = "fire", igniteAt = 10, cutoffGraceS = 8 },  -- igniteAt is backfilled from GameConfig.Fire below (Fire is defined after this table); the 10 here is just a same-typed placeholder
+		deliver   = { kind = "waterfall" },                                            -- same ride up the waterfall
+		placement = { groveCount = 4, perchPerGrove = 5, groveRadius = 130, groveMinGap = 520 }, -- same disc groves
+		verb      = nil,
+	},
 }
 
 -- FIRE-CELL GRID (packet B1, MASTER-PLAN §3.3 + docs/rescue-consults/B1-FireGrid-design.md §2).
@@ -1043,6 +1058,10 @@ GameConfig.Fire = {
 	cutoffCheckEvery= 4,       -- run the BFS cut-off check every N ticks (O(2916); cached between).
 	maxVisualBurning= 30,      -- B2 hard-cap: at most 30 BURNING cells get a flipbook+emitter+light.
 }
+
+-- Backfill ember_valley's fire ignite time from GameConfig.Fire (Fire is defined AFTER Missions, so the
+-- literal above could not reference it inline). Keeps the single source of truth: nudge Fire.igniteAt only.
+GameConfig.Missions.ember_valley.hazard.igniteAt = GameConfig.Fire.igniteAt
 
 GameConfig.Thermals = {
 	count = 8,
