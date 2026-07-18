@@ -37,6 +37,12 @@
       },
       "BounceFX": {
         "$path": "src/shared/BounceFX.luau"
+      },
+      "FeatherFX": {
+        "$path": "src/shared/FeatherFX.luau"
+      },
+      "FeatherBurst": {
+        "$path": "src/shared/FeatherBurst.luau"
       }
     },
 

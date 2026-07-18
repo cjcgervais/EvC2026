@@ -510,12 +510,16 @@ H.test("12: burningCells — ≤maxVisualBurning, all BURNING, newest-first", fu
 end)
 
 --------------------------------------------------------------------------------
--- #13 — inert pin: the shipped mission stays waterfall_meadow with hazard.kind "triage" (B1 changes
--- NOTHING at runtime; the fire mission wiring is Commit 2). This pins the byte-identical game.
+-- #13 — mission-selector integrity. (Was the B1 "inert pin" that froze activeMission to waterfall_meadow;
+-- superseded at Gate B when the FIRE mission (ember_valley) was intentionally activated — Chad "fire is
+-- gone?". The real bug this still guards: a typo'd/broken activeMission that resolveMission can't find, and
+-- a malformed mission data table.) So: activeMission must name a REAL mission, and both shipped missions
+-- keep their hazard contract.
 --------------------------------------------------------------------------------
-H.test("13: inert pin — waterfall_meadow hazard.kind is 'triage' (B1 changes no runtime)", function()
-	-- the mission selector lives on GameConfig.Rescue (GameConfig.luau:967, inside the Rescue table).
-	H.eq(R.activeMission, "waterfall_meadow", "active mission is still the shipped round")
-	local wm = GameConfig.Missions.waterfall_meadow
-	H.eq(wm.hazard.kind, "triage", "waterfall_meadow hazard is 'triage' (no fire consumer yet)")
+H.test("13: mission selector resolves + mission data is well-formed", function()
+	-- the mission selector lives on GameConfig.Rescue (inside the Rescue table).
+	H.ok(GameConfig.Missions[R.activeMission] ~= nil,
+		"activeMission '" .. tostring(R.activeMission) .. "' names a real GameConfig.Missions entry")
+	H.eq(GameConfig.Missions.waterfall_meadow.hazard.kind, "triage", "waterfall_meadow hazard is 'triage' (the fireless shipped round)")
+	H.eq(GameConfig.Missions.ember_valley.hazard.kind, "fire", "ember_valley hazard is 'fire' (the FIRE mission is wired)")
 end)

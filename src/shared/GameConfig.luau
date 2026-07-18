@@ -462,10 +462,12 @@ GameConfig.Combat = {
 		featherCrowDeath = 42,  -- a crow KILLED (the payoff burst — big cloud you can't miss)
 		featherStrike = 22,     -- a strike lands but doesn't kill (glancing puff)
 		featherRam    = 40,     -- a crow ram lands on the eagle (big burst = "you got hit")
-		featherSize   = 1.5,    -- stud size of each feather at spawn (shrinks over life); bigger = more visible
-		featherLifeMin = 1.0, featherLifeMax = 1.8,  -- s; feathers flutter-fall over this life
-		featherSpeed  = 26,     -- studs/s initial scatter speed
-		featherGravity = 26,    -- studs/s^2 downward accel so they settle instead of rocketing off
+		-- S41: the fx envelope is now the BRIEF IMPACT ACCENT (the "smack" scuff at contact instant).
+		-- The feathers are now discrete PARTS — GameConfig.Rescue.featherParts + FeatherBurst.
+		featherSize   = 1.6,    -- small scuff puff — the accent, not the read (feathers are parts now)
+		featherLifeMin = 0.4, featherLifeMax = 0.6,  -- s; a BLINK — the smack, gone before the feather ring peaks
+		featherSpeed  = 18,     -- studs/s; sharp fast opening — reads as impact, not a hang
+		featherGravity = 2,     -- irrelevant over 0.5s; near-zero
 		-- STRIKE ATTACK POSE (client, attribute-driven off Body StrikeActive/StrikeArmedDir; wing pose
 		-- only — never the physics Body root). Wings cup up/forward into a flare while a strike is armed.
 		strikePose        = true,
@@ -764,9 +766,30 @@ GameConfig.Rescue = {
 	                           -- bounce — so a sustained scrape fires once, not once per debounce tick.
 	dazeTime         = 2.0,    -- s the world-space dazed "stars" read hovers over the bird after a hard contact.
 	                           -- WAS 1.5 — too brief to read at flight camera distances.
-	bounceFeathers   = 36,     -- feather count in the contact poof (reuses burstFeathers; brown eagle feathers).
-	                           -- WAS 24 — bigger cartoon puff.
+	bounceFeathers   = 10,     -- IMPACT ACCENT dust-puff particle count (S41: the FEATHERS are now discrete
+	                           -- parts — GameConfig.Rescue.featherParts; this emitter is only the brief pale
+	                           -- "smack" scuff). WAS 44 (the brown-ball cloud, retired).
 	dazeStarCount    = 4,      -- little "stars" orbiting the bird's head during the daze (procedural gray-box).
+
+	-- FEATHER-PARTS RING (S41 — "a poof RING of FALLING feathers"). The old soft-sprite emitter
+	-- blended into a brown BALL 3×; discrete anchored PARTS make the blob structurally impossible.
+	-- Pooled, code-driven kinematics (FeatherBurst.step) — no Roblox physics bodies, presentation only.
+	-- Gated by tests/featherburst.spec.luau (ring / fall / flutter / persistence).
+	featherParts = {
+		count     = 12,    -- feathers per burst; 12 = one every 30° — reads DISCRETE, still a full ring.
+		poolMax   = 36,    -- 3 full bursts alive at once (life 3.0 / debounce 0.6); oldest is stolen after.
+		life      = 3.0,   -- s; Chad's 2.5-3.5 linger window — outlives the 2.0s daze so the aftermath hangs.
+		ringSpeed = 26,    -- studs/s radial; with drag 2.2 the ring opens to ~11 studs — reads at flight camera.
+		upSpeed   = 12,    -- studs/s pop; apex ~+2 studs at ~0.5s — burst UP first, then the fall reads.
+		gravity   = 14,    -- studs/s²; terminal sink 14/2.2 ≈ 6.4 studs/s — visibly FALLING, still feather-slow.
+		drag      = 2.2,   -- 1/s linear; arrests the radial burst in ~0.5s, sets the gentle sink.
+		swayAmp   = 1.2,   -- studs; tangential sinusoid amplitude — a leaf-flutter wander, not a plumb drop.
+		swayFreq  = 2.4,   -- Hz; ~2 Hz is the falling-leaf oscillation band the eye labels "flutter".
+		spinSpeed = 4.5,   -- rad/s max per euler axis; ~0.7 rev/s lazy TUMBLE (faster = spin-blur).
+		size      = Vector3.new(0.15, 2.4, 0.9), -- thin × long × vane; 2.4 long = the emitter size PROVEN
+		                                         -- readable at flight range; aspect 16:1 — never a ball.
+		holdFrac  = 0.75,  -- fully opaque for 75% of life, then linear fade to invisible at life's end.
+	},
 
 	-- THE CATCH TRIGGER (Fable §A). Any fast flyby through the sphere fires — no aiming, guaranteed.
 	-- S32 Chad playtest: "a little hard to snatch the squirrels" → BIGGER trigger + easier gate.
@@ -985,7 +1008,10 @@ GameConfig.Rescue = {
 	-- "waterfall_meadow" = the shipped behavior. Flip this ONE string to switch missions (e.g. to
 	-- "fox_on_the_hill" once THE FOX lands). Every mission field falls back to the current literal, so an
 	-- absent/malformed mission reproduces today's round exactly — the selector is inert by construction.
-	activeMission    = "waterfall_meadow",   -- A0 (S41): fox SHELVED (S39) → back to the shipped round; fox subsystem now fully inert.
+	activeMission    = "ember_valley",       -- GATE B (S41, Chad "fire is gone?"): flipped ON the FIRE mission — a
+	                                         -- wind-driven burn sweeps the valley (FireGrid clock + FireVisuals).
+	                                         -- resolveMission reads ONCE at boot → RESTART Play to load it.
+	                                         -- Revert to "waterfall_meadow" for the fireless shipped round.
 }
 
 -- ENVIRONMENT-VARIED MISSIONS (Packet-03 §4). One sacred loop (scan→dive→catch→deliver); the WORLD varies

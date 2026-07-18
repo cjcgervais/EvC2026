@@ -50,6 +50,8 @@ local BirdBuilder   = require(ReplicatedStorage:WaitForChild("BirdBuilder"))
 local BirdCollision = require(ReplicatedStorage:WaitForChild("BirdCollision"))
 local RescueRules   = require(ReplicatedStorage:WaitForChild("RescueRules"))
 local BounceFX      = require(ReplicatedStorage:WaitForChild("BounceFX"))     -- B3 terrain "oof" presentation (module — keeps BirdController under Luau's 200 module-local cap)
+local FeatherFX     = require(ReplicatedStorage:WaitForChild("FeatherFX"))    -- feather-burst emitter authoring (pure module → headless-gated by tests/featherfx.spec)
+local FeatherBurst  = require(ReplicatedStorage:WaitForChild("FeatherBurst")) -- discrete feather-parts ring (headless-gated by tests/featherburst.spec)
 
 local CAM = GameConfig.Camera
 
@@ -936,7 +938,6 @@ end
 -- built once and reused round-robin, so a 4-crow melee never allocates. Purely cosmetic — no gameplay,
 -- no kernel, no camera-law touch. Swap `FEATHER_TEXTURE` for a real feather decal when art lands.
 --------------------------------------------------------------------------------
-local FEATHER_TEXTURE = "rbxasset://textures/particles/smoke_main.dds" -- soft placeholder; replace w/ feather decal
 local featherPool   = {}     -- array of {part, emitter}
 local featherCursor = 0
 local FEATHER_POOL_N = 6
@@ -955,26 +956,7 @@ local function buildFeatherPool()
 		part.CanTouch = false
 		part.Locked = true
 		local em = Instance.new("ParticleEmitter")
-		em.Texture = FEATHER_TEXTURE
-		em.Rate = 0 -- burst-only, via :Emit
-		em.Lifetime = NumberRange.new((fx and fx.featherLifeMin) or 0.8, (fx and fx.featherLifeMax) or 1.4)
-		em.Speed = NumberRange.new(((fx and fx.featherSpeed) or 22) * 0.5, (fx and fx.featherSpeed) or 22)
-		em.SpreadAngle = Vector2.new(180, 180)
-		em.Acceleration = Vector3.new(0, -((fx and fx.featherGravity) or 30), 0) -- flutter-fall, don't rocket off
-		em.Drag = 4 -- air resistance so they slow and settle like real feathers
-		em.Rotation = NumberRange.new(0, 360)
-		em.RotSpeed = NumberRange.new(-200, 200)
-		local fsz = (fx and fx.featherSize) or 1.5
-		em.Size = NumberSequence.new({
-			NumberSequenceKeypoint.new(0, fsz),
-			NumberSequenceKeypoint.new(1, fsz * 0.25),
-		})
-		em.Transparency = NumberSequence.new({
-			NumberSequenceKeypoint.new(0, 0),    -- spawn fully opaque so the burst is unmissable
-			NumberSequenceKeypoint.new(0.75, 0.15),
-			NumberSequenceKeypoint.new(1, 1),
-		})
-		em.LightEmission = 0
+		FeatherFX.apply(em, fx)   -- all feather props live in the pure module (headless-gated by featherfx.spec)
 		em.Parent = part
 		part.Parent = workspace
 		featherPool[#featherPool + 1] = { part = part, emitter = em }
@@ -994,6 +976,58 @@ end
 
 local FEATHER_CROW  = Color3.fromRGB(28, 28, 34)   -- crow victim: near-black
 local FEATHER_EAGLE = Color3.fromRGB(96, 66, 40)   -- eagle victim: brown body feathers
+
+-- FEATHER-PARTS RING pool (S41 — "a poof RING of FALLING feathers").
+-- Presentation-only: anchored code-driven cosmetics, no kernel/camera/collision/flight touch.
+-- Pool pre-built once; each burst activates N slots from it; RenderStepped steps + writes CFrames.
+local FP = { pool = {}, cursor = 0, active = 0, folder = nil }
+
+function FP.build()
+	if FP.folder then return end
+	local cfg = GameConfig.Rescue and GameConfig.Rescue.featherParts
+	if not cfg then return end
+	FP.folder = Instance.new("Folder")
+	FP.folder.Name = "FeatherParts"
+	FP.folder.Parent = workspace
+	for i = 1, (cfg.poolMax or 36) do
+		FP.pool[i] = { part = FeatherBurst.buildFeather(FP.folder, cfg, i), state = nil, origin = nil }
+	end
+end
+
+function FP.burst(pos)
+	local cfg = GameConfig.Rescue and GameConfig.Rescue.featherParts
+	if not cfg then return end
+	FP.build()
+	for i = 1, cfg.count do
+		FP.cursor = (FP.cursor % #FP.pool) + 1
+		local slot = FP.pool[FP.cursor]
+		if not slot.state then FP.active = FP.active + 1 end  -- else: stealing the oldest, count unchanged
+		slot.state = FeatherBurst.spawnState(i, cfg.count, cfg)
+		slot.origin = pos
+		slot.part.CFrame = FeatherBurst.partCFrame(slot.state, pos)
+		slot.part.Transparency = 0
+	end
+end
+
+RunService.RenderStepped:Connect(function(dt)
+	if FP.active == 0 then return end
+	local cfg = GameConfig.Rescue and GameConfig.Rescue.featherParts
+	if not cfg then return end
+	for _, slot in ipairs(FP.pool) do
+		local st = slot.state
+		if st then
+			FeatherBurst.step(st, dt, cfg)
+			if st.age >= cfg.life then
+				slot.part.Transparency = 1
+				slot.state = nil
+				FP.active = FP.active - 1
+			else
+				slot.part.CFrame = FeatherBurst.partCFrame(st, slot.origin)
+				slot.part.Transparency = FeatherBurst.transparency(st, cfg)
+			end
+		end
+	end
+end)
 
 CombatFX.OnClientEvent:Connect(function(cause, position, victimTeam, _killed)
 	local fx = GameConfig.Combat and GameConfig.Combat.fx
@@ -2943,10 +2977,13 @@ local function onFlightStep(dt)
 	local headPos = rootPart and (rootPart.Position + rootPart.CFrame.UpVector * 5) or nil
 	local bounceHardness = BounceFX.step(dt, headPos, eligibleHit, preSlideVel, RES)
 	if bounceHardness and eligibleHit then
-		local nf = (RES and RES.bounceFeathers) or 24
+		local nf = (RES and RES.bounceFeathers) or 10
 		-- Poof OFF the surface along the hit normal so feathers aren't half-buried in terrain.
 		local poofPos = eligibleHit.Position + eligibleHit.Normal * 4
-		burstFeathers(poofPos, FEATHER_EAGLE, math.floor(nf * (0.6 + 0.4 * bounceHardness)))
+		-- The SMACK: a brief pale dust scuff at the contact instant (FeatherFX is the accent now)...
+		burstFeathers(poofPos, Color3.fromRGB(225, 214, 196), math.floor(nf * (0.6 + 0.4 * bounceHardness)))
+		-- ...and the AFTERMATH: the ring of discrete falling feathers (the read Chad asked for).
+		FP.burst(poofPos)
 	end
 
 	-- UPDRAFT line-riding score (legacy; disabled via config — SUPERSEDED by the rescue style meter).

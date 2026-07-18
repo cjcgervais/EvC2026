@@ -40,6 +40,8 @@ local MODULES = {
 	FireGrid      = "src/shared/FireGrid.luau",
 	FireVisuals   = "src/shared/FireVisuals.luau",
 	BounceRules   = "src/shared/BounceRules.luau",
+	FeatherFX     = "src/shared/FeatherFX.luau",
+	FeatherBurst  = "src/shared/FeatherBurst.luau",
 }
 
 -- Preload every source string (before any luau.load; fs yields).
