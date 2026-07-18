@@ -1012,6 +1012,38 @@ GameConfig.Missions = {
 	},
 }
 
+-- FIRE-CELL GRID (packet B1, MASTER-PLAN §3.3 + docs/rescue-consults/B1-FireGrid-design.md §2).
+-- The fire is the CLOCK made visible (P2 pressure, P3 non-lethal — there is NO damage path; a
+-- cut-off grove's squirrels leave by the EXISTING Ranger Balloon triage). Consumed by the PURE
+-- FireGrid.luau (server per-round in Commit 2; INERT in Commit 1 — nothing reads this yet). Every
+-- number is a §3.3 dial tuned by the headless SIM (tests/firegrid.spec.luau) BEFORE it renders.
+-- The wind vector is FICTIONAL (reshapes the burn per round = replayability with one number) and
+-- NEVER touches FlightPhysics SetWind/WIND_BASE — the flight kernel is untouched.
+GameConfig.Fire = {
+	cellSize        = 60,      -- studs per fire cell → 54×54 bounding grid over the r=1600 valley.
+	gridHalf        = 1620,    -- half-extent of the square cell grid (2·1620/60 = 54 cells/side).
+	tickHz          = 2,       -- fire ticks per second (server steps it from its 0.25s loop).
+	annulusInner    = 300,     -- burnable forest annulus inner radius (clear centre, no fire on the mesa)…
+	annulusOuter    = 1400,    -- …outer radius (≈1490 burnable cells; §3.3 band 1300-2000).
+	padClearRadius  = 400,     -- the top-of-waterfall safe pad (deliverPos ~1150,0) is SACRED — never burns.
+	smolderMin      = 15,      -- a cell smolders 15-25s (drawn from the LCG) before it BURNS…
+	smolderMax      = 25,
+	burnTime        = 20,      -- …then BURNS ~20s before going EMBER (inert). Spread is active SMOLDER→BURNING.
+	spreadP         = 0.045,   -- THE front-speed dial: E[neighbor-ignite delay]=1/(2·0.045)=11.1s → front ≈5.4 studs/s.
+	                           -- Kept at the derivation value; SIM front-speed mean 5.4 studs/s (§3.3 [4.8,6.2]).
+	crossFrac       = 0.50,    -- crosswind neighbor gets spreadP·crossFrac; downwind spreadP; upwind 0 (wind shapes the burn).
+	                           -- The REAL threat/cut-off lever is the ignition LINE width (seedArcDeg + seedCount), NOT lateral
+	                           -- spread — cranking crossFrac flattens the wind character into a growing blob (Fable B1 audit).
+	                           -- 0.50 keeps a 3:1 wind-elongated front (downwind ≫ crosswind, upwind 0).
+	seedCount       = 8,       -- ignition seeds spaced EVENLY across the upwind arc → a broad fire LINE the wind blows downwind
+	                           -- as a wall. 8 seeds over the 180° arc give grove-threat mean 0.40, cut-off mean ~3.8 (§3.3 band)
+	                           -- with front speed IN the [4.8,6.2] window — no band-widening (Fable B1 after-audit fix).
+	seedArcDeg      = 180,     -- the upwind arc (degrees) the ignition line spans; wider = a broader front, more of the valley lit.
+	igniteAt        = 10,      -- t≈10s into the round the seeds light (a calm opening before the clock starts).
+	cutoffCheckEvery= 4,       -- run the BFS cut-off check every N ticks (O(2916); cached between).
+	maxVisualBurning= 30,      -- B2 hard-cap: at most 30 BURNING cells get a flipbook+emitter+light.
+}
+
 GameConfig.Thermals = {
 	count = 8,
 	radius = meters(110),     -- ≈393 studs
