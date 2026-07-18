@@ -25,10 +25,16 @@ or talon animations."** All S41 work is **UNCOMMITTED, ASK-gated, ladder-green**
   It immediately caught a lune-vs-Studio discrepancy (see MASTER-PLAN A-FINDING). Live-runtime classes stay Tier 5 /
   a future Open Cloud packet. Run: `.\tools\Smoke-Boot.ps1` or `.\verify.ps1 -Smoke`.
 
-**▶ NEXT / for Chad:** the 30-sec confirm on "no squirrels" — `.\serve.ps1` → reconnect Rojo plugin → Play → Output
-should show `[Rescue] populated 15/15`. If present, it was stale build → approve the S39+S40+S41 commits and the loop
-runs A2 (RescueRules keystone, now de-risked). If `0/15`/absent, it's a real bug and the line says which. **Autonomous
-loop stands by at the A2 keystone; see MASTER-PLAN §4.**
+**▶ UPDATE (S41 cont.) — PHASE A ≈ COMPLETE → GATE A.** Chad committed the S39-41 batch (Play-confirmed
+`[Rescue] populated 15/15` — the "no squirrels" was a stale build) then said "keep going." The autonomous loop ran
+the whole **A2 RescueRules keystone** (A2.1 module+35-test suite incl. parity oracle · A2.2 server consumes · A2.3
+client consumes · A2.4 sticky-seat F3 fix) — each red-teamed CLEAR, Tier-4 35/35, real-engine smoke green, all
+committed on updraft (NOT pushed). Client+server now share ONE catch/score/seat/phase module; the two-authority
+gate-divergence bug factory is closed. **A3 (acquisition FSM) still queued; A4-remainder MOOT (fox shelved); A5 audio
+DEFERRED (specced rule conflicts w/ the intentional shared-SFX_SWOOSH design — re-scope, don't reopen audio).**
+**▶ NEXT = GATE A:** Chad flies ONE round to confirm nothing FEELS different (Phase A was behavior-preserving) + the
+F3 seat fix. The 10-point checklist is at the top of the current ledger block (`.loop/rescue-phase0/state.md`).
+After Gate A: push (if wanted) + Phase B (the fire round) or A3. Deferred-to-push per SOP.
 
 ---
 
