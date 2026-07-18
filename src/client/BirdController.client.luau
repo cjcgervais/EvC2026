@@ -1369,7 +1369,13 @@ local crewCheer = 0             -- s left of the whole-crew "we got one!" cheer 
 local crewCatches = {}          -- CREW CATCHES (Crew Catch v1): overlapping LIGHT catches that fire while
                                 -- the sacred `catch` is busy, so a fast chain never drops (no slow-mo). Each
                                 -- = { sq, t, airtime, startPos, contactDone }; converts to a rider on contact.
-local riders = {}               -- back-riders: array of { model = Model }
+local riders = {}               -- back-riders: array of { model = Model, seatIndex = number }
+-- F3 STICKY SEATS (A2.4): the set of seat indices currently claimed by a rider (or an in-flight catch
+-- climbing toward its seat). A rider's seat is assigned ONCE at catch (RescueRules.seatAssign) and stored
+-- on its record; nothing recomputes a seat from array position. seatRelease frees it on hop-off/trim so
+-- the pile no longer re-indexes ("pops") when a catch and a crew catch land out of order. Cleared wherever
+-- `riders` is emptied (releaseRiders / resetRescuePresentation).
+local seatOccupied = {}         -- { [seatIndex] = true }, caller-owned per the RescueRules seat contract
 local deliverCooldown = 0
 local perfectBonusShown = false -- once-per-round: the "TIME BONUS ×N — we'll count it at the END!" reveal fired
 
@@ -1608,7 +1614,17 @@ local function stepCatch(dt)
 		talonClench = tuck
 		if not catch.climbStarted then
 			catch.climbStarted = true
-			catch.seatIndex = #riders + 1          -- the seat this rider is climbing toward (stable: single catch slot)
+			-- F3 STICKY SEAT (A2.4): claim a fixed seat ONCE (lowest free), store it on the beat. It never
+			-- re-indexes from array position afterward. Eligibility already gated room, so full → fail safe
+			-- exactly as a full catch would (no seat, no rider, no climb).
+			local cap = rescueState.capacity or RES.carryCapacity or 3
+			catch.seatIndex = RescueRules.seatAssign(seatOccupied, cap)
+			if catch.seatIndex == nil then
+				if catch.sq then pcall(function() catch.sq:Destroy() end) end
+				catch = nil
+				return
+			end
+			seatOccupied[catch.seatIndex] = true
 			playWhip()                             -- doubles as the slow-mo snap-back whip (same timing as before)
 		end
 		if ct < climbDur and catch.sq and catch.sq.PrimaryPart then
@@ -1644,6 +1660,7 @@ local function stepCatch(dt)
 				look   = math.random() * math.pi * 2,
 				t      = 0,
 				settle = RIDER_HOP_DUR,          -- full settle-hop = a clear "landed!" beat
+				seatIndex = catch.seatIndex,     -- F3: carry the seat claimed at climb-start onto the rider
 			}
 			catch.sq = nil
 			catch = nil
@@ -1670,8 +1687,14 @@ local function triggerCrewCatch(sqModel, closing)
 	styleMeter = 0
 	tellId = nil
 	-- v2 (Chad S35 "should be squirrels"): the newb leaps for the BACK, where the crew catches it —
-	-- aim at the seat it's about to take (riders + everything already in flight ahead of it).
-	local seatIdx = #riders + (catch and 1 or 0) + #crewCatches + 1
+	-- aim at the seat it's about to take. F3 STICKY SEAT (A2.4): claim a fixed seat ONCE (lowest free) so
+	-- overlapping sacred+crew catches never share or shuffle a seat; store it on the crew-catch record and
+	-- carry it onto the rider at contact. Eligibility already gated room, so full → fail safe (drop it,
+	-- exactly as a full catch would today).
+	local cap = rescueState.capacity or RES.carryCapacity or 3
+	local seatIdx = RescueRules.seatAssign(seatOccupied, cap)
+	if seatIdx == nil then return end
+	seatOccupied[seatIdx] = true
 	crewCatches[#crewCatches + 1] = {
 		sq = buildPresentationSquirrel(color), t = 0, seatIndex = seatIdx,
 		airtime = RES.crewAirtime or 0.42, startPos = startPos, contactDone = false,
@@ -1719,6 +1742,7 @@ local function stepCrewCatches(dt)
 				riders[#riders + 1] = {
 					model = cc.sq, phase = math.random() * math.pi * 2,
 					look = math.random() * math.pi * 2, t = 0, settle = RIDER_HOP_DUR,
+					seatIndex = cc.seatIndex,          -- F3: carry the seat claimed at leap onto the rider
 				}
 				cc.sq = nil
 			end
@@ -1730,6 +1754,9 @@ end
 -- Destroy every in-flight crew-catch presentation squirrel + clear the list (teardown / reconcile).
 local function clearCrewCatches()
 	for _, cc in ipairs(crewCatches) do
+		-- F3 (A2.4): an in-flight crew catch claimed a seat at leap that never became a rider — free it so a
+		-- teardown mid-flight doesn't strand the seat. (A converted crew catch is already out of this list.)
+		if cc.seatIndex then RescueRules.seatRelease(seatOccupied, cc.seatIndex) end
 		if cc.sq then pcall(function() cc.sq:Destroy() end) end
 	end
 	crewCatches = {}
@@ -1774,7 +1801,10 @@ local function updateRiders(dt)
 			end
 			-- lift a grown rider by its extra half-height so it sits ON the back, not sunk into it.
 			local lift = (grown - 1) * ((m:GetAttribute("SquirrelScale") or 2.4) * 0.575)
-			local seat = seatCFrame(i)
+			-- F3 STICKY SEAT (A2.4): place at the STORED seat, never the array position `i` — so a rider
+			-- keeps its spot when another leaves (no seat "pop" on out-of-order catches). Fallback to `i`
+			-- guards any legacy rider that predates the seatIndex field.
+			local seat = seatCFrame(rider.seatIndex or i)
 				* CFrame.new(0, bob + hop + lift, 0)
 				* CFrame.Angles(br * RIDER_LEAN, look, br * RIDER_LEAN * 0.5)
 			m:PivotTo(seat)
@@ -1798,6 +1828,7 @@ local function releaseRiders()
 		end
 	end
 	riders = {}
+	seatOccupied = {}       -- F3 (A2.4): all seats freed with the pile (round/death/teardown reset)
 end
 
 -- Trim the newest riders until the local count matches an authoritative target (self-heals a phantom
@@ -1805,6 +1836,7 @@ end
 local function trimRidersTo(target)
 	while #riders > target do
 		local rider = table.remove(riders)
+		if rider and rider.seatIndex then RescueRules.seatRelease(seatOccupied, rider.seatIndex) end
 		if rider and rider.model then rider.model:Destroy() end
 	end
 end
@@ -2055,7 +2087,18 @@ local function stepHopOff(dt)
 	if hopOff.t < beat then return end
 	hopOff.t -= beat
 	hopOff.i += 1
-	local rider = table.remove(riders)               -- top of the pile leaves first
+	-- F3 (A2.4): "top of the pile" is the HIGHEST occupied seat, not just the last array slot — with sticky
+	-- seats the array order and seat order can differ. Remove that rider and RELEASE its seat.
+	local topSeat = RescueRules.highestOccupied(seatOccupied)
+	local rider = nil
+	for idx = #riders, 1, -1 do
+		if riders[idx].seatIndex == topSeat then
+			rider = table.remove(riders, idx)
+			break
+		end
+	end
+	if rider == nil then rider = table.remove(riders) end   -- fallback: legacy rider with no seatIndex
+	if rider and rider.seatIndex then RescueRules.seatRelease(seatOccupied, rider.seatIndex) end
 	if rider and rider.model and rider.model.PrimaryPart then
 		local m = rider.model
 		local side = (hopOff.i % 2 == 0) and 1 or -1   -- alternate dismount sides
@@ -2215,6 +2258,7 @@ local function updateRescue(dt)
 		hopOff = nil
 		clearCrewCatches()
 		if #riders > 0 then releaseRiders() end
+		seatOccupied = {}      -- F3 (A2.4): everything torn down → all seats free (covers a lone in-flight catch)
 		rescueCam.env = 0
 		slowmoDesat(0)
 		fadeMusic()
