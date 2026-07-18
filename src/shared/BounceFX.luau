@@ -28,6 +28,10 @@ local grazeGap = true     -- true once a graze-free frame has passed since the l
 local dazeT = 0           -- s of daze remaining (>0 while the halo shows).
 local gui = nil           -- the anchored world billboard (built once, reused).
 local stars = nil         -- the orbiting star labels.
+local oofLabel = nil      -- the "OOF!" TextLabel inside the billboard (built once, reused).
+-- TEMP [B3 oof] diagnostic locals (remove after Chad confirms the poof reads).
+local diagSince = 1e9     -- TEMP [B3 oof]: time since last contact print (starts "ready").
+local diagMax = 0         -- TEMP [B3 oof]: max closing seen since last print.
 
 -- Build (once) a small anchored world part carrying a BillboardGui of orbiting "star" labels. Reused each
 -- daze — never re-allocated. Cosmetic; anchored, no-collide, no-query — never affects physics.
@@ -45,8 +49,8 @@ local function buildGui(cfg)
 	anchor.Locked = true
 	local bb = Instance.new("BillboardGui")
 	bb.Name = "DazeStars"
-	bb.Size = UDim2.fromScale(6, 6)          -- world-space size (studs) — a small halo over the head.
-	bb.AlwaysOnTop = false
+	bb.Size = UDim2.fromScale(12, 12)        -- world-studs halo — big enough to read at flight camera distance.
+	bb.AlwaysOnTop = true                    -- never occluded by terrain/the bird body.
 	bb.LightInfluence = 0
 	bb.Parent = anchor
 	local built = {}
@@ -61,9 +65,24 @@ local function buildGui(cfg)
 		s.Parent = bb
 		built[i] = s
 	end
+	local oof = Instance.new("TextLabel")
+	oof.Name = "OofText"
+	oof.Size = UDim2.fromScale(0.9, 0.42)
+	oof.Position = UDim2.fromScale(0.5, 0.62)
+	oof.AnchorPoint = Vector2.new(0.5, 0.5)
+	oof.BackgroundTransparency = 1
+	oof.Text = "OOF!"
+	oof.Font = Enum.Font.FredokaOne
+	oof.TextScaled = true
+	oof.TextColor3 = Color3.fromRGB(255, 250, 200)
+	oof.TextStrokeColor3 = Color3.fromRGB(40, 25, 10)
+	oof.TextStrokeTransparency = 0
+	oof.Visible = false
+	oof.Parent = bb
 	anchor.Parent = workspace
 	gui = anchor
 	stars = built
+	oofLabel = oof
 end
 
 -- Advance the daze halo one frame: hover over the bird's head and spin/fade the stars. World-space only.
@@ -71,6 +90,7 @@ local function updateHalo(dt, birdPos, cfg)
 	if not gui then return end
 	if dazeT <= 0 then
 		for _, s in ipairs(stars or {}) do s.Visible = false end   -- hide, keep pooled.
+		if oofLabel then oofLabel.Visible = false end
 		return
 	end
 	dazeT = math.max(0, dazeT - dt)
@@ -85,6 +105,13 @@ local function updateHalo(dt, birdPos, cfg)
 		s.Position = UDim2.fromScale(0.5 + 0.35 * math.cos(ang), 0.35 + 0.18 * math.sin(ang * 2))
 		s.ImageTransparency = 1 - fade
 	end
+	-- "OOF!" pops for the first ~40% of the daze, then the stars carry the rest.
+	if oofLabel then
+		local elapsed = total - dazeT
+		local show = elapsed < total * 0.4
+		oofLabel.Visible = show
+		if show then oofLabel.TextTransparency = math.clamp(elapsed / (total * 0.4), 0, 1) * 0.6 end
+	end
 end
 
 -- The per-frame entry point. Advances cooldown + the daze halo, and runs the hard-contact gate.
@@ -97,6 +124,7 @@ end
 -- Returns the impact hardness in [0,1] on the frame a bounce FIRES (the caller does the feather poof),
 -- else nil. Never mutates flight/camera/input.
 function BounceFX.step(dt, birdPos, hitInfo, preSlideVel, cfg)
+	diagSince = diagSince + dt   -- TEMP [B3 oof] diagnostic: advance rate-limit timer.
 	if cooldown > 0 then cooldown = math.max(0, cooldown - dt) end
 	updateHalo(dt, birdPos, cfg)
 	if not hitInfo then
@@ -107,7 +135,17 @@ function BounceFX.step(dt, birdPos, hitInfo, preSlideVel, cfg)
 	-- uses for its lethal gate). Read the PRE-slide velocity (the slide already stripped the into-surface part).
 	local closing = BounceRules.closingSpeed(preSlideVel, hitInfo.Normal)
 	local minSpd = (cfg and cfg.bounceMinSpeed) or 55
-	if not BounceRules.shouldBounce(closing, minSpd, cooldown, grazeGap) then
+	local fired = BounceRules.shouldBounce(closing, minSpd, cooldown, grazeGap)
+	-- TEMP [B3 oof] DIAGNOSTIC (remove after Chad confirms the poof reads): prints once per second max
+	-- during a sustained slide, and always on a fire — converts the next Play into evidence.
+	diagMax = math.max(diagMax, closing)
+	if fired or diagSince >= 1.0 then
+		print(string.format("[B3 oof] terrain hit closing=%.1f (peak %.1f) minSpeed=%.0f cooldown=%.2f gap=%s fired=%s",
+			closing, diagMax, minSpd, cooldown, tostring(grazeGap), tostring(fired)))
+		diagSince = 0
+		diagMax = 0
+	end
+	if not fired then
 		return nil
 	end
 	buildGui(cfg)

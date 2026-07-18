@@ -2944,7 +2944,9 @@ local function onFlightStep(dt)
 	local bounceHardness = BounceFX.step(dt, headPos, eligibleHit, preSlideVel, RES)
 	if bounceHardness and eligibleHit then
 		local nf = (RES and RES.bounceFeathers) or 24
-		burstFeathers(eligibleHit.Position, FEATHER_EAGLE, math.floor(nf * (0.6 + 0.4 * bounceHardness)))
+		-- Poof OFF the surface along the hit normal so feathers aren't half-buried in terrain.
+		local poofPos = eligibleHit.Position + eligibleHit.Normal * 4
+		burstFeathers(poofPos, FEATHER_EAGLE, math.floor(nf * (0.6 + 0.4 * bounceHardness)))
 	end
 
 	-- UPDRAFT line-riding score (legacy; disabled via config — SUPERSEDED by the rescue style meter).

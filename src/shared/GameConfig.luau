@@ -755,12 +755,17 @@ GameConfig.Rescue = {
 	-- brush is ~0 and skips, a boom-and-zoom faceplant is large. Only the POSSESSED eagle shows this, and
 	-- only while nonLethalTerrain is on (inert otherwise). Fires the shared feather pool (no new particle sys).
 	bounceEnabled    = true,   -- master switch for the bounce presentation (false → silent slide, as before).
-	bounceMinSpeed   = 55,     -- studs/s of into-surface closing speed to trigger the "oof" (below = quiet graze).
+	bounceMinSpeed   = 28,     -- studs/s of into-surface closing speed to trigger the "oof". WAS 55 — at cruise (~130)
+	                           -- only a >25° near-faceplant cleared it, so real rescue skims NEVER fired. 28
+	                           -- fires a 15-20° cruise contact (~34-44 closing) while a gentle <12° skim or a
+	                           -- slow careful touch (~60 speed) stays a quiet graze. PLAYTEST-PROVISIONAL.
 	bounceDebounce   = 0.6,    -- s cooldown so sliding along a slope doesn't machine-gun the FX every frame.
 	                           -- ALSO requires the eagle to have left terrain (a graze-free frame) since the last
 	                           -- bounce — so a sustained scrape fires once, not once per debounce tick.
-	dazeTime         = 1.5,    -- s the world-space dazed "stars" read hovers over the bird after a hard contact.
-	bounceFeathers   = 24,     -- feather count in the contact poof (reuses burstFeathers; brown eagle feathers).
+	dazeTime         = 2.0,    -- s the world-space dazed "stars" read hovers over the bird after a hard contact.
+	                           -- WAS 1.5 — too brief to read at flight camera distances.
+	bounceFeathers   = 36,     -- feather count in the contact poof (reuses burstFeathers; brown eagle feathers).
+	                           -- WAS 24 — bigger cartoon puff.
 	dazeStarCount    = 4,      -- little "stars" orbiting the bird's head during the daze (procedural gray-box).
 
 	-- THE CATCH TRIGGER (Fable §A). Any fast flyby through the sphere fires — no aiming, guaranteed.
