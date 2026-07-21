@@ -1204,11 +1204,18 @@ GameConfig.Fire = {
 	roarPitch       = 0.85,    -- a shade below source pitch = bigger/deeper fire.
 	-- ⚠️ ASSET IDS ARE THE ONE THING NO HEADLESS GATE CAN VERIFY. Roblox's 2022 audio-privacy change
 	-- privated the vast majority of pre-2022 third-party audio and new uploads default to private, so a
-	-- web-sourced id is a COIN FLIP. These are CANDIDATES, tried in order; the client prints a one-glance
-	-- verdict per id ("[FireAudio] roar asset i/n loaded" or "FAILED … trying next") and a loud warning if
-	-- every one fails. THE 30-SECOND FIX if they all fail: Studio → Toolbox → Audio → search "fire" →
-	-- right-click an asset → Copy Asset ID → paste it FIRST in this list. Nothing else changes.
-	roarAssetIds    = { 9046850948, 4604808051, 1836383941 },
+	-- web-sourced id is a COIN FLIP. The client walks this list in order and prints a one-glance verdict
+	-- per id, so a dead id costs a line in Output instead of a wasted test flight.
+	-- ── S43 STUDIO RESULT (Chad's first Play) — the chain is why there is any sound at all: ──
+	--   9046850948 → "Asset type does not match requested type" (not audio at all — a bad pick)
+	--   4604808051 → "Asset is not approved for the requester" (the 2022 purge, as predicted)
+	--   1836383941 → LOADED ✅ — the OLDEST id, the one both I and the red-teamer called most likely
+	--                dead. The lesson: age does not predict liveness, so never trim a chain on a guess.
+	-- The two dead ids are recorded above rather than kept in the list: retrying a PROVEN-dead id buys
+	-- nothing and costs ~1.4s of failed preloads plus two red Studio errors every single session.
+	-- IF THIS ONE EVER DIES: Studio → Toolbox → Audio → search "fire" → Copy Asset ID → paste it FIRST
+	-- here → Stop and re-Play (the chain is walked once per session).
+	roarAssetIds    = { 1836383941 },
 }
 
 -- Backfill ember_valley's fire ignite time from GameConfig.Fire (Fire is defined AFTER Missions, so the
