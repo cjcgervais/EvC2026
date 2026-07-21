@@ -72,11 +72,28 @@ death window and be correct after respawn (this is the red-team BLOCK that was f
 toggle Space free-look: the roar should stay steady (it is bird-anchored on purpose — camera-anchoring would
 warble it as you pan).
 
+- **⑥ B5 + B5a (after Chad's "we can worry about sounds later, lets build"):** the **squeak layer** is
+  built and gated (cadence keyed to Stage-3a Danger — calm 7s / worried 3s / panic 1.2s, so the EAR learns
+  triage like the eye) but **silent: `Rescue.squeakAssetIds` is empty**. **THE SAVED CROWD is LIVE**
+  (`Rescue.savedCrowd=true`): delivered squirrels now stay on the meadow, arriving one per hop-beat with a
+  gold pop, cheering for ~2s — "the crowd IS the scoreboard". Before this a delivered squirrel was
+  `:Destroy()`ed and the whole effort evaporated.
+- **⚠️ AUDIO IS PARKED, DELIBERATELY.** Three web-sourced fire ids failed three different ways — wrong asset
+  type, privated by the 2022 purge, and one that loaded perfectly and turned out to be **music** (Chad: *"I
+  didn't really hear fire, I heard music"*). A load gate proves an asset RESOLVES, never that it is the right
+  SOUND, so **both id lists are empty on purpose** and the next id must come from someone who can PREVIEW it
+  (Studio → Toolbox → Audio). Chad's *"didn't hear any squirrels"* was NOT a bug — squeaks were simply
+  unbuilt. Both mechanisms are done and gated; they go live the moment an id exists.
+
 **▶ TWO THINGS ARE WAITING ON CHAD (nothing else is blocked):**
 1. **The Play** — Stage 3a + 3c are LIVE and unflown (checklist above). His verdict also decides whether Stage
    **3b** (world-dims-orange) is built or **CUT**: it is the only Stage-3 channel that can fight the legibility
    Stage 1+2 won, so if he reports the pressure already lands, that global-Lighting risk is never spent.
-2. **DRAG or TAP** — the one B7 question. *On a phone, should your finger MOVE the cursor ring (DRAG, the
+2. **A PREVIEWED SOUND ID** (or two): a fire crackle for `Fire.roarAssetIds` and/or a squirrel squeak for
+   `Rescue.squeakAssetIds`. Preview it in the Toolbox, copy the id, paste it first in the list, Stop and
+   re-Play. Both loaders print a per-id verdict, and the squeak one now REJECTS anything over 3s as
+   "ambience or music, not a squeak".
+3. **DRAG or TAP** — the one B7 question. *On a phone, should your finger MOVE the cursor ring (DRAG, the
    recommendation — P1 is already built for it) or PLACE it (TAP)?* His one word decides whether B7-P2's
    one-line seam ships the built adapter or a tap variant. **Nothing past P2 gets built until he flies it.**
 
