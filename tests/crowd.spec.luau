@@ -116,6 +116,20 @@ H.test("crowd: capacity covers crowdMax, and the count is clamped + deterministi
 	end
 end)
 
-H.test("B5a ships INERT: Rescue.savedCrowd is false (identity default = today's round)", function()
-	H.eq(R.savedCrowd, false, "savedCrowd must ship false — the crowd is a Chad-flown read, one line to enable")
+H.test("B5a: the savedCrowd gate exists as a real one-line revert", function()
+	-- S43 flipped this LIVE for Chad's flight (the S41 flameStyle pattern: headless-gate the read, then
+	-- hand him a working result instead of a flag to hunt for). So this pins the GATE, not a value —
+	-- a test asserting "false" would fail the moment the feature was handed over, which is the same
+	-- inverted-gate mistake the squeak asset-list assert made.
+	H.eq(type(R.savedCrowd), "boolean", "the one-line revert gate exists and is a boolean")
+	-- and the layout is PURE: the gate can only stop the crowd being rendered, never move a seat.
+	local saved = R.savedCrowd
+	local a = Crowd.layout(R, 7)
+	R.savedCrowd = not saved
+	local b = Crowd.layout(R, 7)
+	R.savedCrowd = saved
+	for i = 1, 7 do
+		H.eq(a[i].dx, b[i].dx, "seat " .. i .. " must not depend on the gate")
+		H.eq(a[i].dz, b[i].dz, "seat " .. i .. " must not depend on the gate")
+	end
 end)

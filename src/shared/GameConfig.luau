@@ -926,7 +926,9 @@ GameConfig.Rescue = {
 	-- QUARANTINE (load-bearing): crowd members get NO halo, NO chevron and NO hops. Those three ARE
 	-- the certified Stage-1 "this critter needs you" signal — a saved squirrel wearing them would bait
 	-- a rescue read at the one place on the map where nobody needs rescuing.
-	savedCrowd        = false, -- INERT (identity default = today's round, byte-identical). One line to fly it.
+	savedCrowd        = true,  -- S43 LIVE for Chad's flight (the S41 pattern: headless-gate it, then hand
+	                           -- him a WORKING result rather than a flag to find). false = byte-identical
+	                           -- to the pre-B5a round; the kill switch also tears an existing crowd down.
 	crowdMax          = 24,    -- ~2 good rounds of individuals. Overflow stops adding MODELS (honest
 	                           -- session-scale ceiling); C1/C2 persistence makes the Den the long-term home.
 	crowdRadiusMin    = 45,    -- studs from deliverPos: inside this is the landing pad itself — keep clear.
