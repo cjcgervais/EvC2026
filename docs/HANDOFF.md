@@ -4,6 +4,60 @@ Read this first. It tells the next agent exactly where the project stands, the o
 
 ---
 
+## ▶▶ S43 (2026-07-21) — 🧰 SHORE-UP (perf envelope pinned + fire tick 4× cheaper) · 🐿️🔥 STAGE 3a FEAR is LIVE
+
+**Two loop items, both red-teamed, both committed on `updraft` (NOT pushed — push stays ASK-gated).**
+Worked Chad's S42 directive #4 order literally: shore up FIRST, then the next kid-legibility stage.
+
+- **① The §3.4 perf envelope is now MACHINE-PINNED** (`tests/perf.spec.luau`, 4 gates) with the LIVE
+  flicker/plume config — the thing S41 changed and nothing measured: **~1160 alive particles** (rail 1600),
+  **30 lights / 0 shadow-casting** (the biggest low-end + mobile cliff, directive #3), **zero per-sync
+  allocation** (257→257 instances over 100 syncs). Timing is REPORTED, never asserted (Lune ≠ Roblox VM;
+  a timing assert would be a flake factory).
+- **② It immediately found a real breach and it got fixed:** worst `FireGrid.step` **4.37ms** vs the ≤1.5ms
+  budget. Attributed (`recomputeCutOff` 1.745ms + a per-tick full-grid reach sweep), then three
+  behavior-preserving edits → **recomputeCutOff 5.7× faster, worst step 4.37 → 1.1-2.0ms, mean 0.602 →
+  ~0.30ms.** Honest framing: Lune numbers scatter run-to-run, so this is a ~4× worst-case REDUCTION, not a
+  proven "inside 1.5ms" — that verdict is Roblox-side with `Fire.perfDiag=true`.
+  **Equivalence PROVEN:** my digest (5 seeds × 2 winds × 240 ticks) and the red-teamer's stronger independent
+  harness (full state after EVERY tick, 18 rounds × 300 ticks + zero-grove + BFS-hammered probes) both found
+  **0 mismatches**. LCG bit-identical ⇒ the burn, and so balance, is bit-identical.
+- **③ STAGE 3a — the critter's own FEAR is LIVE** (`Fire.urgencyTells=true`; false from boot = byte-identical
+  round). Server stamps `Danger` 0/1/2 from `FireGrid.dangerAt`; the client renders it in **Stage 1's
+  already-certified vocabulary** — pose ×2.2/×3.4, harder+faster hops, halo flash + fire-red at PANIC while
+  the **chevron keeps its rarity hue** (urgency and triage-by-value stay on separate channels). Danger measures
+  distance to any **non-GREEN** cell, so escalation is **monotone BY CONSTRUCTION**. The plant tell outranks
+  fear in the ladder — the sacred anticipation beat is protected structurally.
+- **Red-team on 3a found the good stuff:** a mutation attack (BURNING-only) turns 3 of 4 gates red, so they
+  have teeth; and its Medium caught that my fear-leads-loss test probed the grove CENTRE while the game stamps
+  at PERCH positions — the easy case, flattering the number. Hardened to the worst-case perch + a min-lead
+  floor: **96/96 groves panicked first, mean 23.0s (was a flattering 40.7s), MIN 4s.**
+- **Ladder: Tier-4 113/113 · rojo PASS · luau-lsp 0 NEW · selene UNAVAILABLE(404).** `updraft` is up to date
+  with origin apart from this session's 3 commits (the older "~20 unpushed" note was stale).
+
+**▶ CHAD'S PLAY (only he can judge this):** fly `ember_valley`.
+① **The Stage-3a read:** as the fire closes on a grove, do the squirrels *scare you into re-routing* — does a
+red flashing, frantically-hopping critter say "GET HIM FIRST" without you thinking about it? (Design gate:
+"did you change your route to grab the panicking one first — without thinking?")
+② **The disclosed tradeoff:** late-round, MANY halos go red at once — can you still tell a rare (gold/rainbow
+chevron) from a common at scan altitude, or did the red wash out triage-by-value? If so the fix is small
+(fear on the chevron's *pulse* instead of the halo's *hue*).
+③ **The plant tell at PANIC** now flares tell-bright but RED — does the "about to catch" beat still read?
+④ **Smoke (perf, behavior-preserving):** set `Fire.perfDiag=true` — fire seeds ~10s, the wall sweeps downwind,
+a cut-off grove rings then balloon-lifts ~8s later, `[Fire] tick … ms=` stays sub-ms. **Any behavioral
+difference at all in the burn = revert** (the perf change claims bit-identity).
+
+**▶ NEXT (unchanged order, minus what S43 did):** Stage **3c** fire roar/crackle + ignition whoomp (pre-designed
+by Fable: one looping Sound, Volume = stateless per-frame function of distance to the nearest replicated marker,
+S37/S38 architecture; gate `Fire.fireAudio`; the un-headless-verifiable part is the ASSET IDs — pin known-good
+ones before the flight) → Stage **3b** world-dims-orange **LAST and a CANDIDATE FOR CUT** (it is the only
+channel that can fight the legibility Stage 1+2 won; if Chad reports pressure already lands, the global-Lighting
+risk never needs spending) → **B5** leap variety + saved-crowd + squirrel squeak SFX → **B7** Fable touch-design
+consult → **B4** canopy collision + trails → **PHASE C: C1 persistence + level track** (Chad's "levels unlock"
+requirement) → C2 The Den → C2.5 critter casts (frogs) → C3 art pass.
+
+---
+
 ## ▶▶ S42 (2026-07-21) — 🎉 THE FUN VERDICT: kid-legibility Stage 1+2 PASSED · road-ahead directives logged
 
 **Chad flew the S41 kid-legibility build (halo critters + fire-reads-as-fire, live on `updraft` uncommitted)
