@@ -879,6 +879,67 @@ GameConfig.Rescue = {
 	dangerHopFreqMult = 1.5,   -- STAGE 3a: hop-frequency × at Danger 2 only. 2 → 3 hops/s: frightened =
 	                           -- faster and smaller-feeling, still under the ~4 Hz vibration band.
 
+	-- ── B5 SQUIRREL SQUEAKS (Chad S42 #2: "little squirrel sounds and music even the better"). ──
+	-- Discrete one-shots (NOT a loop — the stateless-projection law is for sustained sounds). Volume,
+	-- cadence AND the whole schedule (stagger, stale-reseed, per-frame budget, jitter floor, pitch) are
+	-- pure functions in RescueRules, so the anti-chirp-storm rails are headlessly gated rather than
+	-- asserted in a comment — the first draft kept the rate machinery inline and a mutation deleting the
+	-- per-frame cap passed the entire suite. The cadence keys
+	-- off the Stage-3a Danger level, so the EAR learns triage the same way the eye does: a panicking
+	-- squirrel calls out ~6× more often than a calm one. Doubles as a LOCATOR — you can hear a critter
+	-- you have not spotted yet, which is the kid-floor gift.
+	squeakAudio       = true,  -- LIVE, but inert until squeakAssetIds has a working id (see below).
+	squeakHearR       = 260,   -- studs: silent at/beyond. Roughly the halo's legibility range, so ear
+	                           -- and eye acquire a squirrel at about the same moment.
+	squeakFullR       = 60,    -- studs: full volume at/inside (about one scoop-approach out).
+	squeakMaxVol      = 0.5,   -- a small animal is not loud. NOTE the live flapVolBase is 1.6 (Chad S38
+	                           -- "LOUDER again"), so this is an ABSOLUTE ceiling, not a ratio — the spec
+	                           -- pins it absolutely because a relative gate compared against 1.6 was
+	                           -- toothless and let a squeak-as-loud-as-the-wingbeat mutation pass.
+	squeakIntervalCalm    = 7.0, -- s between chirps at Danger 0 — sparse: a living wood, not a mob.
+	squeakIntervalWorried = 3.0, -- Danger 1.
+	squeakIntervalPanic   = 1.2, -- Danger 2 — insistent, still short of a machine-gun chirp.
+	squeakJitter      = 0.35,  -- ± fraction of the interval, derived deterministically from SquirrelId +
+	                           -- time so 15 squirrels never chirp in unison (no math.random in FX).
+	squeakPitchSpread = 0.22,  -- ± playback-speed spread by SquirrelId: individuals, not clones.
+	squeakPitchDanger = 0.18,  -- extra playback speed at Danger 2 — fear raises a small animal's pitch.
+	squeakMaxPerFrame = 2,     -- hard cap on simultaneous starts, so a grove going up can never burst.
+	squeakMinInterval = 0.6,   -- absolute floor between one squirrel's chirps, so even a mis-set jitter
+	                           -- (>1 would drive the interval to zero) cannot produce a machine gun.
+	squeakMaxLen      = 3,     -- s: an asset longer than this is ambience/music, not a squeak — the
+	                           -- resolver REJECTS it. Loadability is not plausibility (the S43 fire-id
+	                           -- lesson: a wrong-content asset loads perfectly and lies).
+	-- ⚠️ EMPTY BY DESIGN — see Fire.roarAssetIds for the full post-mortem. Three web-sourced fire ids
+	-- failed three different ways (wrong type / privated / turned out to be MUSIC), which is why an id
+	-- must come from someone who can PREVIEW it. Built-in rbxasset:// sounds are moderation-immune (see
+	-- the S36 note by SFX_SWOOSH in BirdController) but none of them is an animal.
+	-- TO FILL IT: Studio → Toolbox → Marketplace → Audio → search "squirrel" / "chipmunk squeak" /
+	-- "mouse chirp" → PREVIEW → Copy Asset ID → paste below → Stop and re-Play.
+	squeakAssetIds    = { },
+
+	-- ── B5a THE SAVED CROWD — "the crowd IS the scoreboard" (bible P4; Fable S43 consult). ──
+	-- Delivered squirrels currently get :Destroy()ed, so the whole rescue effort evaporates. Instead
+	-- they persist as a growing crowd on the safe meadow: a five-year-old reads their score with zero
+	-- numerals, and a skilled pilot's meadow visibly fills faster. Seat i depends ONLY on i, so the
+	-- crowd ACCRETES — nobody ever relocates when it grows (a reshuffling crowd reads as a flock
+	-- milling about, not as a record of what you did).
+	-- QUARANTINE (load-bearing): crowd members get NO halo, NO chevron and NO hops. Those three ARE
+	-- the certified Stage-1 "this critter needs you" signal — a saved squirrel wearing them would bait
+	-- a rescue read at the one place on the map where nobody needs rescuing.
+	savedCrowd        = false, -- INERT (identity default = today's round, byte-identical). One line to fly it.
+	crowdMax          = 24,    -- ~2 good rounds of individuals. Overflow stops adding MODELS (honest
+	                           -- session-scale ceiling); C1/C2 persistence makes the Den the long-term home.
+	crowdRadiusMin    = 45,    -- studs from deliverPos: inside this is the landing pad itself — keep clear.
+	crowdRadiusMax    = 85,    -- …and outside this they are too far to read as a crowd from the pad.
+	crowdRingGap      = 12,    -- radial spacing between seat rings.
+	crowdSlotSpacing  = 13,    -- target arc spacing between seats in a ring. With the ring gap this makes
+	                           -- minimum separation STRUCTURAL — the anti-brown-blob rail (S41 feather lesson).
+	crowdExcludeDeg   = 120,   -- total wedge (±60°) kept clear around the climb-out bearing…
+	crowdExcludeBearingDeg = 180, -- …which is the waterfall/updraft side (−X). Crowd is dead ahead as you
+	                           -- crest the falls, never in the climb-out line, never over the pad.
+	crowdScale        = 4.0,   -- BuildSquirrel scale for a crowd member (below the 5.5 stranded scale:
+	                           -- present, but never mistaken for the critter you are flying at).
+
 	-- CLIENT SLOW-MO PRESENTATION (Fable §B) — dilates anim/FX/audio/camera ONLY; the sim runs real-time.
 	slowmoScale      = 0.25,   -- presentation timescale during the catch window.
 	slowmoEaseIn     = 0.11,   -- s; fast attack into slow-mo.

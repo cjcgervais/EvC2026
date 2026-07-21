@@ -435,4 +435,98 @@ function RescueRules.fireRoarVolume(cfg, dist)
 	return maxVol * t ^ (cfg.roarGamma or 1.5)
 end
 
+--------------------------------------------------------------------------------
+-- B5 — SQUIRREL SQUEAKS (Chad S42 directive #2: "little squirrel sounds and music even the better").
+-- Two pure curves so the FEEL envelope is headless-gateable before anyone hears it (the S41 FX
+-- feel-gate rule: verify the MOTION/ENVELOPE, not the pixels or the waveform).
+--
+-- Unlike the fire roar, a squeak is a DISCRETE one-shot, not a continuous loop — so the stateless
+-- projection law does not apply and cannot be faked. The "sound that won't stop" class is impossible
+-- here by construction anyway: a one-shot has no sustain to leak. What must be bounded instead is the
+-- RATE (never a chirp-storm) and the RANGE (a squirrel you cannot see must not be shouting in your ear).
+--------------------------------------------------------------------------------
+
+-- Volume by distance: silent at/beyond squeakHearR, full at/inside squeakFullR, linear between.
+-- Deliberately gentler than the fire roar's gamma swell: a squeak is a LOCATOR, so it should fade in
+-- early and evenly enough to steer by, rather than staying quiet until you have already committed.
+function RescueRules.squeakVolume(cfg, dist)
+	cfg = cfg or {}
+	local hearR = cfg.squeakHearR or 260
+	local fullR = cfg.squeakFullR or 60
+	local maxVol = cfg.squeakMaxVol or 0.5
+	if not dist or dist ~= dist or dist >= hearR then
+		return 0
+	end
+	if dist <= fullR then
+		return maxVol
+	end
+	return maxVol * ((hearR - dist) / math.max(1e-3, hearR - fullR))
+end
+
+-- Seconds between one squirrel's squeaks, by its Stage-3a Danger level. STRICTLY decreasing: a
+-- frightened critter calls out more often, which is the whole point — the ear learns triage before
+-- the eye does. Calm chirping is deliberately sparse so 15 squirrels read as a living wood, not a mob.
+function RescueRules.squeakInterval(cfg, danger)
+	cfg = cfg or {}
+	if (danger or 0) >= 2 then
+		return cfg.squeakIntervalPanic or 1.2
+	elseif (danger or 0) >= 1 then
+		return cfg.squeakIntervalWorried or 3.0
+	end
+	return cfg.squeakIntervalCalm or 7.0
+end
+
+--[[
+	squeakSchedule(cfg, idn, now, nextAt, danger, budget) -> fired, newNextAt, pitch
+
+	The RATE machinery, extracted (red-team F2). It first lived inline in BirdController, which put it
+	outside Tier-4's reach — and a mutation deleting the per-frame cap passed the whole suite. That is
+	the S40 finding ("~70% of playtest churn was headless-testable logic") walked backwards, so the
+	schedule lives here where it can be gated.
+
+	  • nextAt == nil        → SEED with a per-squirrel stagger, don't fire. The stagger scales with the
+	                           CURRENT danger, so a panicking squirrel entering earshot is heard within
+	                           ~1s instead of being silent for up to a calm interval (F7) — first
+	                           contact is exactly when "hear a critter you haven't spotted" earns its keep.
+	  • badly overdue        → RESEED, don't fire (F3). A squirrel out of earshot has a frozen clock, so
+	                           on re-approach every squirrel in the grove would satisfy now >= nextAt on
+	                           the SAME frame — a machine-gun volley on every return, which is precisely
+	                           what the stagger exists to prevent.
+	  • budget <= 0          → don't fire and DON'T reschedule: the per-frame cap defers a chirp, it
+	                           never silently eats one.
+	  • otherwise, when due  → fire, and reschedule from NOW (never from the stale deadline, or a
+	                           returning squirrel would chirp repeatedly to catch up).
+]]
+function RescueRules.squeakSchedule(cfg, idn, now, nextAt, danger, budget)
+	cfg = cfg or {}
+	idn = idn or 0
+	now = now or 0
+	danger = danger or 0
+	local interval = RescueRules.squeakInterval(cfg, danger)
+	-- deterministic per-squirrel offset (golden ratio on the id — never math.random, house rule)
+	local stagger = ((idn * 0.6180339887) % 1) * interval
+
+	if nextAt == nil then
+		return false, now + stagger, nil
+	end
+	if now - nextAt > interval then
+		return false, now + stagger, nil
+	end
+	if now < nextAt then
+		return false, nextAt, nil
+	end
+	if (budget or 1) <= 0 then
+		return false, nextAt, nil
+	end
+
+	local jit = cfg.squeakJitter or 0.35
+	local frac = ((idn * 0.6180339887 + now * 0.113) % 1) * 2 - 1   -- -1..1, deterministic
+	local floor = cfg.squeakMinInterval or 0.6
+	local newNext = now + math.max(floor, interval * (1 + jit * frac))
+	local pitch = 1
+		+ (((idn * 0.381) % 1) * 2 - 1) * (cfg.squeakPitchSpread or 0.22)
+		+ ((danger >= 2) and (cfg.squeakPitchDanger or 0.18) or 0)
+	return true, newNext, pitch
+end
+
 return RescueRules

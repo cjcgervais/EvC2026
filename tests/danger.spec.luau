@@ -246,3 +246,135 @@ H.test("fireRoarVolume: monotone non-increasing in distance, always within [0, r
 	H.ok(mid < maxV * 0.5,
 		("mid-band volume %.3f ≥ half max — the curve went linear-or-faster, losing the commit swell"):format(mid))
 end)
+
+--------------------------------------------------------------------------------
+-- B5 — SQUIRREL SQUEAK envelope. The waveform is Chad's ear; what a machine CAN
+-- pin is the envelope: bounded range, bounded rate, and a cadence that tightens
+-- with Danger so the ear learns triage the same way the eye does.
+--------------------------------------------------------------------------------
+H.test("squeakVolume: silent beyond squeakHearR, full inside squeakFullR, monotone between", function()
+	local R = GameConfig.Rescue
+	local maxV = R.squeakMaxVol or 0.5
+	H.eq(RescueRules.squeakVolume(R, math.huge), 0, "no squirrel in range ⇒ silent")
+	H.eq(RescueRules.squeakVolume(R, 0 / 0), 0, "NaN distance ⇒ silent, never a NaN Volume")
+	H.eq(RescueRules.squeakVolume(R, R.squeakHearR), 0, "at the hearing radius ⇒ silent")
+	H.eq(RescueRules.squeakVolume(R, R.squeakHearR + 400), 0, "well beyond ⇒ silent")
+	H.approx(RescueRules.squeakVolume(R, R.squeakFullR), maxV, 1e-9, "at the full radius ⇒ full")
+	H.approx(RescueRules.squeakVolume(R, 0), maxV, 1e-9, "on top of it ⇒ full, never louder")
+
+	local prev = math.huge
+	for d = 0, (R.squeakHearR or 260) + 100, 2 do
+		local v = RescueRules.squeakVolume(R, d)
+		H.finite(v, "finite at d=" .. d)
+		H.between(v, 0, maxV, "in range at d=" .. d)
+		H.ok(v <= prev + 1e-9, "volume ROSE with distance at d=" .. d)
+		prev = v
+	end
+	-- A squeak must stay small, or it stops reading as a small animal. RED-TEAM F1: this was written as
+	-- a RATIO against flapVolBase — but that dial is 1.6 today (Chad S38 "LOUDER again"), so the gate
+	-- read 0.5 < 1.75 and a mutation setting the squeak to 1.6 sailed through. Pinned ABSOLUTELY now.
+	H.ok(maxV <= 0.6, ("squeakMaxVol %.2f is too loud for a small animal (absolute ceiling 0.6)"):format(maxV))
+end)
+
+H.test("squeakInterval: STRICTLY tightens with Danger (the ear learns triage)", function()
+	local R = GameConfig.Rescue
+	local calm = RescueRules.squeakInterval(R, 0)
+	local worried = RescueRules.squeakInterval(R, 1)
+	local panic = RescueRules.squeakInterval(R, 2)
+	print(("      [squeak] cadence calm %.1fs → worried %.1fs → panic %.1fs (%.1f× more often)")
+		:format(calm, worried, panic, calm / panic))
+	H.ok(calm > worried, "a worried squirrel must call out more often than a calm one")
+	H.ok(worried > panic, "a panicking squirrel must call out more often than a worried one")
+	H.ok(panic >= 0.8, "panic cadence must stay above a machine-gun chirp")
+	H.ok(calm <= 12, "calm cadence must not be so sparse the wood sounds dead")
+	H.eq(RescueRules.squeakInterval(R, nil), calm, "a missing Danger is treated as calm, never as panic")
+	H.eq(RescueRules.squeakInterval(R, 5), panic, "danger above 2 clamps to the panic cadence")
+end)
+
+H.test("B5 dials are coherent and any configured squeak id is well-formed", function()
+	local R = GameConfig.Rescue
+	-- RED-TEAM F5: this used to assert the id list was EMPTY — which would have turned the ladder RED
+	-- the moment Chad did exactly what the Output warning tells him to do (paste an id and re-Play).
+	-- A gate must never fail because the feature started working. Shape is what matters; emptiness is
+	-- a documented state, not an invariant.
+	H.eq(type(R.squeakAssetIds), "table", "the id list exists")
+	for i, id in ipairs(R.squeakAssetIds) do
+		H.ok(type(id) == "number" and id > 0 and id == math.floor(id),
+			("squeak asset id %d is malformed (%s) — it must be a positive integer asset id")
+				:format(i, tostring(id)))
+	end
+	H.ok((R.squeakMaxPerFrame or 0) >= 1, "the per-frame start cap must be at least 1 or squeaks never fire")
+	H.ok((R.squeakFullR or 0) < (R.squeakHearR or 0), "full-volume radius must sit inside the hearing radius")
+	H.ok((R.squeakMaxLen or 0) > 0 and (R.squeakMaxLen or 0) <= 5,
+		"the asset-length plausibility ceiling must be set and short enough to catch music")
+end)
+
+--------------------------------------------------------------------------------
+-- B5 SCHEDULE — the rate machinery, now pure (red-team F2: it lived inline in the
+-- client, so a mutation deleting the per-frame cap passed the whole suite).
+--------------------------------------------------------------------------------
+H.test("squeakSchedule: the per-frame BUDGET defers a chirp and never eats it", function()
+	local R = GameConfig.Rescue
+	local now = 1000
+	-- overdue squirrel, but no budget left this frame
+	local fired, nextAt = RescueRules.squeakSchedule(R, 7, now, now - 0.1, 2, 0)
+	H.eq(fired, false, "with zero budget a squeak must not fire")
+	H.approx(nextAt, now - 0.1, 1e-9, "a deferred chirp keeps its deadline — it fires next frame, not never")
+	-- with budget it fires
+	local fired2 = RescueRules.squeakSchedule(R, 7, now, now - 0.1, 2, 1)
+	H.eq(fired2, true, "with budget the same squirrel fires")
+end)
+
+H.test("squeakSchedule: a squirrel returning to earshot RESEEDS instead of volleying", function()
+	local R = GameConfig.Rescue
+	local now = 5000
+	-- gone for a minute: its deadline is far in the past. Firing immediately would make every squirrel
+	-- in a grove chirp on the same frame the moment you fly back.
+	local fired, nextAt = RescueRules.squeakSchedule(R, 3, now, now - 60, 2, 5)
+	H.eq(fired, false, "a badly-overdue squirrel must reseed, not fire on the re-approach frame")
+	H.ok(nextAt > now, "the reseeded deadline is in the future")
+	H.ok(nextAt <= now + RescueRules.squeakInterval(R, 2) + 1e-9, "…and within one interval")
+	-- different squirrels reseed to DIFFERENT times (that is the whole point)
+	local _, a = RescueRules.squeakSchedule(R, 3, now, now - 60, 2, 5)
+	local _, b = RescueRules.squeakSchedule(R, 8, now, now - 60, 2, 5)
+	H.ok(math.abs(a - b) > 0.05, "two returning squirrels must not reseed to the same instant")
+end)
+
+H.test("squeakSchedule: first contact seeds by DANGER — a panicking newcomer is heard fast", function()
+	local R = GameConfig.Rescue
+	local now = 10
+	local _, calmAt = RescueRules.squeakSchedule(R, 5, now, nil, 0, 5)
+	local _, panicAt = RescueRules.squeakSchedule(R, 5, now, nil, 2, 5)
+	H.ok(panicAt <= calmAt, "a panicking squirrel must not wait longer than a calm one for its first chirp")
+	H.ok(panicAt - now <= RescueRules.squeakInterval(R, 2) + 1e-9,
+		"first panic chirp must land within one panic interval, not one CALM interval")
+	H.eq(select(1, RescueRules.squeakSchedule(R, 5, now, nil, 2, 5)), false, "seeding never fires immediately")
+end)
+
+H.test("squeakSchedule: the interval floor holds even at an absurd jitter, and pitch stays bounded", function()
+	local R = GameConfig.Rescue
+	local bad = table.clone(R)
+	bad.squeakJitter = 3          -- would drive interval*(1+jit*frac) negative without the floor
+	local floor = R.squeakMinInterval or 0.6
+	for i = 1, 400 do
+		local now = 100 + i * 0.37
+		local fired, nextAt, pitch = RescueRules.squeakSchedule(bad, i, now, now - 0.01, 2, 5)
+		if fired then
+			H.ok(nextAt - now >= floor - 1e-9,
+				("rescheduled only %.3fs ahead — under the %.2fs machine-gun floor"):format(nextAt - now, floor))
+			H.finite(pitch, "pitch is finite")
+			H.between(pitch, 0.6, 1.6, "pitch stays in a small-animal band")
+		end
+	end
+end)
+
+H.test("squeakSchedule: always reschedules from NOW, and is deterministic", function()
+	local R = GameConfig.Rescue
+	local now = 2000
+	local fired, nextAt = RescueRules.squeakSchedule(R, 4, now, now - 0.5, 1, 5)
+	H.eq(fired, true, "an overdue squirrel within one interval fires")
+	H.ok(nextAt > now, "the new deadline is measured from NOW, never from the stale one (no catch-up chirping)")
+	local f2, n2 = RescueRules.squeakSchedule(R, 4, now, now - 0.5, 1, 5)
+	H.eq(n2, nextAt, "same inputs give the same schedule")
+	H.eq(f2, fired, "same inputs give the same decision")
+end)

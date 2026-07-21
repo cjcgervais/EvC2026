@@ -2125,6 +2125,56 @@ local function scanSquirrels(dt)
 	-- actually reads from the cockpit; brighten + swell it so the anticipation beat is seen.
 	local flarePulse = 0.5 + 0.5 * math.sin(squirrelPhase * 2.2)   -- 0..1
 	local HALO = (RES.beaconStyle or "shaft") == "halo"   -- Stage 1 style gate (function-local: BirdController's module-local budget is capped)
+
+	-- B5 SQUEAKS: resolve the asset ONCE per session and park the winning id on a named Sound under
+	-- SoundService. Same no-module-local trick as the fire roar (this file is AT the Luau 200 cap), and
+	-- the same one-glance Output verdict — a dead or wrong id must cost a log line, never a test flight.
+	local squeakId = nil
+	if RES.squeakAudio then
+		local src = SoundService:FindFirstChild("SqueakSrc")
+		if not src then
+			src = Instance.new("Sound")
+			src.Name = "SqueakSrc"
+			src.Volume = 0
+			src.Parent = SoundService
+			task.spawn(function()
+				local ContentProvider = game:GetService("ContentProvider")
+				local ids = RES.squeakAssetIds or {}
+				if #ids == 0 then
+					warn("[SqueakAudio] no squirrel squeak id configured — squirrels are SILENT. Studio →"
+						.. " Toolbox → Marketplace → Audio → search \"squirrel\"/\"chipmunk squeak\" → PREVIEW"
+						.. " it → Copy Asset ID → paste into GameConfig.Rescue.squeakAssetIds → Stop and re-Play.")
+					return
+				end
+				for i, id in ipairs(ids) do
+					src.SoundId = "rbxassetid://" .. tostring(id)
+					pcall(function() ContentProvider:PreloadAsync({ src }) end)
+					if src.IsLoaded then
+						-- PLAUSIBILITY, not just loadability (red-team F4). The Stage-3c fire id LOADED
+						-- perfectly and turned out to be music — a load gate cannot hear. Length is the one
+						-- machine-checkable proxy: a squeak is well under a second, and a long asset would
+						-- also pile up ~26 concurrent Sounds at panic cadence, blowing the §3.4 envelope.
+						local maxLen = RES.squeakMaxLen or 3
+						if src.TimeLength > 0 and src.TimeLength > maxLen then
+							warn(("[SqueakAudio] asset %d/%d (id %s) is %.1fs long — that is ambience or music,"
+								.. " not a squeak. REJECTED; trying next."):format(i, #ids, tostring(id), src.TimeLength))
+						else
+							print(("[SqueakAudio] squeak asset %d/%d LOADED (id %s, %.2fs)")
+								:format(i, #ids, tostring(id), src.TimeLength))
+							src:SetAttribute("Resolved", src.SoundId)
+							return
+						end
+					end
+					warn(("[SqueakAudio] squeak asset %d/%d failed to load (id %s) — trying next")
+						:format(i, #ids, tostring(id)))
+				end
+				warn("[SqueakAudio] NO squeak asset loaded — squirrels are SILENT. Paste a PREVIEWED id"
+					.. " FIRST in GameConfig.Rescue.squeakAssetIds, then Stop and re-Play.")
+			end)
+		end
+		squeakId = src:GetAttribute("Resolved")
+	end
+	local squeaksThisFrame = 0
 	for _, m in ipairs(squirrelsFolder:GetChildren()) do
 		if m:IsA("Model") and m.PrimaryPart then
 			local st = m:GetAttribute("State")
@@ -2175,6 +2225,27 @@ local function scanSquirrels(dt)
 					hop = amp * math.abs(math.sin(squirrelPhase * freq + (tonumber(sid) or 0) * 1.7))
 				end
 				sbody.CFrame = sbody.CFrame + Vector3.new(0, (baseY + hop) - sbody.Position.Y, 0)
+			end
+			-- B5 SQUEAK: a discrete one-shot per squirrel, cadence set by its Stage-3a Danger, so the EAR
+			-- learns triage the same way the eye does — and so you can hear a critter you haven't spotted.
+			-- The next-chirp time rides on a client-local model attribute (same pattern as HopBaseY), which
+			-- costs no module local and is cleaned up for free when the model is destroyed.
+			-- Excludes match the HOP's exactly (red-team F6): never during the plant tell — the coiled
+			-- stillness IS that read — and never once claimed, so a chirp can't intrude on the sacred
+			-- slow-mo catch beat. The schedule itself is pure and lives in RescueRules.
+			if squeakId and st == "stranded" and not isTell and not isClaimed(sid) then
+				local sdist = (rootPart.Position - m.PrimaryPart.Position).Magnitude
+				local svol = RescueRules.squeakVolume(RES, sdist)
+				if svol > 0 then
+					local budget = (RES.squeakMaxPerFrame or 2) - squeaksThisFrame
+					local fired, nextAt, pitch = RescueRules.squeakSchedule(
+						RES, tonumber(sid) or 0, os.clock(), m:GetAttribute("NextSqueak"), danger, budget)
+					m:SetAttribute("NextSqueak", nextAt)
+					if fired then
+						playSound(squeakId, svol, pitch)
+						squeaksThisFrame += 1
+					end
+				end
 			end
 			-- Local cosmetic flare (client-only property writes; the server never re-touches these).
 			-- S40 FIX (Chad "its just a light cylinder, I don't even see squirrels"): the beacon is now a
