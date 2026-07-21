@@ -684,3 +684,36 @@ H.test("PARITY ORACLE: RescueRules == the OLD inline formulas over a 1,000-point
 		H.eq(newClaims[id], oldClaims[id], "claim entry state @" .. i)
 	end
 end)
+
+--------------------------------------------------------------------------------
+-- S43 — catchChime. Chad: "the sounds pinging me after I catch just a few
+-- squirrels — it should only ping when I have 10/10."
+--------------------------------------------------------------------------------
+H.test("catchChime: silent on every catch until the load FILLS, then fires exactly once", function()
+	local R = GameConfig.Rescue
+	local cap = R.carryCapacity or 10
+	H.ok(cap >= 2, "fixture: capacity must be more than one or this rule is vacuous")
+	local fired = 0
+	for n = 1, cap do
+		local ring = RescueRules.catchChime(R, n, cap)
+		if n < cap then
+			H.eq(ring, false, ("catch %d/%d must be SILENT — this is the nagging ping Chad rejected"):format(n, cap))
+		else
+			H.eq(ring, true, ("the catch that fills the load (%d/%d) must ring"):format(n, cap))
+		end
+		if ring then fired += 1 end
+	end
+	H.eq(fired, 1, "exactly ONE chime per full load, not one per squirrel")
+end)
+
+H.test("catchChime: capacity falls back sanely, and the legacy flag restores the old behaviour", function()
+	local R = GameConfig.Rescue
+	-- a nil server capacity must fall back to the config, never to a tiny default that would make the
+	-- chime fire at 3/10 (the exact complaint, reintroduced by a fallback bug)
+	H.eq(RescueRules.catchChime(R, 3, nil), false, "3 riders with an unknown capacity must not ring")
+	H.eq(RescueRules.catchChime(R, R.carryCapacity or 10, nil), true, "a full load rings on the config fallback")
+	local legacy = table.clone(R)
+	legacy.chimeEveryCatch = true
+	H.eq(RescueRules.catchChime(legacy, 1, 10), true, "the comparison flag restores the per-catch ping")
+	H.eq(R.chimeEveryCatch, false, "…and it ships OFF, which is what Chad asked for")
+end)

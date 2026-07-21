@@ -1656,7 +1656,12 @@ local function triggerCatch(sqModel, closing)
 	styleMeter = 0            -- style is spent on the catch; re-earn a line for the next
 	tellId = nil
 	playHup()
-	playChord()
+	-- CHAD S43: "the sounds pinging me after I catch just a few squirrels — it should only ping when
+	-- I have 10/10." The rising chord used to fire on EVERY catch, which made the celebration cheap
+	-- and nagging. It is now reserved for the moment the load fills (see the rider-conversion sites):
+	-- one earned fanfare per full load instead of ten pings per round. playHup stays — that is the
+	-- effort/anticipation swoosh, not a ping.
+	if RES.chimeEveryCatch then playChord() end
 	if _G.RescueStamp then _G.RescueStamp("tell") end
 end
 
@@ -1772,6 +1777,8 @@ local function stepCatch(dt)
 				settle = RIDER_HOP_DUR,          -- full settle-hop = a clear "landed!" beat
 				seatIndex = catch.seatIndex,     -- F3: carry the seat claimed at climb-start onto the rider
 			}
+			-- FULL LOAD = the earned ping (Chad S43). Fires exactly on the catch that fills the back.
+			if RescueRules.catchChime(RES, #riders, rescueState.capacity) then playChord() end
 			catch.sq = nil
 			catch = nil
 		end
@@ -1854,6 +1861,8 @@ local function stepCrewCatches(dt)
 					look = math.random() * math.pi * 2, t = 0, settle = RIDER_HOP_DUR,
 					seatIndex = cc.seatIndex,          -- F3: carry the seat claimed at leap onto the rider
 				}
+				-- FULL LOAD = the earned ping (Chad S43), same rule on the crew path.
+				if RescueRules.catchChime(RES, #riders, rescueState.capacity) then playChord() end
 				cc.sq = nil
 			end
 			table.remove(crewCatches, i)

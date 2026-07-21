@@ -805,6 +805,11 @@ GameConfig.Rescue = {
 	                           -- plant/flare fired too late to SEE before the catch. 0.60 ≈ 78 studs = the
 	                           -- anticipation beat is actually read (Fable §A3/#4). Revert to 0.40 if tells feel spammy.
 	tellHoldMin      = 1.2,    -- s; once planted the tell LATCHES at least this long (a flickering tell kills the beat).
+	-- CHAD S43: "the sounds pinging me after I catch just a few squirrels — it should only ping when I
+	-- have 10/10." The rising chord fired on EVERY catch, so the celebration was cheap and nagging.
+	-- It now fires ONCE, on the catch that fills the back (see BirdController's rider-conversion sites).
+	-- true = the old per-catch ping back, for comparison.
+	chimeEveryCatch  = false,
 	carryCapacity    = 10,     -- squirrels ridable on your back before you must deliver (Chad: "he can carry
 	                           -- 10 squirrels that latch onto him"). Grid-packed on the back (SEAT_COLS across,
 	                           -- the rest stacking toward the tail). Read by BOTH the server carry gate and the client.

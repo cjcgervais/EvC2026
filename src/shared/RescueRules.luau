@@ -529,4 +529,22 @@ function RescueRules.squeakSchedule(cfg, idn, now, nextAt, danger, budget)
 	return true, newNext, pitch
 end
 
+--------------------------------------------------------------------------------
+-- catchChime — should THIS catch play the celebration chord?
+-- Chad S43: *"the sounds pinging me after I catch just a few squirrels — it should only ping when I
+-- have 10/10."* The rising chord used to fire on every catch, so the celebration was cheap and it
+-- nagged. It now fires exactly once per load, on the catch that FILLS the back.
+--
+-- It lives here rather than inline in the client for the reason the squeak red-team proved earlier
+-- this session: a rule with no home in a pure module has no home in a test either, and a mutation
+-- deleting it passed the whole suite.
+--------------------------------------------------------------------------------
+function RescueRules.catchChime(cfg, ridersAfter, capacity)
+	cfg = cfg or {}
+	if cfg.chimeEveryCatch then
+		return true   -- the pre-S43 behaviour, kept as a one-flag comparison
+	end
+	return (ridersAfter or 0) >= (capacity or cfg.carryCapacity or 10)
+end
+
 return RescueRules
