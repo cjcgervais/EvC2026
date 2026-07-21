@@ -408,4 +408,31 @@ function RescueRules.triageTick(bucket, dt, timeLeft, strandedCount, hazard)
 	return b, false
 end
 
+--------------------------------------------------------------------------------
+-- STAGE 3c — FIRE ROAR volume curve (kid-legibility Stage 3, channel (c)).
+-- Pure, stateless, per-frame: the client recomputes the roar's Volume every frame from its distance
+-- to the nearest burning cell. This is the S37/S38 stateless-projection architecture that closed the
+-- audio saga — there is NO envelope, NO tween, NO stop-timer and NO state to desync, so "the fire
+-- kept roaring after it burned out" is ARITHMETICALLY impossible: no burning cells ⇒ dist is huge ⇒
+-- Volume is 0 that same frame.
+--
+-- Shape: silent at/beyond roarFarR, full at/inside roarNearR, and a gamma-shaped swell between so the
+-- roar comes up as you commit toward the fire rather than fading linearly across the whole valley.
+-- Monotone NON-INCREASING in distance by construction (t is monotone, gamma > 0 preserves order).
+--------------------------------------------------------------------------------
+function RescueRules.fireRoarVolume(cfg, dist)
+	cfg = cfg or {}
+	local nearR = cfg.roarNearR or 200
+	local farR = cfg.roarFarR or 900
+	local maxVol = cfg.roarMaxVol or 0.35
+	if not dist or dist ~= dist or dist >= farR then
+		return 0 -- beyond earshot, or no fire at all (dist = math.huge), or NaN-guard
+	end
+	if dist <= nearR then
+		return maxVol
+	end
+	local t = (farR - dist) / math.max(1e-3, farR - nearR) -- 0 at farR → 1 at nearR
+	return maxVol * t ^ (cfg.roarGamma or 1.5)
+end
+
 return RescueRules

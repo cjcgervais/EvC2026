@@ -204,3 +204,45 @@ H.test("dangerAt: bounded scan window + coherent dials + the urgencyTells revert
 	H.eq(FireGrid.dangerAt(grid, 600, 0), before, "dangerAt is pure — the gate cannot alter its result")
 	GameConfig.Fire.urgencyTells = saved
 end)
+
+--------------------------------------------------------------------------------
+-- STAGE 3c — the fire ROAR volume curve. The audio ASSET cannot be verified headlessly
+-- (Roblox's 2022 privacy purge means an id is a coin flip — the client prints a per-id
+-- verdict instead). What IS provable is the curve: the stateless projection that makes
+-- "the roar outlived its fire" arithmetically impossible.
+--------------------------------------------------------------------------------
+local RescueRules = Loader.load("RescueRules")
+
+H.test("fireRoarVolume: silent with NO fire, silent beyond roarFarR, full inside roarNearR", function()
+	local F = GameConfig.Fire
+	local maxV = F.roarMaxVol or 0.35
+	-- the no-fire case: the client passes math.huge when it finds zero burning cells. This is the
+	-- whole audio-saga bug class ("it kept roaring after the fire went out") killed by arithmetic.
+	H.eq(RescueRules.fireRoarVolume(F, math.huge), 0, "no burning cells ⇒ SILENT the same frame")
+	H.eq(RescueRules.fireRoarVolume(F, 0 / 0), 0, "NaN distance ⇒ silent, never a NaN Volume")
+	H.eq(RescueRules.fireRoarVolume(F, F.roarFarR), 0, "at roarFarR ⇒ silent")
+	H.eq(RescueRules.fireRoarVolume(F, F.roarFarR + 500), 0, "beyond roarFarR ⇒ silent")
+	H.approx(RescueRules.fireRoarVolume(F, F.roarNearR), maxV, 1e-6, "at roarNearR ⇒ full")
+	H.approx(RescueRules.fireRoarVolume(F, 0), maxV, 1e-6, "inside the fire ⇒ full, never louder than max")
+end)
+
+H.test("fireRoarVolume: monotone non-increasing in distance, always within [0, roarMaxVol]", function()
+	local F = GameConfig.Fire
+	local maxV = F.roarMaxVol or 0.35
+	local prev = math.huge
+	for d = 0, (F.roarFarR or 900) + 200, 5 do
+		local v = RescueRules.fireRoarVolume(F, d)
+		H.finite(v, "volume is finite at d=" .. d)
+		H.between(v, 0, maxV, "volume in range at d=" .. d)
+		H.ok(v <= prev + 1e-9, ("volume ROSE as the fire got further away (d=%d)"):format(d))
+		prev = v
+	end
+	-- and it must actually vary, else "monotone" passes on a constant.
+	local mid = RescueRules.fireRoarVolume(F, (F.roarNearR + F.roarFarR) / 2)
+	H.ok(mid > 0, "the mid-range swell is audible")
+	-- SHAPE CLASS, not the knob value (red-team: replacing t^gamma with plain t survived every other
+	-- assert). Linear gives exactly 0.5·maxVol at the midpoint; a >1 gamma gives less. This pins "the
+	-- roar SWELLS as you commit" without freezing roarGamma, which is a feel dial Chad may move.
+	H.ok(mid < maxV * 0.5,
+		("mid-band volume %.3f ≥ half max — the curve went linear-or-faster, losing the commit swell"):format(mid))
+end)

@@ -1311,11 +1311,16 @@ local flapSound             -- persistent LOOPED flap Sound: created + Played ON
                             -- from live physics every frame (Fable-5 stateless-projection architecture, S38).
 local flapAudibleWas = false -- audioDiag: tracks the audible↔silent transition for the diagnostic log
 local windSound             -- persistent looped wind Sound (created lazily), volume scales with speed
+-- STAGE 3c NOTE: the fire roar deliberately has NO module-level local. This file is AT the Luau
+-- 200-module-local cap under Studio-debug compile settings (the limit that bricked it in 097b479 —
+-- tests/compile.spec is the gate), so the roar is found by name under SoundService each frame instead.
 local function updateWingSound(dt)
 	dt = dt or 0.016
 	if not flightEngine then
 		if flapSound then flapSound.Volume = 0 end   -- projection: silence is a VALUE, never a :Stop()
 		if windSound then windSound.Volume = 0 end
+		local fr = SoundService:FindFirstChild("FireRoar")   -- STAGE 3c: same law, same branch
+		if fr then fr.Volume = 0 end
 		return
 	end
 	-- FLAP SOUND (Fable-5 stateless projection, S38): ONE looped Sound, created + Played ONCE, NEVER Stopped or
@@ -1380,6 +1385,65 @@ local function updateWingSound(dt)
 	local targetVol = sf * (RES.windMaxVol or 0.38)
 	windSound.Volume = windSound.Volume + (targetVol - windSound.Volume) * math.min(1, (dt or 0.016) * 4)
 	windSound.PlaybackSpeed = (RES.windPitchBase or 0.55) + (RES.windPitchSpeed or 0.55) * sf
+
+	-- STAGE 3c — THE FIRE ROARS. Same stateless-projection law as the flap/wind above: ONE looped Sound,
+	-- Volume recomputed every frame from the distance to the nearest BURNING cell. No burning cells ⇒ the
+	-- min stays math.huge ⇒ Volume 0 that same frame, so a roar cannot outlive its fire.
+	-- Parked pool markers sit at Y=-5000 and lose the min automatically; EmberTint patches are charred
+	-- ground, not fire, so only "FireCell" counts.
+	local FIRE = GameConfig.Fire
+	if FIRE.fireAudio then
+		local fireRoar = SoundService:FindFirstChild("FireRoar")   -- see the no-module-local note above
+		if not fireRoar then
+			fireRoar = Instance.new("Sound")
+			fireRoar.Name = "FireRoar"
+			fireRoar.Looped = true
+			fireRoar.Volume = 0
+			fireRoar.PlaybackSpeed = FIRE.roarPitch or 0.85
+			fireRoar.Parent = SoundService
+			-- ASSET CHAIN + ONE-GLANCE VERDICT. No headless gate can prove a Roblox audio id resolves
+			-- (the 2022 privacy purge killed most old ids), so instead of shipping an ambiguous silence
+			-- we walk the candidates and SAY what happened — the same self-diagnosis pattern as
+			-- "[Rescue] populated 15/15". A silent fire must never cost Chad a whole test flight.
+			task.spawn(function()
+				local ContentProvider = game:GetService("ContentProvider")
+				local ids = FIRE.roarAssetIds or {}
+				for i, id in ipairs(ids) do
+					fireRoar.SoundId = "rbxassetid://" .. tostring(id)
+					pcall(function() ContentProvider:PreloadAsync({ fireRoar }) end)
+					if fireRoar.IsLoaded then
+						print(("[FireAudio] roar asset %d/%d LOADED (id %s)"):format(i, #ids, tostring(id)))
+						fireRoar:Play()
+						return
+					end
+					warn(("[FireAudio] roar asset %d/%d failed to load (id %s) — trying next")
+						:format(i, #ids, tostring(id)))
+				end
+				-- NOTE: SoundId is left on the last candidate and this walk does not repeat, so the fix
+				-- needs a restart (a live GameConfig edit would not reach the already-required module).
+				warn("[FireAudio] NO roar asset loaded — the fire is SILENT. 30-second fix: Studio → Toolbox"
+					.. " → Audio → search \"fire\" → Copy Asset ID → paste it FIRST in GameConfig.Fire.roarAssetIds,"
+					.. " then STOP and re-PLAY (the chain is walked once per session).")
+			end)
+		end
+		local nearest = math.huge
+		local ff = workspace:FindFirstChild("FireVisuals")
+		if ff then
+			local here = flightEngine and flightEngine.orientation and flightEngine.orientation.Position
+			if here then
+				for _, p in ipairs(ff:GetChildren()) do
+					if p.Name == "FireCell" then
+						local d = (here - p.Position).Magnitude
+						if d < nearest then nearest = d end
+					end
+				end
+			end
+		end
+		fireRoar.Volume = RescueRules.fireRoarVolume(FIRE, nearest)
+		if fireRoar.Volume > 0 and not fireRoar.IsPlaying and fireRoar.IsLoaded then
+			fireRoar:Play()   -- watchdog, exactly as the flap loop does (silent = Volume 0, never Stopped)
+		end
+	end
 end
 
 --------------------------------------------------------------------------------
@@ -3145,6 +3209,11 @@ local function teardownDrive()
 	-- (red-team F1: exactly the "sound that won't stop" class this session set out to kill).
 	if windSound then windSound.Volume = 0 end
 	if flapSound then flapSound.Volume = 0 end   -- mute the looped flap (Fable-5: never :Stop() it — the watchdog re-Plays)
+	-- STAGE 3c: the fire roar is subject to the IDENTICAL mechanism and must be muted here too — it has no
+	-- module local, so it is found by name (red-team BLOCK: crash inside the roar band → updateWingSound
+	-- stops being called → the roar would loop at full volume through death/respawn).
+	local fr = SoundService:FindFirstChild("FireRoar")
+	if fr then fr.Volume = 0 end
 	flightEngine = nil
 	birdModel = nil
 	rootPart = nil

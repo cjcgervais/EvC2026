@@ -1188,6 +1188,27 @@ GameConfig.Fire = {
 	                           -- that is ~50s of warning — early enough to re-route, late enough to mean it.
 	dangerNearR     = 140,     -- Danger 2 "PANIC": within 140 studs ≈ 26s out. Comfortably LEADS cut-off +
 	                           -- the 8s cutoffGraceS balloon, so panic is actionable pressure, not a loss notice.
+
+	-- ── STAGE 3c (kid-legibility): the fire ROARS. ──
+	-- The second urgency channel: a world that gets audibly worse. ONE looping Sound whose Volume is a
+	-- STATELESS per-frame function of the eagle's distance to the nearest burning cell
+	-- (RescueRules.fireRoarVolume) — the S37/S38 architecture that closed the audio saga. No envelope,
+	-- no tween, no stop-timer ⇒ "it kept roaring after the fire went out" is arithmetically impossible.
+	fireAudio       = true,    -- S43 LIVE for Chad's flight. false FROM BOOT = no Sound is ever created
+	                           -- (byte-identical). Flipping it false mid-session just skips the update
+	                           -- block, so an existing roar would hold its last volume — revert = restart.
+	roarNearR       = 200,     -- studs: full roar at/inside this range of the nearest burning cell.
+	roarFarR        = 900,     -- studs: silent at/beyond. ~2 grove-gaps: the fire is heard before it is legible.
+	roarMaxVol      = 0.35,    -- matches the wind bed's ceiling (windMaxVol 0.38) so it layers, never masks.
+	roarGamma       = 1.5,     -- >1 = the roar swells as you COMMIT toward the fire, instead of a flat fade.
+	roarPitch       = 0.85,    -- a shade below source pitch = bigger/deeper fire.
+	-- ⚠️ ASSET IDS ARE THE ONE THING NO HEADLESS GATE CAN VERIFY. Roblox's 2022 audio-privacy change
+	-- privated the vast majority of pre-2022 third-party audio and new uploads default to private, so a
+	-- web-sourced id is a COIN FLIP. These are CANDIDATES, tried in order; the client prints a one-glance
+	-- verdict per id ("[FireAudio] roar asset i/n loaded" or "FAILED … trying next") and a loud warning if
+	-- every one fails. THE 30-SECOND FIX if they all fail: Studio → Toolbox → Audio → search "fire" →
+	-- right-click an asset → Copy Asset ID → paste it FIRST in this list. Nothing else changes.
+	roarAssetIds    = { 9046850948, 4604808051, 1836383941 },
 }
 
 -- Backfill ember_valley's fire ignite time from GameConfig.Fire (Fire is defined AFTER Missions, so the
