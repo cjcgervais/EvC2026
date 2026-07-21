@@ -72,6 +72,7 @@ local function baseGlobals()
 		NumberSequence = roblox.NumberSequence,
 		NumberSequenceKeypoint = roblox.NumberSequenceKeypoint,
 		ColorSequence = roblox.ColorSequence,
+		ColorSequenceKeypoint = roblox.ColorSequenceKeypoint,
 		tick = os.clock,
 		warn = function(...)
 			print("[warn]", ...)

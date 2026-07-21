@@ -1513,7 +1513,9 @@ end
 
 -- Build the client-only presentation squirrel that leaps + then rides.
 local function buildPresentationSquirrel(color)
-	local sq = BirdBuilder.BuildSquirrel(RES.squirrelScale or 2.4, { body = color })
+	-- STAGE 1 (kid-legibility): match the world-squirrel scale so there is no size pop at catch handoff.
+	local sqScale = ((RES.beaconStyle or "shaft") == "halo") and (RES.haloSquirrelScale or 5.5) or (RES.squirrelScale or 2.4)
+	local sq = BirdBuilder.BuildSquirrel(sqScale, { body = color })
 	for _, p in ipairs(sq:GetDescendants()) do
 		if p:IsA("BasePart") then p.CanQuery = false; p.CanTouch = false; p.CanCollide = false end
 	end
@@ -2058,6 +2060,7 @@ local function scanSquirrels(dt)
 	-- beacon (Fable #4) — the plant pose is tiny at ~78 studs, so the beacon is the signal that
 	-- actually reads from the cockpit; brighten + swell it so the anticipation beat is seen.
 	local flarePulse = 0.5 + 0.5 * math.sin(squirrelPhase * 2.2)   -- 0..1
+	local HALO = (RES.beaconStyle or "shaft") == "halo"   -- Stage 1 style gate (function-local: BirdController's module-local budget is capped)
 	for _, m in ipairs(squirrelsFolder:GetChildren()) do
 		if m:IsA("Model") and m.PrimaryPart then
 			local st = m:GetAttribute("State")
@@ -2068,13 +2071,32 @@ local function scanSquirrels(dt)
 			-- catchable). Render it panicking so you drop your line and race there. The tell (about to catch)
 			-- always wins the pose — the sacred anticipation beat is protected.
 			local isFrantic = (st == "stranded") and (m:GetAttribute("Frantic") == true)
-			local pose = "wave"
-			local phase = squirrelPhase
-			if st == "expiring" then pose = "ride"
-			elseif isTell then pose = "plant"
+			local pose = HALO and "waveBig" or "wave"   -- halo: the frantic two-arm wave IS the default "HELP!"
+			local phase = HALO and (squirrelPhase * 1.6) or squirrelPhase
+			if st == "expiring" then pose = "ride"; phase = squirrelPhase
+			elseif isTell then pose = "plant"; phase = squirrelPhase
 			elseif isSoftFail then pose = "waveBig"; phase = squirrelPhase * 2.4   -- fast excited wave
 			elseif isFrantic then pose = "waveBig"; phase = squirrelPhase * 3.4 end -- panic: even faster
 			BirdBuilder.PoseSquirrel(m, pose, dt, phase)
+			-- STAGE 1 HOPS (halo): little urgent hops — motion = alive = wants something. We write the
+			-- anchored Body's Y ONLY (welded cosmetics + Motor6D limbs ride along; the anchored
+			-- Halo/Chevron do NOT — the critter bounces inside its planted frame). Local-only property
+			-- writes, same contract as the beacon fade below. Base Y is captured ONCE as a local
+			-- attribute (the server never moves a stranded squirrel). Gates: stranded only (expire
+			-- flips State before its balloon pivot), never during the plant tell (the coiled stillness
+			-- IS that read), never once claimed (the leap runs on a separate presentation squirrel).
+			-- Deterministic desync: phase offset derives from SquirrelId, never random.
+			if HALO and st == "stranded" then
+				local sbody = m.PrimaryPart
+				local baseY = m:GetAttribute("HopBaseY")
+				if baseY == nil then baseY = sbody.Position.Y; m:SetAttribute("HopBaseY", baseY) end
+				local hop = 0
+				if not isTell and not isClaimed(sid) then
+					hop = (RES.hopAmp or 1.0)
+						* math.abs(math.sin(squirrelPhase * (RES.hopFreq or 2.0) + (tonumber(sid) or 0) * 1.7))
+				end
+				sbody.CFrame = sbody.CFrame + Vector3.new(0, (baseY + hop) - sbody.Position.Y, 0)
+			end
 			-- Local cosmetic flare (client-only property writes; the server never re-touches these).
 			-- S40 FIX (Chad "its just a light cylinder, I don't even see squirrels"): the beacon is now a
 			-- THIN server-sized beam ABOVE the squirrel (RescueServer.buildBeacon). We NO LONGER fatten it
@@ -2099,6 +2121,35 @@ local function scanSquirrels(dt)
 						baseT = 0.1 + 0.14 * (1 - flarePulse)              -- idle gentle pulse
 					end
 					beacon.Transparency = 1 - farVis * (1 - baseT)         -- baseT far → 1 (gone) near
+				end
+			end
+			-- HALO signal life: same tell/frantic pulse language + the same close-range fade law as the
+			-- beacon -- but the flat ground ring only HALF-fades near (it physically cannot occlude the
+			-- scoop; keeping a dim frame under the critter preserves the read through the dive), while
+			-- the head chevron fades fully out at catch range exactly like the old beam.
+			local halo = HALO and m:FindFirstChild("Halo") or nil
+			local chev = HALO and m:FindFirstChild("Chevron") or nil
+			if halo or chev then
+				local dist = (rootPart.Position - m.PrimaryPart.Position).Magnitude
+				local NEAR, FAR = 70, 260
+				local farVis = clamp((dist - NEAR) / (FAR - NEAR), 0, 1)
+				local baseT
+				if isTell then
+					baseT = 0.05 + 0.15 * (1 - flarePulse)
+				elseif isFrantic then
+					baseT = 0.25 * (0.5 + 0.5 * math.sin(squirrelPhase * 6))
+				else
+					baseT = 0.30 + 0.20 * (1 - flarePulse)
+				end
+				if chev then
+					chev.Transparency = 1 - farVis * (1 - baseT)
+					local cy = (m:GetAttribute("HopBaseY") or m.PrimaryPart.Position.Y) + (RES.chevronY or 14)
+						+ (RES.chevronBobAmp or 1.0) * math.sin(squirrelPhase * 1.4 + (tonumber(sid) or 0))
+					chev.CFrame = chev.CFrame + Vector3.new(0, cy - chev.Position.Y, 0)
+				end
+				if halo then
+					local ringVis = 0.35 + 0.65 * farVis   -- never below 35% presence: the frame survives the dive
+					halo.Transparency = 1 - ringVis * (1 - baseT)
 				end
 			end
 		end

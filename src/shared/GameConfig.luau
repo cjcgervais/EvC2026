@@ -846,6 +846,35 @@ GameConfig.Rescue = {
 	beaconHeight     = 70,
 	beaconBaseY      = 8,      -- base this far above Body origin; clears the ~+5 head/tail at squirrelScale 4.4.
 
+	-- SIGNAL STYLE (Stage 1 kid-legibility — docs/KID-LEGIBILITY-PLAN.md). "shaft" = today's thin
+	-- beacon beam, byte-identical (IDENTITY DEFAULT — flip back = exact old build). "halo" = the
+	-- kid read: the CRITTER is the landmark — a flat ground halo disc it stands in + a small
+	-- bobbing chevron gem over its head (rarity by hue + gold/rainbow size), a bigger squirrel,
+	-- waveBig as the default stranded pose, and little urgent client-side hops.
+	beaconStyle       = "halo",   -- S41 Stage 1 LIVE (Chad "just light cylinders"): the critter is the landmark. Revert to "shaft" for the old beam.
+	haloRadius        = 10,    -- studs; halo disc radius. Squirrel arm-span half-extent at scale 5.5
+	                           -- is ~4.5 → 10 FRAMES the critter (>2×) and reads as a bright ~20-stud
+	                           -- dot from scan altitude; flat at the feet, so it can never engulf.
+	haloGroundY       = -1.5,  -- studs below Body origin the disc centre sits. Disc is 3 thick → top
+	                           -- at Body origin, well below the head bottom (+0.31·s ≈ +1.7): a glow
+	                           -- POOL at the shins, never over the face. (-6 = true foot-bottom is
+	                           -- INSIDE the perch — invisible from above — so we sit it at the shin.)
+	chevronY          = 14,    -- studs above Body origin the gem hovers. Squirrel top ≈ +7.98 at 5.5;
+	                           -- worst-case gem bottom = 14 − 2.73(gold gem halfY) − 1.0(gem bob)
+	                           -- − 1.0(squirrel hop) = 9.27 → clears the head by ≥1.29 always
+	                           -- (models.spec asserts this exact inequality).
+	chevronSize       = 2.2,   -- studs; gem base size (built 1.6× tall, rolled 45° → a kite pointer,
+	                           -- the known "map marker" icon). Gold/Rainbow (mult ≥ 4) build ×1.35.
+	chevronBobAmp     = 1.0,   -- studs; the gem's own slow bob ("THIS one!" pointer life).
+	haloSquirrelScale = 5.5,   -- BuildSquirrel scale under "halo" (+25% over 4.4 → ~14 studs tall: the
+	                           -- critter itself reads at gameplay range). Used for world squirrels AND
+	                           -- the client presentation/riders so the leap handoff has no size pop.
+	                           -- squirrelScale (4.4) stays the untouched "shaft" identity value.
+	hopAmp            = 1.0,   -- studs; stranded urgent-hop height (client |sin| bounce — sharp landing
+	                           -- = a HOP, not a float; ~7% of body height: eager, not flying).
+	hopFreq           = 2.0,   -- × squirrelPhase (3 rad/s) → hop period ≈ 0.52 s ≈ 2 hops/s: urgent,
+	                           -- below the ~4 Hz band that reads as vibration at flight distance.
+
 	-- CLIENT SLOW-MO PRESENTATION (Fable §B) — dilates anim/FX/audio/camera ONLY; the sim runs real-time.
 	slowmoScale      = 0.25,   -- presentation timescale during the catch window.
 	slowmoEaseIn     = 0.11,   -- s; fast attack into slow-mo.
@@ -1118,6 +1147,25 @@ GameConfig.Fire = {
 	maxVisualEmber  = 40,      -- coarse cap on ember tint patches (a pooled subset — ember is a free color, but instances aren't free).
 	ringColor       = Color3.fromRGB(255, 90, 40),  -- cut-off countdown warning ring (grove about to be ranger-rescued).
 	perfDiag        = false,   -- print "[Fire] tick N cells=%d ms=%.2f" per render when true (OFF by default).
+
+	-- ── STAGE 2 (kid-legibility): fire reads as FIRE (docs/KID-LEGIBILITY-PLAN.md §Stage-2). ──
+	-- IDENTITY GATE: flameStyle="static" + smokeLeanStrength=0 reproduce the pre-Stage-2 render
+	-- byte-identically (no teardrop, no flame emitter, no plume, smoke straight up). Flip
+	-- flameStyle="flicker" (+ smokeLeanStrength ~22) to fly the read; flip back = today.
+	flameStyle      = "flicker", -- S41 Stage 2 LIVE (Chad "the fire is square"): teardrop + flames + leaning smoke + centroid plume. Revert to "static" for the old boxes.
+	smokeLeanStrength = 22,     -- studs/s^2 of horizontal smoke Acceleration along grid wind. ~40deg downwind lean = spread telegraph. 0 = straight up (inert).
+	                           -- FLIGHT VALUE 22: atan(22/26) ≈ 40° lean — plume clearly points downwind but still rises.
+	flameRate       = 10,      -- flame particles/sec per burning marker (vetted 8-12). 30 markers × 10 = 300/s peak of
+	                           -- small additive sprites — the engine animates flicker at 60fps for free; server cost 0.
+	flickerAmp      = 0.15,    -- ±15% marker-height breathing per ~1Hz sync (vetted). Arithmetic-only, off tickN + cell phase.
+	teardropLeanDeg = 8,       -- degrees the teardrop tip leans DOWNWIND ("a few degrees" — readable, not toppled).
+	teardropCoreRatio = 0.45,  -- inner yellow core size as a fraction of the outer shell (two-tone taper).
+	plumeRateBase   = 2,       -- centroid mega-plume: Rate = min(plumeRateMax, base + perCell·burningN) —
+	plumeRatePerCell= 0.5,     -- the plume GROWS with the fire = a free urgency channel.
+	plumeRateMax    = 20,      -- cap: ONE emitter, ≤20/s of 6-10s-lived particles ≈ ≤200 alive worst case.
+	plumeRise       = 14,      -- studs/s^2 vertical Acceleration (slow rise + long life = a tall horizon column).
+	plumeSizeMin    = 20,      -- particle Size grows 20 → 80 over its life (vetted): a smudge readable from scan altitude.
+	plumeSizeMax    = 80,
 }
 
 -- Backfill ember_valley's fire ignite time from GameConfig.Fire (Fire is defined AFTER Missions, so the

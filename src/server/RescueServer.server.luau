@@ -339,28 +339,57 @@ local function buildBeacon(model, rarity)
 	-- squirrel's head (center +40, height 70 → base ≈ +5, clearing the ~+3 head/tail), and the client
 	-- FADES it to invisible up close (see BirdController tell-loop) so the squirrel + its animation
 	-- are never occluded. Long-range "fly to the glow" read is kept by the thin bright shaft.
-	local bw = R.beaconWidth or 1.6
-	local bh = R.beaconHeight or 70
-	local baseY = R.beaconBaseY or 8
-	local pillar = Instance.new("Part")
-	pillar.Name = "Beacon"
-	pillar.Size = Vector3.new(bw, bh, bw)
-	pillar.Anchored = false
-	pillar.CanCollide = false
-	pillar.CanQuery = false
-	pillar.CanTouch = false
-	pillar.CastShadow = false
-	pillar.Massless = true
-	pillar.Material = Enum.Material.Neon
-	pillar.Color = rarity.beacon
-	pillar.Transparency = 0.15
-	pillar.CFrame = body.CFrame * CFrame.new(0, baseY + bh / 2, 0)   -- base = +baseY (above the squirrel)
-	pillar.Parent = model
-	local weld = Instance.new("Weld")
-	weld.Part0 = body
-	weld.Part1 = pillar
-	weld.C0 = body.CFrame:ToObjectSpace(pillar.CFrame)
-	weld.Parent = body
+	-- STAGE 1 (kid-legibility, docs/KID-LEGIBILITY-PLAN.md): beaconStyle "halo" replaces the pillar with
+	-- a flat ground halo + a bobbing head chevron — the CRITTER becomes the landmark. "shaft" = byte-identical.
+	if (R.beaconStyle or "shaft") == "halo" then
+		-- 1) Ground halo: the flat disc primitive the fire rings use, tinted by rarity.
+		local ringRec = FireVisuals.buildRing({ ringColor = rarity.beacon }, R.haloRadius or 10, model)
+		local halo = ringRec.part
+		halo.Name = "Halo"
+		halo.Transparency = 0.35
+		halo.CFrame = body.CFrame * CFrame.new(0, R.haloGroundY or -1.5, 0) * CFrame.Angles(0, 0, math.rad(90))
+		-- 2) Head chevron: one neon kite gem hovering above the head — anchored, NOT welded, so the
+		-- client can bob it (and the squirrel's hop, which moves the welded Body assembly, leaves
+		-- the halo planted on the ground — the critter bounces INSIDE its frame).
+		local cs = R.chevronSize or 2.2
+		if (rarity.mult or 1) >= 4 then cs = cs * 1.35 end   -- gold/rainbow: bigger gem = triage-at-a-glance
+		local chev = Instance.new("Part")
+		chev.Name = "Chevron"
+		chev.Size = Vector3.new(cs, cs * 1.6, cs)
+		chev.Anchored = true
+		chev.CanCollide = false
+		chev.CanQuery = false
+		chev.CanTouch = false
+		chev.CastShadow = false
+		chev.Material = Enum.Material.Neon
+		chev.Color = rarity.beacon
+		chev.CFrame = body.CFrame * CFrame.new(0, R.chevronY or 14, 0) * CFrame.Angles(0, 0, math.rad(45))
+		chev.Parent = model
+	else
+		-- SHAFT (identity default): the original thin pillar beam, byte-identical.
+		local bw = R.beaconWidth or 1.6
+		local bh = R.beaconHeight or 70
+		local baseY = R.beaconBaseY or 8
+		local pillar = Instance.new("Part")
+		pillar.Name = "Beacon"
+		pillar.Size = Vector3.new(bw, bh, bw)
+		pillar.Anchored = false
+		pillar.CanCollide = false
+		pillar.CanQuery = false
+		pillar.CanTouch = false
+		pillar.CastShadow = false
+		pillar.Massless = true
+		pillar.Material = Enum.Material.Neon
+		pillar.Color = rarity.beacon
+		pillar.Transparency = 0.15
+		pillar.CFrame = body.CFrame * CFrame.new(0, baseY + bh / 2, 0)   -- base = +baseY (above the squirrel)
+		pillar.Parent = model
+		local weld = Instance.new("Weld")
+		weld.Part0 = body
+		weld.Part1 = pillar
+		weld.C0 = body.CFrame:ToObjectSpace(pillar.CFrame)
+		weld.Parent = body
+	end
 
 	local att = Instance.new("Attachment")
 	att.Parent = body
@@ -386,7 +415,9 @@ local function spawnSquirrel(perch)
 	perch = perch or select(1, pickFreePerch())
 	if not perch then return end
 	local rarity = rollRarity()
-	local model = BirdBuilder.BuildSquirrel(R.squirrelScale or 2.4, { body = rarity.body })
+	-- STAGE 1 (kid-legibility): under "halo" use a bigger squirrel so the critter reads at gameplay range.
+	local sqScale = ((R.beaconStyle or "shaft") == "halo") and (R.haloSquirrelScale or 5.5) or (R.squirrelScale or 2.4)
+	local model = BirdBuilder.BuildSquirrel(sqScale, { body = rarity.body })
 	nextSquirrelId += 1
 	local id = nextSquirrelId
 	model.Name = "Squirrel_" .. id
@@ -397,7 +428,10 @@ local function spawnSquirrel(perch)
 	model:SetAttribute("UnderCanopy", perch.underCanopy == true)
 	-- Anchor as a world prop, faced a random way, sitting on the perch.
 	local yaw = rng:NextNumber() * math.pi * 2
-	model:PivotTo(CFrame.new(perch.pos) * CFrame.Angles(0, yaw, 0))
+	-- halo: the 5.5 squirrel's legs reach ~1.3 studs deeper than 4.4's — lift the pivot so the
+	-- bigger critter keeps today's exact sink depth on its perch (presentation-only).
+	local sqLift = ((R.beaconStyle or "shaft") == "halo") and 1.3 or 0
+	model:PivotTo(CFrame.new(perch.pos + Vector3.new(0, sqLift, 0)) * CFrame.Angles(0, yaw, 0))
 	model.PrimaryPart.Anchored = true
 	buildBeacon(model, rarity)
 	model.Parent = squirrelsFolder
@@ -412,9 +446,11 @@ local function expireSquirrel(id)
 	local model = s.model
 	if not (model and model.Parent) then squirrels[id] = nil; return end
 	model:SetAttribute("State", "expiring")
-	-- Detach beacon so it reads as "rescued by the ranger, off your board".
-	local beacon = model:FindFirstChild("Beacon")
-	if beacon then beacon:Destroy() end
+	-- Detach the signal so it reads as "rescued by the ranger, off your board".
+	for _, n in ipairs({ "Beacon", "Halo", "Chevron" }) do
+		local sig = model:FindFirstChild(n)
+		if sig then sig:Destroy() end
+	end
 	-- Balloon.
 	local balloon = Instance.new("Part")
 	balloon.Shape = Enum.PartType.Ball

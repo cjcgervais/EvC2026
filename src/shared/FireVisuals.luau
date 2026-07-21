@@ -17,6 +17,11 @@
 	subset. Trees NEVER deform. The cut-off countdown RING pulses over a grove about to be
 	ranger-rescued so the read is "grab who you can".
 
+	STAGE 2 (kid-legibility, docs/KID-LEGIBILITY-PLAN.md §Stage-2):
+	  flameStyle="flicker" enables teardrop two-tone shape + flame ParticleEmitter + leaning smoke
+	  + ONE centroid mega-plume. All allocate-once at .new time. sync does arithmetic + property
+	  writes only (no allocation). flameStyle="static" (default) is byte-identical to pre-Stage-2.
+
 	This module is PURE-shape / Instance-only (no services, no clock, no task) so the loader can
 	build one cell-set + a ring HEADLESSLY (tests/firevisuals.spec.luau — the S40 rule: a new visual
 	element class ships a geometry test). Wall-clock/refresh CADENCE is the server's concern; here
@@ -48,10 +53,16 @@ end
 --------------------------------------------------------------------------------
 -- One BURNING-cell visual set: a neon marker column + ONE smoke emitter + ONE warm PointLight.
 -- Built once, then repositioned/recolored by :sync. cellSize sizes the marker footprint.
+-- STAGE 2: under flameStyle="flicker", also builds teardrop Ball shape + inner yellow core +
+-- flame ParticleEmitter + darker/bigger smoke. Under "static" (default) = byte-identical to
+-- pre-Stage-2. core and flame are nil under "static".
 --------------------------------------------------------------------------------
 function FireVisuals.buildCellSet(cfg, cellSize, parent)
 	local h = cfg.markerHeight or 34
 	local w = math.max(6, (cellSize or 60) * 0.55)
+
+	-- STAGE 2 identity gate: compute once at the top.
+	local flicker = (cfg.flameStyle == "flicker")
 
 	local part = Instance.new("Part")
 	part.Name = "FireCell"
@@ -66,6 +77,14 @@ function FireVisuals.buildCellSet(cfg, cellSize, parent)
 	part.Transparency = 0.1
 	part.TopSurface = Enum.SurfaceType.Smooth
 	part.BottomSurface = Enum.SurfaceType.Smooth
+
+	-- STAGE 2: teardrop outer shell replaces the box — a tall orange Ball reads as fire shape
+	-- even frozen from altitude. CanCollide false so the sphere-collision caveat is moot.
+	if flicker then
+		part.Shape = Enum.PartType.Ball
+		part.Size = Vector3.new(w * 0.9, h, w * 0.9)
+		part.Transparency = 0.25
+	end
 
 	local att = Instance.new("Attachment")
 	att.Name = "SmokeAtt"
@@ -88,6 +107,13 @@ function FireVisuals.buildCellSet(cfg, cellSize, parent)
 	smoke.Acceleration = Vector3.new(0, 26, 0)
 	smoke.Parent = att
 
+	-- STAGE 2: darker/bigger smoke so from altitude it's a visible smudge on the horizon.
+	if flicker then
+		smoke.Color = ColorSequence.new(Color3.fromRGB(45, 40, 37), Color3.fromRGB(95, 88, 83))
+		smoke.Size = NumberSequence.new(w * 0.8, w * 2.2)
+		smoke.Lifetime = NumberRange.new(2.5, 4.0)
+	end
+
 	local light = Instance.new("PointLight")
 	light.Name = "FireLight"
 	light.Color = ORANGE
@@ -96,8 +122,74 @@ function FireVisuals.buildCellSet(cfg, cellSize, parent)
 	light.Shadows = false
 	light.Parent = part
 
+	-- STAGE 2: inner yellow core (the two-tone taper that kills "square" at distance).
+	-- Parented under the shell for containment; sync drives its CFrame independently.
+	local core = nil
+	if flicker then
+		local cr = cfg.teardropCoreRatio or 0.45
+		core = Instance.new("Part")
+		core.Name = "FlameCore"
+		core.Shape = Enum.PartType.Ball
+		core.Size = Vector3.new(w * 0.9 * cr, h * cr, w * 0.9 * cr)
+		core.Anchored = true
+		core.CanCollide = false
+		core.CanQuery = false
+		core.CanTouch = false
+		core.CastShadow = false
+		core.Material = Enum.Material.Neon
+		core.Color = Color3.fromRGB(255, 235, 120)  -- hot yellow heart
+		core.Transparency = 0
+		core.Parent = part
+	end
+
+	-- STAGE 2: flame ParticleEmitter at the shell base so licks rise THROUGH the shape.
+	-- Uses Roblox's built-in fire sprite for guaranteed kid-warm palette.
+	-- CONTINGENCY (do not build now): if fire_main.dds misrenders in Studio, one-line swap:
+	--   local fire = Instance.new("Fire"); fire.Parent = part
+	-- (pool-capped by construction; the literal "kid sees fire" object).
+	local flame = nil
+	if flicker then
+		local flameAtt = Instance.new("Attachment")
+		flameAtt.Name = "FlameAtt"
+		flameAtt.Position = Vector3.new(0, -h * 0.25, 0)
+		flameAtt.Parent = part
+		flame = Instance.new("ParticleEmitter")
+		flame.Name = "Flame"
+		flame.Texture = "rbxasset://textures/particles/fire_main.dds"  -- Roblox built-in fire sprite
+		flame.LightEmission = 1                                        -- additive = glows, kid-warm not gory
+		flame.Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 235, 120)),
+			ColorSequenceKeypoint.new(0.4, Color3.fromRGB(255, 140, 30)),
+			ColorSequenceKeypoint.new(1, Color3.fromRGB(140, 35, 15)),
+		})
+		flame.Size = NumberSequence.new({                              -- grow-then-shrink lick
+			NumberSequenceKeypoint.new(0, w * 0.35),
+			NumberSequenceKeypoint.new(0.3, w * 0.55),
+			NumberSequenceKeypoint.new(1, w * 0.1),
+		})
+		flame.Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0.15),
+			NumberSequenceKeypoint.new(1, 1),
+		})
+		flame.Lifetime = NumberRange.new(0.5, 0.9)  -- short = licking, not a smoke column
+		flame.Rate = cfg.flameRate or 10
+		flame.Speed = NumberRange.new(8, 14)         -- upward
+		flame.SpreadAngle = Vector2.new(12, 12)      -- slight wander
+		flame.Enabled = false                        -- sync enables exactly like smoke
+		flame.Parent = flameAtt
+	end
+
 	part.Parent = parent
-	return { part = part, smoke = smoke, light = light }
+
+	-- Compute core vertical offset from the marker base (negative = below centre = sits at base).
+	local coreOffsetY = core and (-h * 0.5 + core.Size.Y * 0.5) or 0
+
+	return {
+		part = part, smoke = smoke, light = light,
+		core = core, flame = flame,
+		baseW = part.Size.X, baseH = part.Size.Y,
+		coreOffsetY = coreOffsetY,
+	}
 end
 
 --------------------------------------------------------------------------------
@@ -124,6 +216,7 @@ end
 --------------------------------------------------------------------------------
 -- One cut-off countdown RING: a thin neon torus-ish ring (a flat cylinder outline) at a grove centre.
 -- Reused per grove; :sync scales/pulses/hides it off fireGraceUntil.
+-- NOTE: buildRing is reused by Stage 1 at RescueServer L346 — do NOT touch its signature or behavior.
 --------------------------------------------------------------------------------
 function FireVisuals.buildRing(cfg, radius, parent)
 	local ring = Instance.new("Part")
@@ -143,6 +236,43 @@ function FireVisuals.buildRing(cfg, radius, parent)
 	ring.CFrame = CFrame.Angles(0, 0, math.rad(90))
 	ring.Parent = parent
 	return { part = ring }
+end
+
+--------------------------------------------------------------------------------
+-- STAGE 2: ONE mega centroid plume — the long-range "there's a wildfire over THERE" read.
+-- One invisible anchored anchor part + ONE big dark long-lived emitter, repositioned to the
+-- burning-set centroid each sync; Rate grows with the burning count (urgency channel).
+-- Allocated ONCE in FireVisuals.new, only under flameStyle=="flicker". ONE emitter total.
+--------------------------------------------------------------------------------
+function FireVisuals.buildCentroidPlume(cfg, parent)
+	local anchor = Instance.new("Part")
+	anchor.Name = "PlumeAnchor"
+	anchor.Size = Vector3.new(4, 4, 4)
+	anchor.Anchored = true
+	anchor.CanCollide = false
+	anchor.CanQuery = false
+	anchor.CanTouch = false
+	anchor.CastShadow = false
+	anchor.Transparency = 1
+	local att = Instance.new("Attachment")
+	att.Parent = anchor
+	local emitter = Instance.new("ParticleEmitter")
+	emitter.Name = "MegaPlume"
+	emitter.Color = ColorSequence.new(Color3.fromRGB(55, 50, 48), Color3.fromRGB(110, 104, 100))
+	emitter.LightEmission = 0
+	emitter.Size = NumberSequence.new(cfg.plumeSizeMin or 20, cfg.plumeSizeMax or 80)
+	emitter.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.45),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	emitter.Lifetime = NumberRange.new(6, 10)
+	emitter.Rate = 0
+	emitter.Speed = NumberRange.new(10, 16)
+	emitter.SpreadAngle = Vector2.new(10, 10)
+	emitter.Enabled = false
+	emitter.Parent = att
+	anchor.Parent = parent
+	return { part = anchor, emitter = emitter }
 end
 
 --------------------------------------------------------------------------------
@@ -181,6 +311,15 @@ function FireVisuals.new(FireGrid, cfg, cellSize, container)
 	self.ringPool = {}
 	self.tickN = 0
 
+	-- STAGE 2: ONE centroid plume, allocated only under flicker. Under static: nil → container
+	-- Instance tree is byte-identical to pre-Stage-2.
+	self.flicker = (cfg.flameStyle == "flicker")
+	self.plume = nil
+	if self.flicker then
+		self.plume = FireVisuals.buildCentroidPlume(cfg, container)
+		self.plume.part.CFrame = CFrame.new(0, -5000, 0)
+	end
+
 	return self
 end
 
@@ -204,6 +343,8 @@ end
 -- perf diag). `graceUntil` = {[g]=deadlineElapsed}; `elapsed` = round-elapsed seconds (for ring pulse).
 --
 -- PURE arithmetic + Instance property writes only (no allocation) — this is what keeps it ≤1.5ms.
+-- STAGE 2: under flicker, also writes teardrop breathing + flame enable + smoke lean + plume drive.
+-- Under static (default): every new code path is gated behind `if flicker then` → zero new writes.
 --------------------------------------------------------------------------------
 function FireVisuals.sync(self, grid, graceUntil, elapsed)
 	local FireGrid = self.FireGrid
@@ -222,24 +363,80 @@ function FireVisuals.sync(self, grid, graceUntil, elapsed)
 	end
 	local span = math.max(1, maxAge - minAge)
 
+	-- STAGE 2: precompute per-sync constants (only used under flicker; computed once here).
+	local flicker = self.flicker
+	local lean = self.cfg.smokeLeanStrength or 0
+	local wx, wz = grid.windX or 0, grid.windZ or 0
+	-- leanCF: rotation that tips the teardrop's up-vector toward the wind.
+	-- axis = up × wind = (wz, 0, -wx) in XZ plane.
+	local leanCF = nil
+	if flicker then
+		leanCF = CFrame.fromAxisAngle(Vector3.new(wz, 0, -wx), math.rad(self.cfg.teardropLeanDeg or 8))
+	end
+	local amp = self.cfg.flickerAmp or 0.15
+	local cx, cz = 0, 0  -- centroid accumulator for the mega-plume
+
 	for i = 1, self.maxBurning do
 		local set = self.cellPool[i]
 		local b = burning[i]
 		if b then
 			local t = (b.age - minAge) / span
 			local col = ageColor(t)
-			set.part.CFrame = CFrame.new(b.x, (self.cfg.markerHeight or 34) * 0.5, b.z)
+			if flicker then
+				-- STAGE 2: deterministic 1Hz breathing — phase from tickN + cell position (NO math.random).
+				local ph = b.x * 0.013 + b.z * 0.007 + self.tickN * 1.3
+				local s = 1 + amp * math.sin(ph)
+				set.part.Size = Vector3.new(set.baseW, set.baseH * s, set.baseW)
+				-- lean the teardrop downwind.
+				local place = CFrame.new(b.x, (self.cfg.markerHeight or 34) * 0.5, b.z) * leanCF
+				set.part.CFrame = place
+				-- drive the inner core to its base position.
+				set.core.CFrame = place * CFrame.new(0, set.coreOffsetY, 0)
+				set.core.Color = Color3.fromRGB(255, 235, 120)
+				set.core.Transparency = 0
+				set.flame.Enabled = true
+				-- accumulate centroid.
+				cx += b.x; cz += b.z
+			else
+				set.part.CFrame = CFrame.new(b.x, (self.cfg.markerHeight or 34) * 0.5, b.z)
+			end
 			set.part.Color = col
 			set.part.Transparency = 0.1
 			set.light.Color = col
 			set.light.Enabled = true
 			set.smoke.Enabled = true
+			-- STAGE 2: lean the smoke plume toward the wind.
+			-- lean==0 → this branch never writes → Acceleration stays build-time (0,26,0) = identity.
+			if lean ~= 0 then
+				set.smoke.Acceleration = Vector3.new(wx * lean, 26, wz * lean)
+			end
 		else
 			-- cull: park + silence (no destroy)
 			set.part.Transparency = 1
 			set.light.Enabled = false
 			set.smoke.Enabled = false
 			set.part.CFrame = CFrame.new(0, -5000, 0)
+			if flicker then
+				set.flame.Enabled = false
+				set.core.Transparency = 1
+				set.core.CFrame = set.part.CFrame
+			end
+		end
+	end
+
+	-- STAGE 2: drive the ONE centroid mega-plume (nil under static — no-op).
+	if self.plume then
+		if n > 0 then
+			local px, pz = cx / n, cz / n
+			self.plume.part.CFrame = CFrame.new(px, (self.cfg.markerHeight or 34), pz)
+			self.plume.emitter.Rate = math.min(
+				self.cfg.plumeRateMax or 20,
+				(self.cfg.plumeRateBase or 2) + (self.cfg.plumeRatePerCell or 0.5) * n)
+			self.plume.emitter.Acceleration = Vector3.new(wx * lean, self.cfg.plumeRise or 14, wz * lean)
+			self.plume.emitter.Enabled = true
+		else
+			self.plume.emitter.Enabled = false
+			self.plume.part.CFrame = CFrame.new(0, -5000, 0)
 		end
 	end
 
@@ -254,10 +451,10 @@ function FireVisuals.sync(self, grid, graceUntil, elapsed)
 		local idx = 1
 		while idx <= N * N and emberCount < self.maxEmber do
 			if grid.state[idx] == FireGrid.EMBER then
-				local cz = math.floor((idx - 1) / N) + 1
-				local cx = (idx - 1) % N + 1
-				local x = (cx - 1 + 0.5) * cs - grid.gridHalf
-				local z = (cz - 1 + 0.5) * cs - grid.gridHalf
+				local cz2 = math.floor((idx - 1) / N) + 1
+				local cx2 = (idx - 1) % N + 1
+				local x = (cx2 - 1 + 0.5) * cs - grid.gridHalf
+				local z = (cz2 - 1 + 0.5) * cs - grid.gridHalf
 				emberCount = emberCount + 1
 				local patch = self.emberPool[emberCount]
 				patch.part.CFrame = CFrame.new(x, 0.5, z)
@@ -306,6 +503,7 @@ function FireVisuals.destroy(self)
 	for _, set in ipairs(self.cellPool) do set.part:Destroy() end
 	for _, p in ipairs(self.emberPool) do p.part:Destroy() end
 	for _, r in ipairs(self.ringPool) do r.part:Destroy() end
+	if self.plume then self.plume.part:Destroy(); self.plume = nil end
 	self.cellPool, self.emberPool, self.ringPool = {}, {}, {}
 end
 
