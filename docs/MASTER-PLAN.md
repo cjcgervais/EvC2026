@@ -49,6 +49,31 @@ optimize, plan and build."* The core loop (catch → carry → bank vs the fire 
 
 ---
 
+## ✅ S43 PROGRESS (2026-07-21) — shore-up done, Stage 3 two-thirds done, B7 opened
+
+Worked directive #4's order literally (shore up BEFORE features). All on `updraft`, each red-teamed,
+ladder Tier-4 105 → **128** tests.
+
+- **§3.4 IS NOW MACHINE-PINNED** — `tests/perf.spec.luau` (particles / lights+shadows / allocation-free
+  sync / reported timing). It found a real breach on day one: worst `FireGrid.step` 4.37ms vs the ≤1.5ms
+  budget → optimized to ~1.1-2.0ms worst, `recomputeCutOff` 5.7× faster, **proven bit-identical** across
+  10 seeded rounds + the red-teamer's stronger per-tick harness. Rule of record: assert WORK
+  deterministically, only REPORT wall-clock (Lune ms ≠ Roblox ms).
+- **Kid-legibility Stage 3a (critter FEAR) + 3c (fire ROAR) are LIVE and unflown.** 3b (world-dims) is
+  deliberately LAST and a **CANDIDATE FOR CUT** — it is the only channel that can fight the legibility
+  Stage 1+2 won, so Chad's Play decides whether that global-Lighting risk is ever spent.
+- **B7 opened:** the consult is written (`docs/rescue-consults/B7-touch-design.md`) and **P1 is BUILT
+  INERT** (`TouchAimAdapter` + parity oracle). Structural finding: the aim law consumes ONE input, so
+  touch is a delta-source ADAPTER, never a new control law.
+- **Mobile perf ceiling, from our own gate:** 30 non-shadow PointLights are the low-end cliff;
+  `Fire.maxVisualBurning` 30→12 is the ONE master dial (moves flipbook+emitter+light together).
+
+**▶ BLOCKED ON CHAD (nothing else is):** ① the Play (3a+3c; also decides 3b build-or-cut) ② **DRAG or
+TAP** — the one B7 question; P1 was built ahead on Fable's DRAG recommendation and is discardable at
+zero cost if the answer is TAP. Then: B7-P2 proof-of-feel → B4 → B5 → Phase C (C1 levels).
+
+---
+
 ## 1. The thesis (why this plan is shaped this way)
 
 The 14-bug autopsy of every playtest bug Chad chased says: **~10 of 14 were pure
