@@ -32,8 +32,26 @@ Worked Chad's S42 directive #4 order literally: shore up FIRST, then the next ki
   have teeth; and its Medium caught that my fear-leads-loss test probed the grove CENTRE while the game stamps
   at PERCH positions — the easy case, flattering the number. Hardened to the worst-case perch + a min-lead
   floor: **96/96 groves panicked first, mean 23.0s (was a flattering 40.7s), MIN 4s.**
-- **Ladder: Tier-4 113/113 · rojo PASS · luau-lsp 0 NEW · selene UNAVAILABLE(404).** `updraft` is up to date
-  with origin apart from this session's 3 commits (the older "~20 unpushed" note was stale).
+- **④ STAGE 3c — THE FIRE ROARS** (`Fire.fireAudio=true` live). `RescueRules.fireRoarVolume` is a pure
+  stateless curve — silent beyond 900 studs, full inside 200, `t^1.5` between so the roar SWELLS as you
+  commit; the client recomputes Volume every frame from the distance to the nearest `FireCell`, so no burning
+  cells ⇒ Volume 0 that same frame. **Red-team BLOCKED it first:** `teardownDrive` mutes wind+flap (with a
+  comment naming exactly this bug class) but nothing muted the roar → crashing inside the fire band left it
+  looping at FULL VOLUME through death/respawn. Fixed in both teardown paths.
+  ⚠️ **ASSET IDS ARE THE ONE UNVERIFIABLE PART.** Roblox's 2022 audio-privacy purge privated most pre-2022
+  third-party audio, so a web-sourced id is a coin flip and no headless gate can prove a sound loads. The
+  client walks an ordered candidate chain and PRINTS the verdict per id; realistically it is **"id 1 or
+  bust"** (`9046850948` is in the block Roblox itself uploaded as the curated public library; the other two
+  are pre-purge and likely dead). If all fail: Studio → Toolbox → Audio → Copy Asset ID → paste FIRST in
+  `Fire.roarAssetIds` → Stop and re-Play.
+- **⑤ B7 TOUCH CONSULT + P1 BUILT INERT.** `docs/rescue-consults/B7-touch-design.md`. Structural finding: the
+  whole aim law consumes ONE input — the pixel delta at `BirdController:2495` — so **touch is a delta-source
+  ADAPTER above that line, never a new control law** (kernel + instructor byte-identical by construction).
+  `src/shared/TouchAimAdapter.luau` + `tests/touchaim.spec.luau` are BUILT and **INERT** (`Controls.touchAim
+  = false`, nothing requires the module): drag = mouse-parity swing, hold past a 60px band = the rim-pin
+  analog, lift = zero forever. Gated by a PARITY ORACLE (summed deltas == displacement × gain).
+- **Ladder: Tier-4 125/125 · rojo PASS · luau-lsp 0 NEW · selene UNAVAILABLE(404).** `updraft` is up to date
+  with origin apart from this session's commits (the older "~20 unpushed" note was stale).
 
 **▶ CHAD'S PLAY (only he can judge this):** fly `ember_valley`.
 ① **The Stage-3a read:** as the fire closes on a grove, do the squirrels *scare you into re-routing* — does a
@@ -46,15 +64,30 @@ chevron) from a common at scan altitude, or did the red wash out triage-by-value
 ④ **Smoke (perf, behavior-preserving):** set `Fire.perfDiag=true` — fire seeds ~10s, the wall sweeps downwind,
 a cut-off grove rings then balloon-lifts ~8s later, `[Fire] tick … ms=` stays sub-ms. **Any behavioral
 difference at all in the burn = revert** (the perf change claims bit-identity).
+⑤ **The roar (3c):** FIRST check Output for `[FireAudio] roar asset 1/3 LOADED` (if every id failed, the fix
+is in the warning — 30 seconds in the Toolbox). Then fly at the grove from >900 studs: silence → a swell from
+~900 → a deep roar inside 200. Knobs: `roarFarR / roarNearR / roarGamma / roarPitch / roarMaxVol`.
+⑥ **The roar's regression test:** crash into terrain *inside* the roar band — it must go SILENT during the
+death window and be correct after respawn (this is the red-team BLOCK that was fixed). Also orbit at ~400 and
+toggle Space free-look: the roar should stay steady (it is bird-anchored on purpose — camera-anchoring would
+warble it as you pan).
 
-**▶ NEXT (unchanged order, minus what S43 did):** Stage **3c** fire roar/crackle + ignition whoomp (pre-designed
-by Fable: one looping Sound, Volume = stateless per-frame function of distance to the nearest replicated marker,
-S37/S38 architecture; gate `Fire.fireAudio`; the un-headless-verifiable part is the ASSET IDs — pin known-good
-ones before the flight) → Stage **3b** world-dims-orange **LAST and a CANDIDATE FOR CUT** (it is the only
-channel that can fight the legibility Stage 1+2 won; if Chad reports pressure already lands, the global-Lighting
-risk never needs spending) → **B5** leap variety + saved-crowd + squirrel squeak SFX → **B7** Fable touch-design
-consult → **B4** canopy collision + trails → **PHASE C: C1 persistence + level track** (Chad's "levels unlock"
-requirement) → C2 The Den → C2.5 critter casts (frogs) → C3 art pass.
+**▶ TWO THINGS ARE WAITING ON CHAD (nothing else is blocked):**
+1. **The Play** — Stage 3a + 3c are LIVE and unflown (checklist above). His verdict also decides whether Stage
+   **3b** (world-dims-orange) is built or **CUT**: it is the only Stage-3 channel that can fight the legibility
+   Stage 1+2 won, so if he reports the pressure already lands, that global-Lighting risk is never spent.
+2. **DRAG or TAP** — the one B7 question. *On a phone, should your finger MOVE the cursor ring (DRAG, the
+   recommendation — P1 is already built for it) or PLACE it (TAP)?* His one word decides whether B7-P2's
+   one-line seam ships the built adapter or a tap variant. **Nothing past P2 gets built until he flies it.**
+
+**▶ NEXT (in order):** **B7-P2** proof-of-feel (one-line seam at `BirdController:2495` + a bare flap slider;
+Studio Device-Emulator; CHAD GATE) → **B4** canopy collision + trails (unblocked, no assets, no feel gate) →
+**B5** leap variety + saved-crowd + squirrel squeak SFX (same asset caveat as 3c — batch the audio decisions)
+→ Stage **3b** ONLY if his Play says pressure is still missing → **PHASE C: C1 persistence + level track**
+(Chad's "levels unlock" requirement) → C2 The Den → C2.5 critter casts (frogs) → C3 art pass.
+Mobile note for B7-P4: S43's own perf gate sets the ceiling — the 30 non-shadow PointLights are the low-end
+cliff and `Fire.maxVisualBurning` 30→12 is the ONE master dial (it moves flipbook + emitter + light
+together); the fire SIM stays server-side so the burn is bit-identical.
 
 ---
 

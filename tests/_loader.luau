@@ -42,6 +42,7 @@ local MODULES = {
 	BounceRules   = "src/shared/BounceRules.luau",
 	FeatherFX     = "src/shared/FeatherFX.luau",
 	FeatherBurst  = "src/shared/FeatherBurst.luau",
+	TouchAimAdapter = "src/shared/TouchAimAdapter.luau",
 }
 
 -- Preload every source string (before any luau.load; fs yields).

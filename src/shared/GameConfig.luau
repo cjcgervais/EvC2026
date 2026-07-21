@@ -1403,6 +1403,22 @@ GameConfig.Camera = {
 -- camera. The lowered STABILITY_RATE is what lets your aim actually hold. PLAYTEST-PROVISIONAL.
 --------------------------------------------------------------------------------
 GameConfig.Controls = {
+	-- ── B7-P1 TOUCH AIM (INERT — nothing reads these yet; B7-P2 wires the one-line seam). ──
+	-- The touch analog of the aim law, as a pure DELTA SOURCE above BirdController:2495. The whole
+	-- signed-off pipeline (world cursor, curl, rim-pin, CS-1, CS-8) lives downstream of that read and
+	-- never knows the device, so touch is a source swap and NEVER a new control law.
+	-- ⚠️ CHAD GATE: whether the finger MOVES the cursor (drag, these dials) or PLACES it (tap) is his
+	-- call — B7-P2's proof-of-feel flight is what answers it. Do not build past P2 before he flies.
+	touchAim        = false, -- INERT. true = the adapter feeds the aim seam on touch devices.
+	touchDragGain   = 1.4,   -- finger-px → mouse units. Phone px are physically smaller than a mouse
+	                         -- inch, so 1 px is worth ~1.3-1.6 to keep the SWING feeling mouse-equal.
+	touchBandPx     = 60,    -- dead-band radius from where the finger LANDED. Inside it: pure 1:1 drag.
+	                         -- Too big reads as "I keep swiping to hold a turn"; too small as "a nudge
+	                         -- becomes a turn". Both are dials, not architecture (consult §1-A).
+	touchHoldRate   = 6.0,   -- px/sec of synthetic delta per px of overshoot past the band — the
+	                         -- rim-pin analog: a locked mouse has infinite travel, a finger does not.
+	touchHoldMaxPxPerSec = 1400, -- clamp so a finger jammed at the screen edge can't spin the cursor.
+
 	mouseSteer      = false, -- DISABLED for now (session 7) — keyboard-only control while we tune flight feel. Flip back to true to re-enable mouse nose-aim.
 	mouseSensitivity= 1.0,   -- mouse-delta -> virtual-stick gain (higher = nose moves more per mouse inch)
 	-- Spring of the stick back to center (per-sec) when you stop moving the mouse. SPLIT by axis:
