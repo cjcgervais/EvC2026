@@ -43,6 +43,12 @@
       },
       "FeatherBurst": {
         "$path": "src/shared/FeatherBurst.luau"
+      },
+      "CrowdLayout": {
+        "$path": "src/shared/CrowdLayout.luau"
+      },
+      "TouchAimAdapter": {
+        "$path": "src/shared/TouchAimAdapter.luau"
       }
     },
 

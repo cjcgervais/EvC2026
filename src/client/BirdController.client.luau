@@ -2317,6 +2317,114 @@ local function scanSquirrels(dt)
 			end
 		end
 	end
+
+	-- ─────────────────────────────────────────────────────────────────────────────────────
+	-- B5a — THE SAVED CROWD. "The crowd IS the scoreboard": every squirrel you delivered stands
+	-- on the meadow, so a five-year-old reads their score with zero numerals and a skilled
+	-- pilot's meadow visibly fills faster. Before this a delivered squirrel was :Destroy()ed and
+	-- the whole rescue effort evaporated (bible P4, "everyone you save saves with you").
+	--
+	-- It runs HERE, at the tail of the squirrel presentation pass, rather than in its own
+	-- function: this file is AT the Luau 200 module-local cap and a module-level `local function`
+	-- is itself a local (tests/compile.spec caught exactly that). The saved crowd IS squirrel
+	-- presentation, so this is a coherent home and not only a workaround. For the same reason the
+	-- pool is a Workspace folder found by name and its growth clock + cheer timer ride on folder
+	-- ATTRIBUTES — the same trick as HopBaseY and SqueakSrc.
+	--
+	-- QUARANTINE, load-bearing: crowd members get NO halo, NO chevron and NO hops. Those three
+	-- ARE the certified Stage-1 "this critter needs you" signal, and the meadow is the one place
+	-- where nobody needs rescuing. They never react to fire or Danger either — the safe zone is
+	-- calm by construction.
+	-- ─────────────────────────────────────────────────────────────────────────────────────
+	repeat
+		local folder = workspace:FindFirstChild("SavedCrowd")
+		-- Kill switch tears DOWN, so flipping the knob off mid-Play (the natural tuning compare)
+		-- doesn't leave a frozen, unposed crowd standing there.
+		if not RES.savedCrowd then
+			if folder then folder:Destroy() end
+			break
+		end
+		local target = math.min(rescueState.rescued or 0, RES.crowdMax or 24)
+		if target <= 0 then
+			if folder then folder:Destroy() end   -- fresh session / reset: no crowd, no stragglers
+			break
+		end
+		if not folder then
+			folder = Instance.new("Folder")
+			folder.Name = "SavedCrowd"
+			folder.Parent = workspace
+		end
+
+		local now = os.clock()
+
+		-- CHEER off the DELIVERY, not off model growth: past crowdMax we stop adding bodies, but the
+		-- payoff beat must still fire — silently swallowing the celebration at 24 saves would be a
+		-- design decision nobody made (red-team F6).
+		if (rescueState.rescued or 0) > (folder:GetAttribute("LastRescued") or 0) then
+			folder:SetAttribute("LastRescued", rescueState.rescued or 0)
+			folder:SetAttribute("CheerUntil", now + (RES.crowdCheerS or 2.2))
+		end
+
+		-- GROW one member per hop beat, so the child WATCHES the number they just counted turn into
+		-- squirrels. A crowd that grew silently between rounds would be décor, not a scoreboard.
+		local shown = #folder:GetChildren()
+		if shown < target and now >= (folder:GetAttribute("NextGrow") or 0) then
+			folder:SetAttribute("NextGrow", now + (RES.hopBeat or 0.35))
+			-- NEVER WaitForChild here: scanSquirrels runs BEFORE the body CFrame write, so an unbounded
+			-- yield would silently skip that frame's flight write and leak a thread every beat. If the
+			-- module is missing (the Rojo mapping bug this packet just fixed), say so and stay inert.
+			local mod = ReplicatedStorage:FindFirstChild("CrowdLayout")
+			if not mod then
+				warn("[SavedCrowd] CrowdLayout is not in ReplicatedStorage — crowd disabled."
+					.. " Check default.project.json maps src/shared/CrowdLayout.luau.")
+				break
+			end
+			local seat = require(mod).layout(RES, shown + 1)[shown + 1]
+			if seat then
+				local sx = RES.deliverPos.X + seat.dx
+				local sz = RES.deliverPos.Z + seat.dz
+				-- Seat them on the ACTUAL pad surface rather than guessing its geometry: the SafePad is
+				-- queryable, so a short downward ray finds the ground they should be standing on.
+				local y = (RES.deliverPadY or 250) + 6
+				local rp = RaycastParams.new()
+				rp.FilterType = Enum.RaycastFilterType.Exclude
+				rp.FilterDescendantsInstances = { folder, birdModel }
+				local hit = workspace:Raycast(Vector3.new(sx, y + 60, sz), Vector3.new(0, -160, 0), rp)
+				if hit then y = hit.Position.Y end
+				local ok, m = pcall(BirdBuilder.BuildSquirrel, RES.crowdScale or 4.0, nil)
+				if ok and m and m.PrimaryPart then
+					m.Name = "Saved_" .. (shown + 1)
+					m:SetAttribute("Phase", seat.phase)
+					-- Shadows OFF for the crowd: 24 shadow-casting bodies parked in one spot is the kind of
+					-- cost the §3.4 gate exists to catch, and it matters most on the mobile target.
+					for _, d in ipairs(m:GetDescendants()) do
+						if d:IsA("BasePart") then d.CastShadow = false end
+					end
+					m.Parent = folder
+					m.PrimaryPart.Anchored = true
+					m:PivotTo(CFrame.new(sx, y + (RES.crowdLift or 1.2), sz) * CFrame.Angles(0, seat.yaw, 0))
+					burstFeathers(Vector3.new(sx, y + 6, sz), FEATHER_GOLD, 6)   -- the arrival pop
+				else
+					-- A build failure must cost a log line, never a silent retry loop forever (red-team F3).
+					warn("[SavedCrowd] BuildSquirrel failed: " .. tostring(m))
+					if ok and m then pcall(function() m:Destroy() end) end
+				end
+			end
+		end
+
+		-- POSE — distance-gated: beyond the gate they are static props and cost nothing. Calm by
+		-- default; the whole crowd cheers for a beat after each delivery.
+		local flat = Vector3.new(rootPart.Position.X - RES.deliverPos.X, 0,
+			rootPart.Position.Z - RES.deliverPos.Z).Magnitude
+		if flat > (RES.crowdPoseRange or 600) then break end
+		local cheering = now < (folder:GetAttribute("CheerUntil") or 0)
+		for _, m in ipairs(folder:GetChildren()) do
+			if m:IsA("Model") and m.PrimaryPart then
+				BirdBuilder.PoseSquirrel(m, cheering and "waveBig" or "wave", dt,
+					squirrelPhase * (cheering and 2.4 or 1.0) + (m:GetAttribute("Phase") or 0))
+			end
+		end
+	until true
 end
 
 -- Line-riding STYLE meter (Fable §C) — reuses computeProximity (terrain closeness). Charges when

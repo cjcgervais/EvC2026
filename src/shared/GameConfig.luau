@@ -939,6 +939,9 @@ GameConfig.Rescue = {
 	                           -- crest the falls, never in the climb-out line, never over the pad.
 	crowdScale        = 4.0,   -- BuildSquirrel scale for a crowd member (below the 5.5 stranded scale:
 	                           -- present, but never mistaken for the critter you are flying at).
+	crowdLift         = 1.2,   -- studs above the raycast-found pad surface (feet on the grass, not sunk).
+	crowdCheerS       = 2.2,   -- s the whole crowd waves BIG after each arrival — the deliver payoff.
+	crowdPoseRange    = 600,   -- studs: beyond this the crowd is static props and costs nothing to pose.
 
 	-- CLIENT SLOW-MO PRESENTATION (Fable §B) — dilates anim/FX/audio/camera ONLY; the sim runs real-time.
 	slowmoScale      = 0.25,   -- presentation timescale during the catch window.

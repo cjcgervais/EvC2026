@@ -232,3 +232,41 @@ H.test("§3.4 timing (reported; pathological-only rail)", function()
 	H.ok(worstSync < SANITY_SYNC_MS,
 		("FireVisuals:sync worst %.2fms exceeded the pathological rail %dms"):format(worstSync, SANITY_SYNC_MS))
 end)
+
+--------------------------------------------------------------------------------
+-- 5) THE SAVED CROWD (B5a) — a permanent, growing pile of models parked on the
+--    meadow is exactly the kind of cost §3.4 exists to bound. The crowd is built
+--    from the REAL BirdBuilder, so measure the real per-model instance count and
+--    multiply by the shipped cap rather than trusting an estimate.
+--------------------------------------------------------------------------------
+local CROWD_INSTANCE_BUDGET = 1400   -- ~40 instances/squirrel × 24 + headroom for a pose rig tweak
+
+H.test("§3.4 saved crowd: crowdMax × a real squirrel stays inside the instance budget", function()
+	local BirdBuilder = Loader.load("BirdBuilder")
+	local R = GameConfig.Rescue
+	local cap = R.crowdMax or 24
+	local m = BirdBuilder.BuildSquirrel(R.crowdScale or 4.0, nil)
+	H.ok(m ~= nil, "a crowd squirrel builds at crowdScale (nil palette must be safe)")
+	H.ok(m.PrimaryPart ~= nil, "…and has a PrimaryPart to pivot")
+
+	local instances, parts = 0, 0
+	for _, d in ipairs(m:GetDescendants()) do
+		instances += 1
+		if d:IsA("BasePart") then parts += 1 end
+	end
+	local total = (instances + 1) * cap
+	print(("      [perf] crowd: %d instances (%d parts) per squirrel × cap %d = %d instances")
+		:format(instances + 1, parts, cap, total))
+
+	H.ok(parts > 0, "the crowd squirrel is non-degenerate (it has parts)")
+	H.ok(total <= CROWD_INSTANCE_BUDGET,
+		("a full crowd is %d instances, over the §3.4 budget %d — lower crowdMax or simplify the model")
+			:format(total, CROWD_INSTANCE_BUDGET))
+	-- The crowd is parked permanently in one spot, so it must not add dynamic light/shadow load.
+	-- (The renderer clears CastShadow on every part at build time; this pins the budget it protects.)
+	local lights = 0
+	for _, d in ipairs(m:GetDescendants()) do
+		if d:IsA("PointLight") or d:IsA("SpotLight") or d:IsA("SurfaceLight") then lights += 1 end
+	end
+	H.eq(lights, 0, "a crowd squirrel must carry no dynamic lights — 24 of them park in one place")
+end)
