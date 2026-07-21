@@ -857,6 +857,10 @@ local function relocateSquirrel(id)
 	s.state = "relocating"
 	s.model:SetAttribute("State", "relocating")
 	s.model:SetAttribute("Frantic", nil)
+	-- STAGE 3a: fear is about WHERE YOU STAND, so it cannot survive being moved. Without this a
+	-- squirrel relocated away from the fire arrives on a safe perch still rendering full panic until
+	-- the next fire tick re-stamps it. Exact symmetry with the Frantic clear above.
+	s.model:SetAttribute("Danger", nil)
 	local hz = mission.hazard or {}
 	local foxPos = (fox and fox.pos) or Vector3.new(0, 0, 0)
 	local newPerch, newIdx
@@ -1152,6 +1156,23 @@ local function stepFire(dt, elapsed)
 		end
 	end
 
+	-- STAGE 3a (kid-legibility): stamp each STRANDED squirrel's fear from the grid. Pure arithmetic on
+	-- the authoritative fire (FireGrid.dangerAt — ≤121 cell reads each, ≤15 squirrels), written ONLY when
+	-- the value changes, so replication traffic is a handful of attribute sets across a whole round. The
+	-- client renders it; the server is the single authority for the fact, exactly like Frantic/State.
+	-- Gate: urgencyTells=false ⇒ never written ⇒ every client branch is dead ⇒ byte-identical round.
+	if GameConfig.Fire.urgencyTells and ticksRun > 0 then
+		for _, s in pairs(squirrels) do
+			local m = s.model
+			if s.state == "stranded" and s.perch and m and m.Parent then
+				local d = FireGrid.dangerAt(fireState, s.perch.pos.X, s.perch.pos.Z)
+				if m:GetAttribute("Danger") ~= d then
+					m:SetAttribute("Danger", d)
+				end
+			end
+		end
+	end
+
 	-- diff cut-off groves: a NEWLY cut-off grove starts a cutoffGraceS countdown; when it elapses, lift.
 	local cut = FireGrid.cutOffGroves(fireState)
 	local graceS = hz.cutoffGraceS or 8
@@ -1175,6 +1196,13 @@ local function teardownFire()
 	fireSeeded = false
 	table.clear(fireCutOffSeen)
 	table.clear(fireGraceUntil)
+	-- STAGE 3a: the stamp loop stops with the fire, so without this the survivors freeze mid-panic —
+	-- red flashing halos on a field whose flames were just destroyed, through grace + results.
+	for _, s in pairs(squirrels) do
+		if s.model and s.model.Parent then
+			s.model:SetAttribute("Danger", nil)
+		end
+	end
 	-- THE FIRE (B2): drop the pooled visuals + the replicated folder so nothing lingers between rounds.
 	if fireVisuals then
 		pcall(function() fireVisuals:destroy() end)

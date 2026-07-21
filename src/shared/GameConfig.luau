@@ -874,6 +874,10 @@ GameConfig.Rescue = {
 	                           -- = a HOP, not a float; ~7% of body height: eager, not flying).
 	hopFreq           = 2.0,   -- × squirrelPhase (3 rad/s) → hop period ≈ 0.52 s ≈ 2 hops/s: urgent,
 	                           -- below the ~4 Hz band that reads as vibration at flight distance.
+	dangerHopMult     = 1.5,   -- STAGE 3a: hop-amplitude × at Danger ≥1 (fire closing). Capped at 1.5 so a
+	                           -- frightened critter never hops out of its halo frame — the Stage-1 read wins.
+	dangerHopFreqMult = 1.5,   -- STAGE 3a: hop-frequency × at Danger 2 only. 2 → 3 hops/s: frightened =
+	                           -- faster and smaller-feeling, still under the ~4 Hz vibration band.
 
 	-- CLIENT SLOW-MO PRESENTATION (Fable §B) — dilates anim/FX/audio/camera ONLY; the sim runs real-time.
 	slowmoScale      = 0.25,   -- presentation timescale during the catch window.
@@ -1166,6 +1170,24 @@ GameConfig.Fire = {
 	plumeRise       = 14,      -- studs/s^2 vertical Acceleration (slow rise + long life = a tall horizon column).
 	plumeSizeMin    = 20,      -- particle Size grows 20 → 80 over its life (vetted): a smudge readable from scan altitude.
 	plumeSizeMax    = 80,
+
+	-- ── STAGE 3a (kid-legibility): URGENCY BECOMES VISCERAL — the critter's own FEAR. ──
+	-- A kid needs no decoding to read a scared animal, so the squirrel itself carries the clock:
+	-- the server stamps a Danger 0/1/2 attribute from pure FireGrid arithmetic (FireGrid.dangerAt)
+	-- and the client renders it in Stage 1's ALREADY-SHIPPED vocabulary — pose speed, hop
+	-- amplitude, halo colour/flash. Fear must LEAD the loss (it is pressure you can still act on,
+	-- never a notification that a grove is already gone), which is why it keys off fire DISTANCE
+	-- and not off fireGraceUntil. Non-lethal as always (P3): a squirrel you miss still leaves on
+	-- the Ranger Balloon — panic means "help me faster", never suffering.
+	-- IDENTITY GATE: urgencyTells=false FROM BOOT ⇒ the server never writes Danger, so every client
+	-- branch is dead ⇒ byte-identical round. Honest caveat: the client branches are gated on the
+	-- ATTRIBUTE, not on this flag, so flipping it false mid-session leaves already-stamped squirrels
+	-- rendering their last value. The revert is edit + restart, which is how it is always used.
+	urgencyTells    = true,    -- S43 Stage 3a LIVE for Chad's flight (revert to false = the pre-Stage-3 round).
+	dangerFarR      = 280,     -- Danger 1 "worried": fire within 280 studs. At the SIM'd ~5.4 studs/s front
+	                           -- that is ~50s of warning — early enough to re-route, late enough to mean it.
+	dangerNearR     = 140,     -- Danger 2 "PANIC": within 140 studs ≈ 26s out. Comfortably LEADS cut-off +
+	                           -- the 8s cutoffGraceS balloon, so panic is actionable pressure, not a loss notice.
 }
 
 -- Backfill ember_valley's fire ignite time from GameConfig.Fire (Fire is defined AFTER Missions, so the

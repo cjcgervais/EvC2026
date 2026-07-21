@@ -2071,12 +2071,21 @@ local function scanSquirrels(dt)
 			-- catchable). Render it panicking so you drop your line and race there. The tell (about to catch)
 			-- always wins the pose — the sacred anticipation beat is protected.
 			local isFrantic = (st == "stranded") and (m:GetAttribute("Frantic") == true)
+			-- STAGE 3a (kid-legibility): the server stamps Danger 0/1/2 from the fire grid
+			-- (FireGrid.dangerAt). A kid reads a scared animal with zero decoding, so fear IS the
+			-- urgency channel. Rendered purely in Stage 1's shipped vocabulary — pose speed, hop,
+			-- halo flash — so it AMPLIFIES the legibility Stage 1 won rather than competing with it.
+			local danger = (st == "stranded") and (m:GetAttribute("Danger") or 0) or 0
 			local pose = HALO and "waveBig" or "wave"   -- halo: the frantic two-arm wave IS the default "HELP!"
 			local phase = HALO and (squirrelPhase * 1.6) or squirrelPhase
+			-- Priority ladder — the PLANT tell always outranks fear: the coiled-stillness anticipation
+			-- beat is sacred and must never be stomped by a Danger escalation.
 			if st == "expiring" then pose = "ride"; phase = squirrelPhase
 			elseif isTell then pose = "plant"; phase = squirrelPhase
 			elseif isSoftFail then pose = "waveBig"; phase = squirrelPhase * 2.4   -- fast excited wave
-			elseif isFrantic then pose = "waveBig"; phase = squirrelPhase * 3.4 end -- panic: even faster
+			elseif isFrantic then pose = "waveBig"; phase = squirrelPhase * 3.4     -- fox panic: even faster
+			elseif danger >= 2 then pose = "waveBig"; phase = squirrelPhase * 3.4   -- FIRE PANIC (same read as fox)
+			elseif danger >= 1 then pose = "waveBig"; phase = squirrelPhase * 2.2 end -- worried: quickened wave
 			BirdBuilder.PoseSquirrel(m, pose, dt, phase)
 			-- STAGE 1 HOPS (halo): little urgent hops — motion = alive = wants something. We write the
 			-- anchored Body's Y ONLY (welded cosmetics + Motor6D limbs ride along; the anchored
@@ -2092,8 +2101,14 @@ local function scanSquirrels(dt)
 				if baseY == nil then baseY = sbody.Position.Y; m:SetAttribute("HopBaseY", baseY) end
 				local hop = 0
 				if not isTell and not isClaimed(sid) then
-					hop = (RES.hopAmp or 1.0)
-						* math.abs(math.sin(squirrelPhase * (RES.hopFreq or 2.0) + (tonumber(sid) or 0) * 1.7))
+					-- STAGE 3a: fear drives the hop harder and faster. Stateless per frame (no stored
+					-- animation state, S37 law); a Danger step causes one imperceptible phase jump in the
+					-- |sin| bounce, and Danger steps at most twice in a squirrel's life.
+					local amp = (RES.hopAmp or 1.0)
+					local freq = (RES.hopFreq or 2.0)
+					if danger >= 1 then amp = amp * (RES.dangerHopMult or 1.5) end
+					if danger >= 2 then freq = freq * (RES.dangerHopFreqMult or 1.5) end
+					hop = amp * math.abs(math.sin(squirrelPhase * freq + (tonumber(sid) or 0) * 1.7))
 				end
 				sbody.CFrame = sbody.CFrame + Vector3.new(0, (baseY + hop) - sbody.Position.Y, 0)
 			end
@@ -2114,7 +2129,10 @@ local function scanSquirrels(dt)
 					local baseT
 					if isTell then
 						baseT = 0.05 + 0.15 * (1 - flarePulse)             -- brightest: about to catch
-					elseif isFrantic then
+					elseif isFrantic or danger >= 2 then
+						-- STAGE 3a parity: the shaft beacon is the inert identity fallback, but it must
+						-- carry the fear flash too — otherwise reverting beaconStyle to "shaft" would
+						-- silently drop the Danger channel down to pose speed alone.
 						local fp = 0.5 + 0.5 * math.sin(squirrelPhase * 6) -- urgent flicker
 						baseT = 0.0 + 0.25 * fp
 					else
@@ -2136,8 +2154,10 @@ local function scanSquirrels(dt)
 				local baseT
 				if isTell then
 					baseT = 0.05 + 0.15 * (1 - flarePulse)
-				elseif isFrantic then
-					baseT = 0.25 * (0.5 + 0.5 * math.sin(squirrelPhase * 6))
+				elseif isFrantic or danger >= 2 then
+					baseT = 0.25 * (0.5 + 0.5 * math.sin(squirrelPhase * 6))   -- urgent flash
+				elseif danger >= 1 then
+					baseT = 0.18 + 0.22 * (1 - flarePulse)                     -- worried: brighter than idle
 				else
 					baseT = 0.30 + 0.20 * (1 - flarePulse)
 				end
@@ -2150,6 +2170,14 @@ local function scanSquirrels(dt)
 				if halo then
 					local ringVis = 0.35 + 0.65 * farVis   -- never below 35% presence: the frame survives the dive
 					halo.Transparency = 1 - ringVis * (1 - baseT)
+					-- STAGE 3a: at PANIC the halo flips to the fire-warning red already used by the
+					-- cut-off ring — ONE consistent "fire threat" hue across the whole game. The two
+					-- reads stay split: the HALO is the urgency channel, the CHEVRON keeps its rarity
+					-- colour so triage-by-value survives. Stateless: the rarity hue is read back off
+					-- the chevron each frame (both are built from rarity.beacon), never cached.
+					if chev then
+						halo.Color = (danger >= 2) and (GameConfig.Fire.ringColor or chev.Color) or chev.Color
+					end
 				end
 			end
 		end

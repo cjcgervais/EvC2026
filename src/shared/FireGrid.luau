@@ -613,4 +613,59 @@ function FireGrid.burningCells(grid, maxN)
 	return out
 end
 
+--------------------------------------------------------------------------------
+-- FireGrid.dangerAt — how frightened should the critter standing at world (x,z) be?
+-- Returns 0 (calm) | 1 (worried) | 2 (panic). The Stage-3 "urgency becomes visceral" seam
+-- (docs/KID-LEGIBILITY-PLAN.md): a kid reads ANOTHER CREATURE'S FEAR with no decoding, so the
+-- server derives fear from pure grid arithmetic and the client renders it in Stage 1's own
+-- pose/halo vocabulary. Read-only: no LCG draw, no state write ⇒ B1 determinism is untouched.
+--
+-- Distance is measured to any NON-GREEN cell (smolder/burning/ember), NOT just BURNING. That is
+-- the load-bearing choice: cells never turn back green within a round, so the touched set only
+-- GROWS, so the min distance only SHRINKS, so danger is MONOTONE NON-DECREASING BY CONSTRUCTION —
+-- a squirrel that got scared stays scared until it is rescued. The failure mode ("fear flickers
+-- off as the front passes and the cell cools") is impossible, not merely untested.
+--
+-- Cost: a bounded window of ceil(farR/cellSize) cells each way — 11x11 = 121 cell reads at the
+-- shipped dials, times <=15 stranded squirrels at the fire cadence. Microseconds against §3.4.
+--------------------------------------------------------------------------------
+function FireGrid.dangerAt(grid, x, z)
+	local cfg = grid.cfg or {}
+	local nearR = cfg.dangerNearR or 140
+	local farR = cfg.dangerFarR or 280
+	local cx0, cz0 = worldToCell(grid, x, z)
+	if not cx0 then
+		return 0 -- outside the grid box entirely = outside the burnable annulus = nothing to fear
+	end
+
+	local N = grid.N
+	local state = grid.state
+	local GREEN = FireGrid.GREEN
+	local w = math.ceil(farR / grid.cellSize)
+	local nearSq, farSq = nearR * nearR, farR * farR
+	local best = math.huge
+
+	for cz = math.max(1, cz0 - w), math.min(N, cz0 + w) do
+		local rowBase = (cz - 1) * N
+		for cx = math.max(1, cx0 - w), math.min(N, cx0 + w) do
+			if state[rowBase + cx] ~= GREEN then
+				local wx, wz = cellToWorld(grid, cx, cz)
+				local dx, dz = wx - x, wz - z
+				local d2 = dx * dx + dz * dz
+				if d2 <= nearSq then
+					return 2 -- can't get worse; stop scanning
+				end
+				if d2 < best then
+					best = d2
+				end
+			end
+		end
+	end
+
+	if best <= farSq then
+		return 1
+	end
+	return 0
+end
+
 return FireGrid
