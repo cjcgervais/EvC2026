@@ -3309,12 +3309,24 @@ local function onFlightStep(dt)
 	local bounceHardness = BounceFX.step(dt, headPos, eligibleHit, preSlideVel, RES)
 	if bounceHardness and eligibleHit then
 		local nf = (RES and RES.bounceFeathers) or 10
-		-- Poof OFF the surface along the hit normal so feathers aren't half-buried in terrain.
+		-- Poof OFF the surface along the hit normal so parts aren't half-buried in the surface.
 		local poofPos = eligibleHit.Position + eligibleHit.Normal * 4
-		-- The SMACK: a brief pale dust scuff at the contact instant (FeatherFX is the accent now)...
-		burstFeathers(poofPos, Color3.fromRGB(225, 214, 196), math.floor(nf * (0.6 + 0.4 * bounceHardness)))
-		-- ...and the AFTERMATH: the ring of discrete falling feathers (the read Chad asked for).
-		FP.burst(poofPos)
+		-- B4.1: the CANOPY scatters LEAVES; every other solid throws the certified feather oof. Same
+		-- discrete-parts technique either way (a soft green puff would degrade to a blob — the S41
+		-- tombstone). Honest detail: only the SCUFF colour changes — FP.burst's accent ring is
+		-- hard-coded brown feathers, so a canopy bonk reads green scuff + shed feathers (the bird
+		-- sheds; the leaves scatter), which is the intended read, not an oversight.
+		local kind = RescueRules.surfaceKind(eligibleHit.Instance and eligibleHit.Instance.Name or "")
+		if kind == "leaf" then
+			local leaf = Color3.fromRGB(96, 168, 74)
+			burstFeathers(poofPos, leaf, math.floor(nf * (0.6 + 0.4 * bounceHardness)))
+			FP.burst(poofPos)
+		else
+			-- The SMACK: a brief pale dust scuff at the contact instant (FeatherFX is the accent now)...
+			burstFeathers(poofPos, Color3.fromRGB(225, 214, 196), math.floor(nf * (0.6 + 0.4 * bounceHardness)))
+			-- ...and the AFTERMATH: the ring of discrete falling feathers (the read Chad asked for).
+			FP.burst(poofPos)
+		end
 	end
 
 	-- UPDRAFT line-riding score (legacy; disabled via config — SUPERSEDED by the rescue style meter).

@@ -747,6 +747,15 @@ GameConfig.Rescue = {
 	-- at the two collision call sites (server processCrashes + client onFlightStep); the stored
 	-- Flight.CRASH_SPEED (45) is UNCHANGED so combat is byte-identical if ever un-shelved. The deep
 	-- Y < GROUND_FAILSAFE_Y (-200) kill still applies (nothing legitimately flies that low in the valley).
+	-- B4.1 SOLID TREES (Fable S43 consult). Ghost trees today; flip and the eagle's swept-sphere hits
+	-- the canopy so THREADING the grove at speed becomes the skill flex — and, for free, the existing
+	-- style meter (which only sees CanQuery=true parts) starts charging near trees. Note that is any
+	-- queryable part within styleProxDist along the ray fan, so plain grove OVERFLIGHT charges too,
+	-- not only deliberate skims — intended (the grove becomes live scoring space). NOT lethal:
+	-- nonLethalTerrain already forces every impact to a graze-slide. "off" = the byte-identical ghost
+	-- forest · "trunks" = wood solid, leaves soft (kid-kind fallback) · "full" = both (Fable's flight
+	-- hypothesis — canopy is a roof you skim). Shipped "off" pending Chad's flight; one word to flip.
+	treeCollision    = "off",
 	nonLethalTerrain = true,
 
 	-- TERRAIN "OOF" BOUNCE (Packet B3 — PRESENTATION ONLY). A hard terrain contact now reads as a cartoon

@@ -539,6 +539,39 @@ end
 -- this session: a rule with no home in a pure module has no home in a test either, and a mutation
 -- deleting it passed the whole suite.
 --------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+-- B4.1 — SOLID TREES. Two pure predicates so the truth tables are headless-gated (world-gen itself
+-- lives in a server script no Lune tier can fly, so at minimum the DECISIONS it makes are testable).
+--
+-- Fable's B4 finding dissolved the "lethal tree" fear: Rescue.nonLethalTerrain forces both crash
+-- gates to 1e9, so a solid tree is a graze-slide surface, never a killer. This only decides WHICH tree
+-- parts the eagle's swept-sphere can hit, and how a bonk is FLAVOURED — never lethality (unchanged).
+--------------------------------------------------------------------------------
+
+-- treeQueryable — should a tree part of this KIND ("Trunk" | "Canopy") be a collision surface?
+--   "off"    → neither (byte-identical to the pre-B4 ghost forest)
+--   "trunks" → wood is solid, leaves are soft (the kid-kind fallback)
+--   "full"   → both, so skimming the canopy roof charges the style meter (the flight hypothesis)
+function RescueRules.treeQueryable(cfg, kind)
+	local mode = (cfg and cfg.treeCollision) or "off"
+	if mode == "full" then
+		return kind == "Trunk" or kind == "Canopy"
+	elseif mode == "trunks" then
+		return kind == "Trunk"
+	end
+	return false
+end
+
+-- surfaceKind — classify a hit part NAME into the FX flavour of its bonk. Canopy scatters leaves; every
+-- other solid (trunk, mesa, ground/terrain) throws the certified feather oof. Presentation only — it
+-- changes what you SEE on a graze, never the graze itself.
+function RescueRules.surfaceKind(name)
+	if name == "Canopy" then
+		return "leaf"
+	end
+	return "feather"
+end
+
 function RescueRules.catchChime(cfg, ridersAfter, capacity)
 	cfg = cfg or {}
 	if cfg.chimeEveryCatch then

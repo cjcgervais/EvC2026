@@ -717,3 +717,38 @@ H.test("catchChime: capacity falls back sanely, and the legacy flag restores the
 	H.eq(RescueRules.catchChime(legacy, 1, 10), true, "the comparison flag restores the per-catch ping")
 	H.eq(R.chimeEveryCatch, false, "…and it ships OFF, which is what Chad asked for")
 end)
+
+--------------------------------------------------------------------------------
+-- B4.1 — SOLID TREES. World-gen runs in a server script no Lune tier can fly, but
+-- the DECISIONS it makes (which parts are solid, how a bonk is flavoured) are pure
+-- and gated here. The feel — delicious roof vs sticky ceiling — stays Chad's flight.
+--------------------------------------------------------------------------------
+H.test("treeQueryable: the three modes have exactly the right truth table", function()
+	local function q(mode, kind) return RescueRules.treeQueryable({ treeCollision = mode }, kind) end
+	-- off = the ghost forest, byte-identical to pre-B4
+	H.eq(q("off", "Trunk"), false, "off: trunks are ghosts")
+	H.eq(q("off", "Canopy"), false, "off: canopy is a ghost")
+	-- trunks = wood solid, leaves soft
+	H.eq(q("trunks", "Trunk"), true, "trunks: wood is solid")
+	H.eq(q("trunks", "Canopy"), false, "trunks: leaves stay soft")
+	-- full = both solid (the canopy roof)
+	H.eq(q("full", "Trunk"), true, "full: trunk solid")
+	H.eq(q("full", "Canopy"), true, "full: canopy solid")
+	-- a nil / unknown mode must default to the safe ghost forest, never to solid
+	H.eq(RescueRules.treeQueryable(nil, "Trunk"), false, "nil cfg → ghost (never accidentally solid)")
+	H.eq(RescueRules.treeQueryable({ treeCollision = "wat" }, "Trunk"), false, "unknown mode → ghost")
+	H.eq(q("full", "Beacon"), false, "only Trunk/Canopy are ever made solid — not other named parts")
+end)
+
+H.test("surfaceKind: canopy scatters leaves, every other solid throws the feather oof", function()
+	H.eq(RescueRules.surfaceKind("Canopy"), "leaf", "a treetop bonk scatters leaves")
+	H.eq(RescueRules.surfaceKind("Trunk"), "feather", "a trunk bonk is the certified feather oof")
+	H.eq(RescueRules.surfaceKind("Mesa"), "feather", "the mesa is a feather oof")
+	H.eq(RescueRules.surfaceKind("Terrain"), "feather", "the ground is a feather oof")
+	H.eq(RescueRules.surfaceKind(""), "feather", "an unnamed/unknown surface falls back to feather, never errors")
+end)
+
+H.test("B4.1 ships INERT: treeCollision is off (the ghost forest, byte-identical)", function()
+	H.eq(GameConfig.Rescue.treeCollision, "off",
+		"treeCollision must ship off — solid trees are a Chad-flown feel question, one word to enable")
+end)

@@ -135,8 +135,13 @@ local function anchoredPart(name, size, color, material, parent, queryable)
 end
 
 local function buildTree(pos)
+	-- B4.1 SOLID TREES: the eagle's swept-sphere sees a tree part only when it is queryable. The mode
+	-- knob decides per KIND (RescueRules.treeQueryable); "off" = the pre-B4 ghost forest, byte-identical.
+	-- Nothing lethal changes — Rescue.nonLethalTerrain already makes every impact a graze-slide.
+	local trunkQ = RescueRules.treeQueryable(R, "Trunk")
+	local canopyQ = RescueRules.treeQueryable(R, "Canopy")
 	local h = 60 + rng:NextNumber() * 55           -- trunk height
-	local trunk = anchoredPart("Trunk", Vector3.new(7, h, 7), Color3.fromRGB(96, 66, 40), Enum.Material.Wood, worldFolder)
+	local trunk = anchoredPart("Trunk", Vector3.new(7, h, 7), Color3.fromRGB(96, 66, 40), Enum.Material.Wood, worldFolder, trunkQ)
 	trunk.Shape = Enum.PartType.Cylinder
 	-- Cylinder's length is along X; rotate so it stands up along Y.
 	trunk.CFrame = CFrame.new(pos + Vector3.new(0, h * 0.5, 0)) * CFrame.Angles(0, 0, math.rad(90))
@@ -145,7 +150,7 @@ local function buildTree(pos)
 	local green = Color3.fromRGB(60 + rng:NextInteger(0, 30), 120 + rng:NextInteger(0, 40), 54 + rng:NextInteger(0, 24))
 	for _ = 1, rng:NextInteger(2, 3) do
 		local d = 34 + rng:NextNumber() * 22
-		local blob = anchoredPart("Canopy", Vector3.new(d, d * 0.8, d), green, Enum.Material.Grass, worldFolder)
+		local blob = anchoredPart("Canopy", Vector3.new(d, d * 0.8, d), green, Enum.Material.Grass, worldFolder, canopyQ)
 		blob.Shape = Enum.PartType.Ball
 		blob.CFrame = CFrame.new(pos.X + (rng:NextNumber() - 0.5) * 26, crownY + (rng:NextNumber() - 0.5) * 14, pos.Z + (rng:NextNumber() - 0.5) * 26)
 	end
