@@ -1206,16 +1206,18 @@ GameConfig.Fire = {
 	-- privated the vast majority of pre-2022 third-party audio and new uploads default to private, so a
 	-- web-sourced id is a COIN FLIP. The client walks this list in order and prints a one-glance verdict
 	-- per id, so a dead id costs a line in Output instead of a wasted test flight.
-	-- ── S43 STUDIO RESULT (Chad's first Play) — the chain is why there is any sound at all: ──
-	--   9046850948 → "Asset type does not match requested type" (not audio at all — a bad pick)
-	--   4604808051 → "Asset is not approved for the requester" (the 2022 purge, as predicted)
-	--   1836383941 → LOADED ✅ — the OLDEST id, the one both I and the red-teamer called most likely
-	--                dead. The lesson: age does not predict liveness, so never trim a chain on a guess.
-	-- The two dead ids are recorded above rather than kept in the list: retrying a PROVEN-dead id buys
-	-- nothing and costs ~1.4s of failed preloads plus two red Studio errors every single session.
-	-- IF THIS ONE EVER DIES: Studio → Toolbox → Audio → search "fire" → Copy Asset ID → paste it FIRST
-	-- here → Stop and re-Play (the chain is walked once per session).
-	roarAssetIds    = { 1836383941 },
+	-- ── S43 STUDIO RESULTS — three web-sourced guesses, three different failures: ──
+	--   9046850948 → "Asset type does not match requested type" (not audio at all)
+	--   4604808051 → "Asset is not approved for the requester" (the 2022 privacy purge)
+	--   1836383941 → loaded fine… and is MUSIC. Chad: "I didn't really hear fire, I heard music."
+	-- THE LESSON, which is why this list is now EMPTY: a load gate proves an asset RESOLVES, never that
+	-- it is the right SOUND. Guessing ids off the web burns a real playtest per attempt at no better
+	-- than chance, so the id must come from someone who can PREVIEW it — i.e. from Studio's Toolbox,
+	-- where you hear it before you paste it. Silence is strictly better than music-as-fire: it is
+	-- honest about being unfinished, where wrong audio actively lies about what the fire is.
+	-- TO FILL IT: Studio → Toolbox → Marketplace → Audio → search "fire crackling" → PREVIEW it →
+	-- Copy Asset ID → paste below → Stop and re-Play (the chain is walked once per session).
+	roarAssetIds    = { },
 }
 
 -- Backfill ember_valley's fire ignite time from GameConfig.Fire (Fire is defined AFTER Missions, so the
