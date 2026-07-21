@@ -185,6 +185,21 @@ local function ignite(grid, idx)
 	grid.timer[idx] = grid.smolderMin + lcgNext(grid) * (grid.smolderMax - grid.smolderMin)
 	grid.nextIgniteId = grid.nextIgniteId + 1
 	grid.igniteOrder[idx] = grid.nextIgniteId
+	-- REACH (S43 perf): `reach` is the monotone max distance-from-origin over cells that have LEFT
+	-- green — and a cell can ONLY leave green right here. Stamping it at ignition is therefore
+	-- equivalent to the old per-tick full-grid sweep (which re-derived x,z and a sqrt for every
+	-- non-green cell, ~1000 of them by mid-round), at O(1) per ignition instead of O(N²) per tick.
+	-- ONE boundary difference, deliberate: reach now advances DURING the tick (and immediately on a
+	-- manual igniteAt/seedUpwind) rather than at tick end — e.g. after seedUpwind but before the first
+	-- tick, reach reads its true value instead of 0. Unobservable today (the sole reader is
+	-- FireGrid.stats, which nothing samples mid-tick), but a future HUD consumer should know.
+	local cz = math.floor((idx - 1) / grid.N) + 1
+	local cx = (idx - 1) % grid.N + 1
+	local x, z = cellToWorld(grid, cx, cz)
+	local r = math.sqrt(x * x + z * z)
+	if r > grid.reach then
+		grid.reach = r
+	end
 	return true
 end
 
@@ -322,20 +337,7 @@ local function tick(grid)
 		ignite(grid, idx)
 	end
 
-	-- 4) track reach (monotone farthest ignited-cell distance from origin).
-	--    Only recompute against newly-changed cells is enough; a cheap full scan of active cells
-	--    keeps it exact and is O(active).
-	for idx = 1, grid.N * grid.N do
-		if grid.state[idx] ~= FireGrid.GREEN then
-			local cz = math.floor((idx - 1) / grid.N) + 1
-			local cx = (idx - 1) % grid.N + 1
-			local x, z = cellToWorld(grid, cx, cz)
-			local r = math.sqrt(x * x + z * z)
-			if r > grid.reach then
-				grid.reach = r
-			end
-		end
-	end
+	-- 4) reach is now stamped in ignite() (S43 perf) — exactly equivalent, O(1) per ignition.
 
 	-- 5) refresh the cut-off cache every cutoffCheckEvery ticks (BFS; monotone).
 	if grid.tickCount % grid.cutoffCheckEvery == 0 then
@@ -378,18 +380,38 @@ end
 --------------------------------------------------------------------------------
 function FireGrid.recomputeCutOff(grid)
 	local N = grid.N
-	local reachable = {} -- [idx] = true (GREEN & flood-reached from the safe rim)
-	-- BFS queue seeded from every GREEN cell on the grid border (the border is outside the annulus
-	-- → non-burnable → safe). We seed from all non-burnable GREEN cells adjacent to the grid edge by
-	-- simply seeding the whole outer ring, then flood inward through GREEN cells.
-	local queue = {}
-	local head = 1
+	local total = N * N
+	local groves = grid.groves or {}
+
+	-- SCRATCH BUFFERS (S43 perf — this is where the win came from): this used to allocate two fresh
+	-- tables per call — a ~1900-entry hash plus a queue grown one insert at a time — every
+	-- cutoffCheckEvery ticks. They are now persistent flat arrays on the grid, with a generation stamp
+	-- standing in for "visited" so no clearing pass is needed. Same border seeds, same traversal ⇒
+	-- identical result; only the allocation/rehash cost is gone.
+	-- CONTRACT: `_reachMark`/`_bfsQueue` are DERIVED scratch, never part of the sim state. They must
+	-- never be shared between two grids (a shallow clone would share the mark array while copying
+	-- _reachGen by value → both grids flood at the same gen, read each other's marks as visited, and
+	-- can emit a FALSE cut-off), never be written nil (the `#mark ~= total` reallocation test is sound
+	-- only because table.create fills it and gens only overwrite), and must be STRIPPED from any
+	-- future serialization / state hash / replication of the grid.
+	local mark = grid._reachMark
+	if not mark or #mark ~= total then
+		mark = table.create(total, 0)
+		grid._reachMark = mark
+		grid._bfsQueue = table.create(total, 0)
+	end
+	local queue = grid._bfsQueue
+	local gen = (grid._reachGen or 0) + 1
+	grid._reachGen = gen
+
+	local head, tail = 1, 0
 
 	local function trySeed(cx, cz)
 		local idx = cellIndex(grid, cx, cz)
-		if grid.state[idx] == FireGrid.GREEN and not reachable[idx] then
-			reachable[idx] = true
-			queue[#queue + 1] = idx
+		if grid.state[idx] == FireGrid.GREEN and mark[idx] ~= gen then
+			mark[idx] = gen
+			tail = tail + 1
+			queue[tail] = idx
 		end
 	end
 
@@ -403,26 +425,43 @@ function FireGrid.recomputeCutOff(grid)
 		trySeed(N, cz)
 	end
 
-	-- flood through GREEN cells (N4)
-	while head <= #queue do
+	-- Flood through GREEN cells (N4). PERF (S43): neighbors are walked in INDEX space (±1 = ±x,
+	-- ±N = ±z, exactly what cellIndex computes) with the state table and the GREEN constant hoisted
+	-- into locals — the inner loop was dominated by ~7.6k cellIndex calls + ipairs iterator overhead
+	-- per flood, not by the work. This is a set-reachability flood, so visit ORDER cannot change the
+	-- result (unlike tick()'s spread, whose N4 order fixes the LCG draw sequence and is untouched).
+	local state = grid.state
+	local GREEN = FireGrid.GREEN
+	while head <= tail do
 		local idx = queue[head]
 		head = head + 1
-		local cz = math.floor((idx - 1) / N) + 1
 		local cx = (idx - 1) % N + 1
-		for _, d in ipairs(N4) do
-			local nx, nz = cx + d[1], cz + d[2]
-			if nx >= 1 and nx <= N and nz >= 1 and nz <= N then
-				local nidx = cellIndex(grid, nx, nz)
-				if grid.state[nidx] == FireGrid.GREEN and not reachable[nidx] then
-					reachable[nidx] = true
-					queue[#queue + 1] = nidx
-				end
+		-- -x / +x (guard the row edges so we never wrap onto the neighbouring row)
+		if cx > 1 then
+			local n1 = idx - 1
+			if state[n1] == GREEN and mark[n1] ~= gen then
+				mark[n1] = gen; tail = tail + 1; queue[tail] = n1
 			end
+		end
+		if cx < N then
+			local n2 = idx + 1
+			if state[n2] == GREEN and mark[n2] ~= gen then
+				mark[n2] = gen; tail = tail + 1; queue[tail] = n2
+			end
+		end
+		-- -z / +z
+		local n3 = idx - N
+		if n3 >= 1 and state[n3] == GREEN and mark[n3] ~= gen then
+			mark[n3] = gen; tail = tail + 1; queue[tail] = n3
+		end
+		local n4 = idx + N
+		if n4 <= total and state[n4] == GREEN and mark[n4] ~= gen then
+			mark[n4] = gen; tail = tail + 1; queue[tail] = n4
 		end
 	end
 
 	-- a grove is cut off if NO GREEN cell inside its disc is reachable from the safe rim.
-	for g, grove in ipairs(grid.groves) do
+	for g, grove in ipairs(groves) do
 		if not grid.cutOff[g] then -- monotone: once cut off, stay cut off
 			local center = grove.center or grove.centre
 			local gr = grove.radius or 130
@@ -443,7 +482,7 @@ function FireGrid.recomputeCutOff(grid)
 					local ddx, ddz = x - cx0, z - cz0
 					if ddx * ddx + ddz * ddz <= gr * gr then
 						anyCellInGrove = true
-						if reachable[cellIndex(grid, cx, cz)] then
+						if mark[cellIndex(grid, cx, cz)] == gen then
 							anyReachableGreen = true
 						end
 					end
