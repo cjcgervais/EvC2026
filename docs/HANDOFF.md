@@ -4,6 +4,39 @@ Read this first. It tells the next agent exactly where the project stands, the o
 
 ---
 
+## ▶▶ S42 (2026-07-21) — 🎉 THE FUN VERDICT: kid-legibility Stage 1+2 PASSED · road-ahead directives logged
+
+**Chad flew the S41 kid-legibility build (halo critters + fire-reads-as-fire, live on `updraft` uncommitted)
+and delivered the strongest verdict of the project:** *"EvC2026 is addictive and fun and it has levels to it.
+Its actually fun!… Realizing times to go fast and when to slow down and dont forget to watch the clock…
+Actually very happy with the latest progress. Need to shore it up, optimize, plan and build."*
+
+- **Core loop CONFIRMED FUN** (catch → carry → bank vs the fire clock). Kid-legibility Stage 1+2 Play gate =
+  PASSED. Don't re-litigate the loop. Memory: `project-fun-verdict-road-ahead`.
+- **Kernel note of record:** slight kernel "incorrectness" (the tight mouse-curl beyond plane-realism) **is a
+  feature** — never correct toward textbook aerodynamics. Memory: `feedback-kernel-incorrectness-is-a-feature`.
+- **Chad's directives folded into `docs/MASTER-PLAN.md` §CHAD-DIRECTIVES S42:** ① LEVELS UNLOCK is a
+  REQUIREMENT (Phase C is the flag) · ② squirrel SFX + music ENDORSED (B5 squeak + music polish — schedule,
+  don't defer) · ③ mobile interest (B7 — run the Fable touch-design consult sooner) · ④ SHORE-UP/OPTIMIZE
+  before piling on features · ⑤ "other mediums" = vision note only.
+- **Ladder run on the pending Stage 1+2 diff:** Tier-4 was 102/105 — 3 stale-assumption failures in
+  `firevisuals.spec` (tests assumed the config default was still `flameStyle="static"`; S41 flipped the live
+  defaults to halo/flicker for Chad's flight, which he approved). Fixed by pinning those tests to an explicit
+  `staticCfg()` (static/revert-gate coverage KEPT; live default stays flicker). Now **Tier-4 105/105 · rojo
+  PASS · luau-lsp 0 NEW (pre-existing baseline only) · selene UNAVAILABLE(404)**.
+- **⚠️ HYGIENE:** the Stage 1+2 batch (7 files + `docs/KID-LEGIBILITY-PLAN.md`) is UNCOMMITTED and was never
+  ledgered by the prior session — the S42 ledger entry backfills it. Commit proposed (ASK-gated); `updraft`
+  has ~20 unpushed commits — consider pushing.
+
+**▶ NEXT (the road ahead, in order):** ① commit Stage 1+2 (+ push if Chad approves) → ② Kid-legibility
+**Stage 3** (visceral urgency: squirrel Danger escalation, world dims, fire roar — docs/KID-LEGIBILITY-PLAN.md)
+→ ③ **B5** leap variety + saved-crowd + **squirrel squeak SFX** (Chad-endorsed) → ④ **B7 Fable touch-design
+consult** (design only; Chad decides) → ⑤ **B4** canopy collision + trails → ⑥ **PHASE C: C1 persistence +
+level track** (Chad's "levels unlock" requirement) → C2 The Den → C3 art pass. Shore-up items to fold in:
+perf-envelope check with flicker/plume live (§3.4), B6 FTUE before soft-launch.
+
+---
+
 ## ▶▶ S41 (2026-07-17) — 🔁 master-loop resumed: plan audited/hardened · A0 · empty-map self-diagnosis · A6 smoke boot
 
 **Chad:** *"keep building eagle rescue, fully autonomous, one component at a time, audit our vision and our plan, this

@@ -20,6 +20,35 @@ exit-code gated). Key findings folded in throughout; the bible remains
 
 ---
 
+## ★ CHAD DIRECTIVES — S42 (2026-07-21): THE FUN VERDICT (read before picking a packet)
+
+Chad flew the kid-legibility Stage 1+2 build: *"EvC2026 is addictive and fun and it has
+levels to it. Its actually fun!… very happy with the latest progress. Need to shore it up,
+optimize, plan and build."* The core loop (catch → carry → bank vs the fire clock) is
+**CONFIRMED FUN** — don't re-litigate it. His directives, mapped onto this plan:
+
+1. **"Definately need to have levels unlock"** → **Phase C is a Chad REQUIREMENT**, the
+   post-Phase-B headline. C1 (persistence + level track) is the flag to march toward.
+2. **"little squirrel sounds and music even the better"** → **B5's squeak SFX + music
+   polish (C5's escalation item) are ENDORSED** — schedule, don't defer. Respect the S37
+   stateless per-frame audio architecture; "don't reopen audio" = the flap saga, not new SFX.
+3. **"could be fun on mobile too"** → **B7 has a positive Chad signal** (still design-gated,
+   CHAD decides the touch analog of the aim law — but no longer speculative; run the Fable
+   design consult sooner rather than later so implementation packets exist before Gate C).
+4. **"shore it up, optimize"** → a **SHORE-UP packet precedes new features**: land the
+   pending Stage 1+2 commit, push `updraft` (if Chad approves), perf-envelope check (§3.4,
+   fire tick-ms + particle budget with flicker/plume live), Stage 3 of the kid-legibility
+   plan, then B4/B5.
+5. Kernel note of record: slight kernel "incorrectness" (the tight mouse-curl) **is a
+   feature** — never correct toward realism (memory: `feedback-kernel-incorrectness-is-a-feature`).
+6. **"Other levels can have frogs or snakes other n types of animals?" — YES (S42):** each unlocked
+   valley gets its own CRITTER CAST → packet C2.5 below. The catch loop is animal-agnostic
+   (trigger → leap → talon), so new animals are model + pose + leap-arc + SFX variety, never
+   new mechanics. Frogs are the natural second animal (a frog LEAPING to your talons is the
+   mechanic at its best).
+
+---
+
 ## 1. The thesis (why this plan is shaped this way)
 
 The 14-bug autopsy of every playtest bug Chad chased says: **~10 of 14 were pure
@@ -280,6 +309,14 @@ cap unchanged; tree part count reviewed at C3 (art pass) with an explicit instan
   real formulas = the threshold check. `[model: opus | gate: tests]`
 - **C2 — The Den (collection book).** Rares persist as named pets; collection UI; login greet.
   Rarity stays rescue-only, never purchasable. `[model: opus | gate: batched Play]`
+- **C2.5 — VALLEY CRITTER CASTS (Chad S42: "frogs or snakes other n types of animals").** Each
+  valley = its own animal identity: valley 1 squirrels · valley 2 "Frostfall" candidates =
+  frogs (big showy leap arcs — the mechanic's hero animal) / snow hares · later valleys =
+  snakes (dangle-from-the-talon carry read), turtles (slow leap = easier kid-floor catch),
+  possums/raccoons (already in the bible as rescuers). Per-animal = `BirdBuilder.Build<X>` +
+  poses + leap-arc/SFX flavor on the SAME `RescueRules` catch loop — zero new mechanics, and
+  every new model class ships its `models.spec` geometry test (A-RULE). Rarity tiers + The Den
+  give each cast collection value. `[model: fable designs the cast per valley, opus implements | gate: batched Play]`
 - **C3 — Emberpine art pass (staged, budgeted).** Stylized-chunky canopy (instancing/imposter
   budget written BEFORE art lands), real waterfall dressing, named clearings/grottos. The one
   deliberately expensive packet — split into sub-passes, each perf-checked. `[model: opus | gate: batched Play]`
