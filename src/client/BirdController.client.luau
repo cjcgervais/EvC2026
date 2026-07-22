@@ -55,6 +55,17 @@ local FeatherBurst  = require(ReplicatedStorage:WaitForChild("FeatherBurst")) --
 
 local CAM = GameConfig.Camera
 
+-- S44 BOOT DIAG (Chad: "it just takes a while at the start for everything to render"). Deliberately
+-- on _G, NOT module-locals: BirdController sits hard against Luau's 200-local cap and adding two here
+-- would BRICK the client (it did exactly that earlier this session; compile.spec caught it). Zero
+-- behaviour — `Rescue.bootDiag=false` prints nothing. Pair the output with [BootDiag/server].
+_G.EvCBootT0 = os.clock()
+_G.EvCBoot = function(what)
+	if not (GameConfig.Rescue and GameConfig.Rescue.bootDiag) then return end
+	print(string.format("[BootDiag/client] %7.3fs  %s", os.clock() - _G.EvCBootT0, what))
+end
+_G.EvCBoot("client script running (modules required)")
+
 --------------------------------------------------------------------------------
 -- MATH HELPERS (shared by the mouse-aim instructor + the no-snap chase camera)
 --------------------------------------------------------------------------------
@@ -1206,7 +1217,14 @@ local rescueState = {
 task.spawn(function()
 	if not (RES and RES.enabled) then return end
 	local rr = ReplicatedStorage:WaitForChild("RescueRemotes", 30)
-	if not rr then return end
+	if not rr then
+		-- Same silent one-shot as the Squirrels wait: on nil the HUD clock freezes at 0:00 and every
+		-- catch is rejected on the phase gate, with no console evidence at all (audit finding).
+		warn("[Rescue] RescueRemotes never appeared in 30s — the rescue layer is DEAD for this session"
+			.. " (frozen 0:00 clock, no catches). RescueServer almost certainly errored at boot.")
+		return
+	end
+	_G.EvCBoot("RescueRemotes resolved (catch/deliver wired)")
 	catchRemote   = rr:WaitForChild("CatchSquirrel")
 	deliverRemote = rr:WaitForChild("DeliverSquirrels")
 	rr:WaitForChild("RescueState").OnClientEvent:Connect(function(s)
@@ -1216,7 +1234,18 @@ end)
 
 local squirrelsFolder
 task.spawn(function()
-	if RES and RES.enabled then squirrelsFolder = workspace:WaitForChild("Squirrels", 30) end
+	if RES and RES.enabled then
+		squirrelsFolder = workspace:WaitForChild("Squirrels", 30)
+		-- The 30s timeout is a SILENT one-shot: on nil, scanSquirrels early-returns forever and every
+		-- squirrel becomes uncatchable with no console evidence (audit finding). Say so, loudly.
+		if squirrelsFolder then
+			_G.EvCBoot(("Squirrels folder found (%d already in it)"):format(#squirrelsFolder:GetChildren()))
+		else
+			warn("[Rescue] Squirrels folder never appeared in 30s — squirrels will render but be"
+				.. " UNCATCHABLE for this whole session. RescueServer almost certainly errored at boot;"
+				.. " check the server Output above.")
+		end
+	end
 end)
 
 -- Presentation models (leaping squirrel + back-riders) live here — client-only, never queried.
@@ -3668,6 +3697,7 @@ end)
 -- Deferred so the WaitForChild yield can't delay the TeamAssigned connection above.
 task.spawn(function()
 	birdsFolder = workspace:WaitForChild("Birds")
+	_G.EvCBoot("Birds folder found — bird acquisition can begin")
 
 	birdsFolder.ChildAdded:Connect(function(child)
 		trackModel(child)

@@ -94,7 +94,21 @@ flicker breathing** — one pale slow emitter on an invisible anchor.
 **clean ignition handoff** (never wisp *and* flame on one cell), kill-switch restores the byte-identical
 pre-S44 emitter tree, and a guard asserting `smolderMin/Max` were **not** quietly cut.
 
-### ④ Ladder: **Tier-4 166/166 · rojo PASS · luau-lsp 0 NEW (17 pre-existing) · selene UNAVAILABLE(404)**
+### ④ ✅ CHAD'S VERDICT (flown 2026-07-21): **"yes better now no ping"** — the six-session complaint is
+**CLOSED**. Remaining, in his words: *"it just takes a while at the start for everything to render."*
+
+### ⑤ BOOT DIAG — attribute the startup, don't guess at it (`Rescue.bootDiag=true`, LIVE)
+The perf lane already ruled OUT a frame-rate cliff, which leaves three candidates that no amount of
+code-reading can choose between: **(a)** Roblox replicating the whole place at join (`StreamingEnabled`
+is false, so *everything* arrives before anything renders), **(b)** the client acquisition handshake
+(Birds → Body → NetOwner), **(c)** the **6s INTERMISSION**, which deliberately CLEARS the valley of
+squirrels and then bursts ~600 instances in a single frame at round start. Guessing here is precisely
+how the ping survived five fixes — so both sides now print timestamped milestones and **one flight
+names the cause.** Turn `bootDiag` off once it is named.
+Also fixed while in there: the two **silent** one-shot `WaitForChild(…,30)` timeouts (audit finding)
+now `warn()` loudly instead of leaving the rescue layer dead with zero console evidence.
+
+### ⑥ Ladder: **Tier-4 166/166 · rojo PASS · luau-lsp 0 NEW (17 pre-existing) · selene UNAVAILABLE(404)**
 
 **▶ CHAD'S PLAY (only he can judge these):**
 ① **The ear:** carry 6+ and keep catching — every catch should land as a *snap/thump*, the crew as
@@ -111,8 +125,10 @@ watch the fire START instead of finding it already burning. Knobs: `maxVisualSmo
 `Fire.smolderTell=false`. ⚠️ If it still feels late, the honest next dial is `Fire.igniteAt` (when the
 burn SEEDS) — NOT `smolderMin/Max`, which would speed the whole front and change the balance.
 
-**▶ NEXT (in order):** **Chad's Play on all three above** (the ear, the sky gem, the fire timing) →
-**B7-P2** touch proof-of-feel (Chad answered nothing on DRAG vs TAP yet) → **B4** canopy trails
+**▶ NEXT (in order):** **read the [BootDiag] output from Chad's next Play** and fix the named cause of
+"everything takes a while to render at the start" (if it is (c), the fix is to populate the valley
+during intermission / stagger the burst — do NOT reach for a perf fix the lane already ruled out) →
+his Play verdict on the sky gem + the fire timing → **B7-P2** touch proof-of-feel (Chad answered nothing on DRAG vs TAP yet) → **B4** canopy trails
 → **B5** leap variety → Stage **3b** only if pressure still missing → **PHASE C** persistence/levels.
 
 **▶ DRIFT the audit found (not yet fixed):** `GameConfig:1178` claims ember_valley is "INERT-by-default"

@@ -1220,13 +1220,29 @@ local function teardownFire()
 	fireVisualTick = 0
 end
 
+-- S44 BOOT DIAG (Chad: "it just takes a while at the start for everything to render"). The audit
+-- ruled out a frame-rate cliff, which leaves three very different candidates — Roblox replicating the
+-- place at join, the client acquisition handshake, and the 6s intermission that deliberately EMPTIES
+-- the valley before the round bursts ~600 instances in one frame. Guessing between them is exactly how
+-- the ping bug survived five "fixes", so instead: one flight, timestamped milestones, the cause NAMED.
+-- Zero behaviour; `Rescue.bootDiag=false` prints nothing. Server clock is relative to this script's start.
+local BOOT_T0 = os.clock()
+local function bootStamp(what)
+	if not R.bootDiag then return end
+	print(string.format("[BootDiag/server] %7.3fs  %s", os.clock() - BOOT_T0, what))
+end
+
 local triageBucket = 0
 local function RescueRoundLoop()
+	bootStamp("round loop entered")
 	resolveMission()
+	bootStamp("mission resolved: " .. tostring(mission.id or mission.name or "?"))
 	buildWorld()
+	bootStamp("world built (trees + waterfall)")
 	squirrelsFolder = Instance.new("Folder")
 	squirrelsFolder.Name = "Squirrels"
 	squirrelsFolder.Parent = Workspace
+	bootStamp("Squirrels folder parented (the client's WaitForChild can now resolve)")
 
 	-- THE FOX (#15b): spawn the patrol + connect its Heartbeat step ONCE, only if this mission's hazard is the
 	-- fox. Inert-by-default: waterfall_meadow never enters here → no fox, no den, no step connected.
@@ -1241,6 +1257,7 @@ local function RescueRoundLoop()
 		phase = "intermission"
 		timeLeft = RescueRules.phaseDuration(R, "intermission")
 		clearSquirrels()
+		bootStamp(("INTERMISSION begins (%.0fs) — the valley is now EMPTY of squirrels"):format(timeLeft))
 		pushAll()
 		while timeLeft > 0 do
 			task.wait(0.5)
@@ -1250,12 +1267,14 @@ local function RescueRoundLoop()
 
 		-- ROUND
 		startRound()
+		bootStamp("ROUND ACTIVE — all squirrels populated in ONE frame")
 		triageBucket = 0
 		local triageStarted = false
 		-- THE FIRE (B1): build this round's fire state after the squirrels populate (fire missions only —
 		-- initFire self-gates on hazard.kind and leaves fireState nil otherwise → shipped round untouched).
 		local roundActive = RescueRules.phaseDuration(R, "active")
 		initFire()
+		bootStamp("fire pool allocated (parked; seeds at igniteAt)")
 		while timeLeft > 0 do
 			local dt = task.wait(0.25)
 			timeLeft -= dt

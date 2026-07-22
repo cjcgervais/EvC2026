@@ -829,6 +829,16 @@ GameConfig.Rescue = {
 	gotchaOnPing     = false,  -- true → the catch accent is the old two-note BELL again (was per-catch).
 	woohooOnPing     = false,  -- true → the "wheee!" is the old pitch-bent bell instead of a wind rush.
 	chirpOnPing      = false,  -- true → crew chatter is the old bell metronome instead of chitter clicks.
+	-- S44 BOOT DIAG — Chad: "it just takes a while at the start for everything to render." The audit
+	-- ruled OUT a frame-rate cliff, which leaves three very different candidates and no way to pick
+	-- between them from the outside: (a) Roblox replicating the whole place at join (StreamingEnabled
+	-- is false, so everything arrives before anything renders), (b) the client acquisition handshake
+	-- (Birds folder → Body → NetOwner attribute), (c) the 6s INTERMISSION, which deliberately empties
+	-- the valley of squirrels and then bursts ~600 instances in a single frame when the round starts.
+	-- Guessing between them is how the ping bug survived five "fixes" — so: one flight, timestamped
+	-- milestones on BOTH sides, and the answer is in the Output. Zero behaviour when false.
+	bootDiag         = true,   -- prints [BootDiag/server] and [BootDiag/client] milestone timings.
+	                           -- Turn OFF once the startup cause is named.
 	sfxDiag          = false,  -- true → every one-shot prints "[SFXDiag] event class vol pitch carry/cap" to
 	                           -- Output. The audio channel is the one subsystem that never had a diagnostic,
 	                           -- which is how six guess-cycles happened; ONE flight now NAMES the sound.
