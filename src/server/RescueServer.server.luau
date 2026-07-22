@@ -134,6 +134,28 @@ local function anchoredPart(name, size, color, material, parent, queryable)
 	return p
 end
 
+-- uprightCylinder — the ONE place that knows a Cylinder's axis is local X AND that it needs standing
+-- up. Owning Size, Shape and the rotation together is the point: a caller cannot get the axis wrong,
+-- forget the rotation, or add a cylinder that skips the convention (the compile.spec gate asserts
+-- Enum.PartType.Cylinder appears exactly once in this file — right here).
+--   axial    = extent ALONG the axis: height for a pillar, thickness for a disc.
+--   diameter = the round face.
+--   legacy   = pass R.cylinderAxisFix == false ONLY at the four sites that had it wrong, so the kill
+--              switch restores the old world byte-identically. The two sites that were ALWAYS correct
+--              (UpdraftColumn, FoxFlare) never pass it, so the switch cannot break them.
+local function uprightCylinder(name, axial, diameter, color, material, parent, queryable, pos, legacy)
+	local x, y, z = RescueRules.cylinderSize(axial, diameter, legacy)
+	local p = anchoredPart(name, Vector3.new(x, y, z), color, material, parent, queryable)
+	p.Shape = Enum.PartType.Cylinder
+	p.CFrame = CFrame.new(pos) * CFrame.Angles(0, 0, math.rad(90))
+	return p
+end
+
+-- The four sites S46 fixed pass this; it is `true` only while the kill switch is off.
+local function legacyAxis()
+	return R.cylinderAxisFix == false
+end
+
 local function buildTree(pos)
 	-- B4.1 SOLID TREES: the eagle's swept-sphere sees a tree part only when it is queryable. The mode
 	-- knob decides per KIND (RescueRules.treeQueryable); "off" = the pre-B4 ghost forest, byte-identical.
@@ -141,10 +163,10 @@ local function buildTree(pos)
 	local trunkQ = RescueRules.treeQueryable(R, "Trunk")
 	local canopyQ = RescueRules.treeQueryable(R, "Canopy")
 	local h = 60 + rng:NextNumber() * 55           -- trunk height
-	local trunk = anchoredPart("Trunk", Vector3.new(7, h, 7), Color3.fromRGB(96, 66, 40), Enum.Material.Wood, worldFolder, trunkQ)
-	trunk.Shape = Enum.PartType.Cylinder
-	-- Cylinder's length is along X; rotate so it stands up along Y.
-	trunk.CFrame = CFrame.new(pos + Vector3.new(0, h * 0.5, 0)) * CFrame.Angles(0, 0, math.rad(90))
+	-- S46: h is the AXIAL extent (the trunk's height), 7 the diameter. Passing (7, h) here is what
+	-- rendered every trunk as a 7-stud-tall, h-wide pancake with its canopy floating at crownY.
+	uprightCylinder("Trunk", h, 7, Color3.fromRGB(96, 66, 40), Enum.Material.Wood, worldFolder, trunkQ,
+		pos + Vector3.new(0, h * 0.5, 0), legacyAxis())
 	-- Canopy: 2-3 green blobs clustered at the crown.
 	local crownY = pos.Y + h
 	local green = Color3.fromRGB(60 + rng:NextInteger(0, 30), 120 + rng:NextInteger(0, 40), 54 + rng:NextInteger(0, 24))
@@ -163,30 +185,33 @@ local function buildWaterfall()
 	for i = 0, 5 do
 		local y = i * (R.deliverPadY / 6)
 		local rad = 260 - i * 26
-		local mesa = anchoredPart("Mesa", Vector3.new(rad, R.deliverPadY / 6 + 2, rad), Color3.fromRGB(120, 116, 96), Enum.Material.Rock, worldFolder, true)
-		mesa.Shape = Enum.PartType.Cylinder
-		mesa.CFrame = CFrame.new(d.X, y + (R.deliverPadY / 12), d.Z) * CFrame.Angles(0, 0, math.rad(90))
+		-- S46: the DISC's axial extent is its thickness; `rad` is the face diameter. Swapped, each of
+		-- these rendered as a ~260-tall blade only 43.7 thick instead of a stacked disc.
+		uprightCylinder("Mesa", R.deliverPadY / 6 + 2, rad, Color3.fromRGB(120, 116, 96), Enum.Material.Rock, worldFolder, true,
+			Vector3.new(d.X, y + (R.deliverPadY / 12), d.Z), legacyAxis())
 	end
 	-- Safe pad on top — bright green meadow disc (SOLID: the safe zone reads as ground you arrive on).
-	local pad = anchoredPart("SafePad", Vector3.new(200, 6, 200), Color3.fromRGB(96, 196, 96), Enum.Material.Grass, worldFolder, true)
-	pad.Shape = Enum.PartType.Cylinder
-	pad.CFrame = CFrame.new(d.X, R.deliverPadY + 3, d.Z) * CFrame.Angles(0, 0, math.rad(90))
+	-- S46: 6 = thickness, 200 = diameter. Swapped, this was a 200-tall, 6-thick WALL — which is why
+	-- the client's crowd-seating raycast has always fallen through to its deliverPadY + 6 default.
+	uprightCylinder("SafePad", 6, 200, Color3.fromRGB(96, 196, 96), Enum.Material.Grass, worldFolder, true,
+		Vector3.new(d.X, R.deliverPadY + 3, d.Z), legacyAxis())
 	-- Waterfall face — translucent blue sheet down the mesa front (visual; fly up beside it on the updraft).
 	local fall = anchoredPart("Waterfall", Vector3.new(6, R.deliverPadY, 120), Color3.fromRGB(150, 210, 255), Enum.Material.Glass, worldFolder)
 	fall.Transparency = 0.45
 	fall.CFrame = CFrame.new(d.X - 230, R.deliverPadY * 0.5, d.Z)
 	-- Rim pool (solid).
-	local pool = anchoredPart("RimPool", Vector3.new(120, 4, 120), Color3.fromRGB(120, 190, 240), Enum.Material.Glass, worldFolder, true)
+	-- S46: 4 = thickness, 120 = diameter (was a 120-tall glass wall).
+	local pool = uprightCylinder("RimPool", 4, 120, Color3.fromRGB(120, 190, 240), Enum.Material.Glass, worldFolder, true,
+		Vector3.new(d.X, R.deliverPadY + 6, d.Z), legacyAxis())
 	pool.Transparency = 0.35
-	pool.Shape = Enum.PartType.Cylinder
-	pool.CFrame = CFrame.new(d.X, R.deliverPadY + 6, d.Z) * CFrame.Angles(0, 0, math.rad(90))
 
 	-- Updraft column VFX — translucent cyan cylinder + rising mist so the ride reads. (Force is client-side.)
-	local col = anchoredPart("UpdraftColumn", Vector3.new(R.updraftTopY - R.updraftBaseY, R.updraftRadius * 2, R.updraftRadius * 2),
-		Color3.fromRGB(200, 240, 255), Enum.Material.ForceField, worldFolder)
+	-- This site was ALWAYS correct (height first); it is routed through the helper for uniformity and
+	-- deliberately does NOT pass `legacy`, so the kill switch cannot break what was never broken.
+	local col = uprightCylinder("UpdraftColumn", R.updraftTopY - R.updraftBaseY, R.updraftRadius * 2,
+		Color3.fromRGB(200, 240, 255), Enum.Material.ForceField, worldFolder, nil,
+		Vector3.new(d.X - 230, (R.updraftBaseY + R.updraftTopY) * 0.5, d.Z))
 	col.Transparency = 0.85
-	col.Shape = Enum.PartType.Cylinder
-	col.CFrame = CFrame.new(d.X - 230, (R.updraftBaseY + R.updraftTopY) * 0.5, d.Z) * CFrame.Angles(0, 0, math.rad(90))
 	local att = Instance.new("Attachment")
 	att.Position = Vector3.new(0, -(R.updraftTopY - R.updraftBaseY) * 0.5, 0)
 	att.Parent = col
@@ -824,10 +849,11 @@ local function distXZ(a, b)
 end
 
 local function buildFoxFlare(centre)
-	local col = anchoredPart("FoxFlare", Vector3.new(320, 7, 7), Color3.fromRGB(255, 140, 40), Enum.Material.Neon, worldFolder)
-	col.Shape = Enum.PartType.Cylinder
+	-- Also ALWAYS correct (320 = the beam's height); routed through the helper for uniformity, and it
+	-- does NOT pass `legacy` so the S46 kill switch cannot break it.
+	local col = uprightCylinder("FoxFlare", 320, 7, Color3.fromRGB(255, 140, 40), Enum.Material.Neon, worldFolder, nil,
+		Vector3.new(centre.X, 160, centre.Z))
 	col.Transparency = 0.25
-	col.CFrame = CFrame.new(centre.X, 160, centre.Z) * CFrame.Angles(0, 0, math.rad(90))
 	local att = Instance.new("Attachment")
 	att.Parent = col
 	local em = Instance.new("ParticleEmitter")

@@ -143,9 +143,13 @@ end)
 -- the code: the first version of the CastShadow gate PASSED against a mutant that had deleted the
 -- assignment, because the comment above it says "CastShadow" four times. A gate that reads comments
 -- is not a gate.
+-- Also normalises CRLF -> LF. The working tree is CRLF (core.autocrlf=true), so any gate whose
+-- pattern anchors on "\n" silently matches nothing against a `)\r\n` line ending — it does not fail
+-- loudly, it goes VACUOUS, which is the one failure mode these gates exist to prevent. Stripping \r
+-- here fixes the whole class once instead of per-pattern. (S46: cost one red test to find.)
 local function codeOnly(s)
 	local out = {}
-	for line in (s .. "\n"):gmatch("(.-)\n") do
+	for line in (s:gsub("\r", "") .. "\n"):gmatch("(.-)\n") do
 		if not line:match("^%s*%-%-") then out[#out + 1] = line end
 	end
 	return table.concat(out, "\n")
@@ -207,6 +211,60 @@ H.test("B4.2 glue: the style meter scores canopies through the PURE helpers, not
 	H.ok(src:find("CanQuery%s*=%s*true") == nil,
 		"BirdController is setting CanQuery=true. Chad's ghost forest (S45c) is a design decision; " ..
 		"style scoring must reach trees by POSITION, never by making them queryable.")
+end)
+
+--------------------------------------------------------------------------------
+-- S46 CYLINDER AXIS. The pure test in rescuerules.spec proves cylinderSize permutes correctly, which
+-- is nearly worthless on its own: the BUG lived entirely in ARGUMENT ORDER at four call sites. These
+-- gates read the call sites. codeOnly() strips `--` lines first (S45c: a gate that matches its own
+-- explanatory comment is not a gate — and the comments here name every one of these symbols).
+--------------------------------------------------------------------------------
+
+H.test("S46: every upright cylinder goes through the ONE helper that knows the axis", function()
+	local src = codeOnly(fs.readFile("src/server/RescueServer.server.luau"))
+
+	-- The whole point of uprightCylinder is that Size, Shape and the stand-up rotation are owned
+	-- together. If a new cylinder is hand-rolled, the axis can be got wrong again with no gate firing.
+	local shapes = select(2, src:gsub("Enum%.PartType%.Cylinder", ""))
+	H.eq(shapes, 1, ("RescueServer sets Enum.PartType.Cylinder %d times; it must be exactly 1 (inside " ..
+		"uprightCylinder). A hand-rolled cylinder can reintroduce the S46 axis bug undetected — route " ..
+		"it through the helper instead."):format(shapes))
+
+	local helper = src:match("local function uprightCylinder.-\nend")
+	H.ok(helper ~= nil, "uprightCylinder is gone from RescueServer — this gate has gone vacuous, fix the pattern")
+	H.ok(helper:find("math%.rad%(90%)") ~= nil,
+		"uprightCylinder no longer applies the stand-up rotation. Sized correctly but left lying on " ..
+		"its side is the SAME class of bug, and the helper exists so a caller cannot forget it.")
+	H.ok(helper:find("RescueRules%.cylinderSize") ~= nil,
+		"uprightCylinder no longer derives its Size from RescueRules.cylinderSize, so the headless " ..
+		"axis test in rescuerules.spec no longer describes what the world actually builds.")
+
+	local calls = select(2, src:gsub("uprightCylinder%(", ""))
+	H.ok(calls >= 7, ("expected the uprightCylinder definition + at least 6 call sites (%d found). " ..
+		"Trunk, Mesa, SafePad, RimPool, UpdraftColumn and FoxFlare all stand up."):format(calls))
+end)
+
+H.test("S46: the four fixed sites pass AXIAL FIRST — this is the bug, pinned by literal", function()
+	-- Mutation (a) from the red-team: swap the args back at ONE site, e.g. uprightCylinder("Trunk", 7, h,
+	-- ...). That reintroduces the exact bug and every pure test stays green. Only a literal check
+	-- on argument order catches it.
+	local src = codeOnly(fs.readFile("src/server/RescueServer.server.luau"))
+	local sites = {
+		{ 'uprightCylinder%("Trunk", h, 7,',    "Trunk: h is the HEIGHT (axial), 7 the diameter — swapped, trunks are 7-stud pancakes" },
+		{ 'uprightCylinder%("Mesa", R%.deliverPadY / 6 %+ 2, rad,', "Mesa: padY/6+2 is the disc THICKNESS, rad the diameter — swapped, each disc is a ~260-tall blade" },
+		{ 'uprightCylinder%("SafePad", 6, 200,', "SafePad: 6 is the THICKNESS, 200 the diameter — swapped, the pad is a 200-tall wall" },
+		{ 'uprightCylinder%("RimPool", 4, 120,', "RimPool: 4 is the THICKNESS, 120 the diameter — swapped, the pool is a 120-tall wall" },
+	}
+	for _, s in ipairs(sites) do
+		H.ok(src:find(s[1]) ~= nil, "S46 ARGUMENT ORDER REGRESSED — " .. s[2])
+	end
+
+	-- The two sites that were ALWAYS correct must NOT take the legacy path, or the kill switch would
+	-- break what was never broken.
+	local col = src:match('uprightCylinder%("UpdraftColumn".-%)\n')
+	local fox = src:match('uprightCylinder%("FoxFlare".-%)\n')
+	H.ok(col and not col:find("legacyAxis"), "UpdraftColumn was always correct — it must not pass legacyAxis()")
+	H.ok(fox and not fox:find("legacyAxis"), "FoxFlare was always correct — it must not pass legacyAxis()")
 end)
 
 H.test("B4.2 glue: the index waits for the server's published canopy count", function()

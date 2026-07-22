@@ -629,6 +629,33 @@ function RescueRules.shellCloseness(centreDist, radius, proxDist, sweetSpot)
 end
 
 --------------------------------------------------------------------------------
+-- S46 — CYLINDER AXIS. A Roblox Cylinder's axis is LOCAL X: Size.X is the axial extent (height for a
+-- pillar, thickness for a disc) and Size.Y/Size.Z are the round face's diameters. Four world-gen
+-- sites passed the intended height in Y and ALSO applied the stand-up rotation
+-- CFrame.Angles(0, 0, rad(90)) (which maps local X -> world Y), so the height became the
+-- cross-section: trunks rendered 7 studs TALL and 60-115 WIDE — pancakes under floating canopies —
+-- and the mesa, safe pad and rim pool rendered as tall thin WALLS instead of stacked discs.
+-- Four OTHER cylinders in the repo already used the correct order (UpdraftColumn, FoxFlare,
+-- FireVisuals.buildRing, goldRing), one of them with an explicit comment saying so. That 4-vs-4
+-- split inside one codebase is what proves this was a typo pattern, not a style choice.
+--------------------------------------------------------------------------------
+
+-- cylinderSize — the Size components (x, y, z) for a Cylinder the caller stands upright with
+-- CFrame.Angles(0, 0, rad(90)). Returns THREE NUMBERS rather than a Vector3 so this stays pure.
+-- `broken` is the kill switch's legacy path: true reproduces the pre-fix SWAPPED order exactly, so
+-- Rescue.cylinderAxisFix=false restores the old world byte-identically.
+-- ⚠️ This DELIBERATELY inverts the module's usual "an absent field reproduces today's number"
+-- convention, and it is the only function here that does. Absence means the CORRECT geometry,
+-- because the old order was a BUG, not a tuned value. The parameter is named `broken` rather than
+-- `fixed` so that exception reads at a glance instead of looking like an oversight.
+function RescueRules.cylinderSize(axial, diameter, broken)
+	if broken == true then
+		return diameter, axial, diameter
+	end
+	return axial, diameter, diameter
+end
+
+--------------------------------------------------------------------------------
 -- beatActive — is a sacred presentation beat running right now?
 -- The codebase's rule for "never stomp a beat" is THREE flags (see the pose ladder): the slow-mo
 -- catch, any crew catch still in flight, and the hop-off tally ceremony. A first attempt at the

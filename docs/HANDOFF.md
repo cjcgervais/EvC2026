@@ -164,26 +164,59 @@ and a gate asserts `treeCollision` is still `"off"` so collision can never sneak
   3. **Does the catch beat still ESCALATE?** `styleMeter` also drives the camera (pull-in, cant, FOV,
      desat) — that is by design, but if every catch now looks like the biggest one, `treeStyleProxDist`
      is too generous. This is the one knob I'd expect to want tuning.
-  4. Ground/mesa line-riding should feel **exactly as before** — that path is untouched.
+  4. ~~Ground/mesa line-riding should feel **exactly as before**~~ — ⚠️ **THIS CONTROL IS VOID.** The
+     S46 cylinder fix (below) reshapes the mesa/pad/pool, which are `CanQuery=true` and therefore feed
+     the style meter's ray fan. Chad chose to fly both changes together knowing this. Ground-only
+     line-riding (away from the waterfall) is still a valid control; the mesa is not.
+
+### 🛠️ S46 — CYLINDER AXIS FIX (LIVE, Chad green-lit; visible world change)
+A Roblox `Cylinder`'s axis is **local X**. Four world-gen sites passed the intended height in **Y** and
+*also* applied the stand-up rotation `CFrame.Angles(0,0,rad(90))` (local X → world Y), so height and
+cross-section swapped. **4 of the repo's 8 cylinder sites were already correct** (`UpdraftColumn`,
+`FoxFlare`, `FireVisuals.buildRing` — which carries an explicit comment saying so — and `goldRing`);
+that 4-vs-4 split inside one codebase is what proved it a typo pattern, not a style.
+
+| part | was | now |
+|---|---|---|
+| `Trunk` | 7 tall, 60–115 **wide** (a pancake under a floating canopy) | a real 60–115-stud trunk |
+| `Mesa` ×6 | six ~260-tall blades, 43.7 thick | six stacked discs, radius 130→65 |
+| `SafePad` | a 200-tall, 6-thick **wall** | a 200-diameter landing pad |
+| `RimPool` | a 120-tall glass **wall** | a 120-diameter pool |
+
+- **Kill switch `Rescue.cylinderAxisFix`** (`false` = the pre-S46 world, byte-identical — the pure test
+  pins all four legacy vectors literally). The two always-correct sites do **not** take the legacy
+  path, so the switch cannot break what was never broken.
+- **The class is closed, not just the four instances.** `uprightCylinder` owns Size + Shape + rotation
+  together, so a caller cannot get the axis wrong, forget the rotation, or hand-roll a new cylinder.
+- **Gates:** `Enum.PartType.Cylinder` must appear exactly once in `RescueServer`; the four fixed sites
+  are pinned **by literal argument order** (the pure permutation test alone is near-worthless — the bug
+  lived entirely in arg order at the call sites). **7 mutations run, all killed by their own gate.**
+- ⚠️ **`codeOnly()` now strips `\r`.** The working tree is CRLF, so any gate anchoring a pattern on
+  `\n` matched nothing and went **vacuous rather than failing loudly**. Cost one red test to find; the
+  fix is in the shared helper so it can never bite another gate.
+- ▶ **CHAD'S PLAYTEST ASK:**
+  1. **The deliver run** — carry a load and deliver. You now clear the pad rim (~y 258) and fly in over
+     a green disc, instead of passing through the old thin blades at ~230. It should feel like arriving
+     somewhere. If it feels like smacking a cliff, that is the dead updraft (landmine below), not the
+     geometry. Knob: `deliverRadius` / reviving `updraftStrength`.
+  2. **Look at the crowd after a deliver** — the rim pool is a real 120-wide disc centred on the pad, so
+     seats between r=45 and r=60 now land on **water**. If saved squirrels are standing on the pond,
+     that is a placement follow-up (move the pool to the waterfall lip), not a regression.
+  3. **Fly a grove low** — trunks are poles now. Still ghosts (`treeCollision="off"`), so you pass through.
+  4. **One-word revert proof:** `cylinderAxisFix = false` must restore exactly today's look.
 
 ### 🚨 Landmines — real, unfixed, deliberately deferred
-- **🆕 CYLINDER PARTS ARE BUILT ON THE WRONG AXIS (S46, found while indexing trees — NOT fixed).**
-  A Roblox `Cylinder`'s axis is **local X** (`Size.X` = length, Y/Z = cross-section). Four sites pass
-  height in **Y** and then *also* apply the stand-up rotation `CFrame.Angles(0,0,rad(90))`, so the
-  intended height becomes the cross-section. Same file proves the correct convention at
-  `RescueServer:185` (`UpdraftColumn`, height first). Sites + the one-line fix:
-  - `RescueServer:144` `Trunk` `(7, h, 7)` → `(h, 7, 7)` — trunks are **7 studs tall and h wide**, i.e.
-    pancakes, with the canopy floating at `crownY`. (h = 60–115.)
-  - `RescueServer:166` `Mesa` `(rad, padY/6+2, rad)` → `(padY/6+2, rad, rad)`
-  - `RescueServer:171` `SafePad` `(200, 6, 200)` → `(6, 200, 200)`
-  - `RescueServer:179` `RimPool` `(120, 4, 120)` → `(4, 120, 120)`
-  ⚠️ **Mesa/SafePad/RimPool are `CanQuery=true`, so the EXISTING style scorer already rays against
-  malformed geometry** — whoever tunes `styleProxDist` next is tuning against a wall, not a pad. It
-  also explains why `updateDeliver`'s crowd seating needs its `deliverPadY + 6` raycast fallback
-  (`BirdController:~2605`): seats past ±22 studs in X miss the "pad" entirely. It works by accident.
-  **Deferred because it is a VISIBLE world change Chad did not ask for** — fixing it will alter the
-  look of the trees and the waterfall mesa, so it needs his say-so, not a silent commit. B4.2 sidesteps
-  it entirely by indexing canopy **Balls** only (a Ball is a true sphere on any axis).
+- ✅ **CYLINDER AXIS BUG — FIXED in S46 (Chad green-lit it).** See the S46 block above. Left here only
+  as a pointer: the class is now closed by `uprightCylinder`, and `compile.spec` asserts
+  `Enum.PartType.Cylinder` appears **exactly once** in `RescueServer` so no hand-rolled cylinder can
+  reintroduce it.
+- 🆕 **`updraftStrength = 210` IS AN ORPHAN — the waterfall updraft applies NO FORCE.** Confirmed by
+  grep: nothing in `src/` reads it. This was always true, but the S46 geometry fix makes it matter —
+  the deliver run now clears the pad rim (~y 258) instead of passing through the old thin mesa blades
+  at ~230, and the updraft is the mechanic that is *supposed* to carry you up there. **It is not
+  blocking** (you spawn at 600 and the valley is 1600 wide, so altitude is cheap), but the intended
+  payoff ride is currently decor. **Strong candidate for the next packet** — it is the causal partner
+  of the change just shipped.
 - **⚠️ SOP (S46): never mutation-test with PowerShell `Get-Content`/`Set-Content`.** PS 5.1 reads
   UTF-8-without-BOM as Windows-1252 and writes UTF-8 **with** BOM, so a read-mutate-restore harness
   silently mojibaked 161 comment characters across 3 source files and added BOMs — a 254-line diff

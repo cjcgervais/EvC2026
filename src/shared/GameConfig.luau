@@ -778,6 +778,19 @@ GameConfig.Rescue = {
 	-- ground line-riding feel Chad already signed off. Tune trees here, never in styleProxDist.
 	-- Canopy radius runs 13.6–22.4 studs, so proxDist 16 means the deep interior of a crown scores ~0
 	-- and the skin scores 1.0 — that is the threading mechanic, see RescueRules.shellCloseness.
+	-- S46 CYLINDER AXIS FIX. A Roblox Cylinder's axis is LOCAL X, but Trunk/Mesa/SafePad/RimPool passed
+	-- the intended height in Y and ALSO applied the stand-up rotation — so trunks rendered 7 studs tall
+	-- and 60-115 WIDE (pancakes under floating canopies) and the mesa/pad/pool rendered as tall thin
+	-- WALLS instead of discs. Four other cylinders in the repo already had it right (UpdraftColumn,
+	-- FoxFlare, FireVisuals.buildRing, goldRing), which is what proved it a typo, not a style.
+	-- false ⇒ the pre-S46 world, byte-identical (the two always-correct sites are NOT affected either way).
+	-- ⚠️ This is a VISIBLE world change Chad green-lit knowing two consequences: (1) it moves the
+	-- mesa/pad line-riding baseline that B4.2's playtest used as its control, and (2) the deliver run
+	-- now clears the pad rim (~y 258) instead of passing through the old thin blades at ~230 — which is
+	-- the INTENDED design, but the waterfall updraft meant to carry you there applies no force at all
+	-- (`updraftStrength` below is read by nothing — see the HANDOFF landmines).
+	cylinderAxisFix    = true,
+
 	treeStyleScoring   = true,
 	treeStyleProxDist  = 16,   -- studs from the canopy SKIN (either side) where tree style charges.
 	treeStyleSweetSpot = 3,    -- studs; within this of the skin, closeness = 1.0 (the knife-edge).

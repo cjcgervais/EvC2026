@@ -1005,6 +1005,46 @@ H.test("B4.2 LIVE CONFIG: the crown interior cannot max the meter at shipped num
 	H.ok(skin > centre * 3, "the skin must decisively out-score the interior at shipped numbers")
 end)
 
+H.test("cylinderSize: the AXIAL extent goes in X, because that is a Cylinder's axis", function()
+	-- The bug: four world-gen sites passed height in Y and ALSO applied CFrame.Angles(0,0,rad(90)),
+	-- which maps local X -> world Y. So the height became the cross-section.
+	local x, y, z = RescueRules.cylinderSize(115, 7)
+	H.eq(x, 115, "axial extent (the trunk's HEIGHT) must land in X — that is the cylinder's axis")
+	H.eq(y, 7, "the round face's diameter goes in Y")
+	H.eq(z, 7, "…and Z. Y and Z must be EQUAL or the 'cylinder' is an elliptical prism")
+	-- A disc is the same call with a small axial extent — this is the mesa/pad/pool case.
+	local dx, dy, dz = RescueRules.cylinderSize(6, 200)
+	H.eq(dx, 6, "a DISC's axial extent is its thickness")
+	H.eq(dy, 200, "…and its face is the diameter")
+	H.eq(dz, 200, "…on both cross-axes")
+end)
+
+H.test("cylinderSize: the kill switch reproduces the four pre-S46 shapes EXACTLY", function()
+	-- Pinned to the literal vectors the old code built, so `cylinderAxisFix=false` is provably a
+	-- byte-identical revert and not merely "something different".
+	local function legacy(axial, diameter)
+		local a, b, c = RescueRules.cylinderSize(axial, diameter, true)
+		return ("%s,%s,%s"):format(tostring(a), tostring(b), tostring(c))
+	end
+	H.eq(legacy(115, 7), "7,115,7", "Trunk was Vector3.new(7, h, 7)")
+	H.eq(legacy(6, 200), "200,6,200", "SafePad was Vector3.new(200, 6, 200)")
+	H.eq(legacy(4, 120), "120,4,120", "RimPool was Vector3.new(120, 4, 120)")
+	H.eq(legacy(43.666666666666664, 260), "260,43.666666666666664,260", "Mesa was Vector3.new(rad, padY/6+2, rad)")
+	-- ⚠️ Only an EXPLICIT `true` may take the legacy path. This module's usual convention is that an
+	-- absent config field reproduces today's number; here absence must mean the CORRECT geometry,
+	-- because the old order was a bug rather than a tuned value.
+	local nx = RescueRules.cylinderSize(115, 7, nil)
+	local fx = RescueRules.cylinderSize(115, 7, false)
+	H.eq(nx, 115, "a MISSING flag must give the fixed geometry, never the broken one")
+	H.eq(fx, 115, "an explicit false must give the fixed geometry")
+end)
+
+H.test("S46 cylinder fix ships LIVE (Chad green-lit it knowing it is a visible world change)", function()
+	H.eq(R.cylinderAxisFix, true,
+		"cylinderAxisFix must ship true — trunks are poles, the mesa is a stack of discs, and the " ..
+		"safe pad is a pad. If this is false the world reverted to pancakes and walls.")
+end)
+
 H.test("B4.2 kill switch + the ghost forest are independent knobs", function()
 	H.eq(R.treeStyleScoring, true, "B4.2 ships LIVE — decoupling the scorer is the point of the packet")
 	H.eq(R.treeCollision, "off",
