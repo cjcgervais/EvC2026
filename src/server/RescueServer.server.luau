@@ -1238,7 +1238,8 @@ local function RescueRoundLoop()
 	resolveMission()
 	bootStamp("mission resolved: " .. tostring(R.activeMission or "?"))
 	buildWorld()
-	bootStamp("world built (trees + waterfall)")
+	bootStamp(("world built (trees + waterfall) — RescueWorld has %d descendants SERVER-side")
+		:format(#worldFolder:GetDescendants()))
 	squirrelsFolder = Instance.new("Folder")
 	squirrelsFolder.Name = "Squirrels"
 	squirrelsFolder.Parent = Workspace

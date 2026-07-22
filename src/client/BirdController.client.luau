@@ -1248,6 +1248,50 @@ task.spawn(function()
 	end
 end)
 
+-- S44 REPLICATION PROBE. Chad: "AT 20S IN I HAD LIKE 5 TREES." The server builds all 68 trees in
+-- FOUR MILLISECONDS and reports 15/15 squirrels, so if the CLIENT only has 5 trees at 20s the parts
+-- are arriving over time — that is replication, not rendering, and the prime suspect is STREAMING.
+-- GameServer:266 does `pcall(function() Workspace.StreamingEnabled = false end)`, but StreamingEnabled
+-- CANNOT be assigned at runtime: the pcall swallows the failure silently, so a place file with it ON
+-- stays ON forever. With CharacterAutoLoads=false there is no character, so streaming falls back to
+-- the CAMERA as the replication focus and distant trees/squirrels stream in AS YOU FLY AT THEM —
+-- which is exactly the reported symptom, and would also explain the original "squirrels render in
+-- after 30s". This probe prints the runtime truth from the client's side, where it matters.
+task.spawn(function()
+	if not (RES and RES.enabled and RES.bootDiag) then return end
+	local streaming = workspace.StreamingEnabled
+	-- The SECOND candidate, and the one the built place argues for: Rojo DOES emit
+	-- StreamingEnabled=false into EaglesVsCrows.rbxlx (verified), so if streaming reads false here the
+	-- parts are arriving fine and the problem is that they are not being DRAWN — i.e. the engine's
+	-- quality-dependent render distance. On Auto, a struggling frame budget silently drops the quality
+	-- level and with it how far Roblox will draw parts, which pops trees/squirrels in as you approach.
+	-- The counts below are the decider: parts PRESENT but invisible = rendering; counts CLIMBING over
+	-- time = replication. One flight, no more guessing.
+	local q = "?"
+	pcall(function()
+		local ugs = UserSettings():GetService("UserGameSettings")
+		q = ("saved=%s master=%s"):format(tostring(ugs.SavedQualityLevel), tostring(ugs.MasterQuality))
+	end)
+	_G.EvCBoot(("workspace.StreamingEnabled = %s   |  graphics quality: %s   (client-side truth)")
+		:format(tostring(streaming), q))
+	if streaming then
+		warn("[BootDiag] STREAMING IS ON. This is the cause: parts arrive as you fly toward them, and no"
+			.. " runtime script can turn it off (the assignment is read-only once the game is running)."
+			.. " FIX IT IN STUDIO: select Workspace in Explorer -> uncheck StreamingEnabled -> SAVE the"
+			.. " place, then Play again. If Rojo is serving, also confirm default.project.json's"
+			.. " Workspace.StreamingEnabled=false actually synced.")
+	end
+	for _, mark in ipairs({ 1, 5, 10, 20, 30 }) do
+		while (os.clock() - _G.EvCBootT0) < mark do task.wait(0.25) end
+		local function n(name)
+			local f = workspace:FindFirstChild(name)
+			return f and #f:GetDescendants() or -1
+		end
+		_G.EvCBoot(("t=%02ds  RescueWorld=%d  Squirrels=%d  Map=%d  Birds=%d  (descendants the CLIENT can see)")
+			:format(mark, n("RescueWorld"), n("Squirrels"), n("Map"), n("Birds")))
+	end
+end)
+
 -- Presentation models (leaping squirrel + back-riders) live here — client-only, never queried.
 local catchFxFolder
 local function ensureCatchFx()
@@ -1355,8 +1399,17 @@ end
 local function playAccent(kind, carry)
 	if kind == "gotcha" then
 		local legacy = RES.gotchaOnPing
-		playCue("catchAccent", carry, 0.6, legacy and 1.0 or 1.4)
-		task.delay(0.08, function() playCue("catchAccent", carry, 0.6, legacy and 1.5 or 2.0) end)
+		if legacy then
+			playCue("catchAccent", carry, 0.6, 1.0)
+			task.delay(0.08, function() playCue("catchAccent", carry, 0.6, 1.5) end)
+			return
+		end
+		-- Chad flew the first snap version: "catching a squirrel now sounds like a RELOAD." Two bright
+		-- switch.wav clicks 0.08s apart is literally a reload gesture. Now an airy rising ZIP layered
+		-- over playPomf's low thump — wider spacing so it swings rather than clicks, and quieter,
+		-- because the pomf is doing the punching.
+		playCue("catchAccent", carry, 0.5, 1.5)
+		task.delay(0.13, function() playCue("catchAccent", carry, 0.42, 2.1) end)
 		return
 	end
 	local base = RES.woohooOnPing and 1.2 or 1.3

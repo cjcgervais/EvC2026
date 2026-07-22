@@ -754,8 +754,12 @@ H.test("PING LAW: the celebration is PRESERVED, not deleted — a full load DOES
 			ev .. " must ring at a FULL load — scarcity is what makes 10/10 the jackpot")
 	end
 	-- …and the per-catch layer is RE-VOICED, never silenced: a catch still lands hard.
-	H.eq(RescueRules.soundClass(R, "catchAccent", { carry = 3, capacity = cap }), "snap",
-		"the catch accent must still FIRE (as a talon snap) — a silent catch is not the fix")
+	-- The accent must still FIRE and must not be a bell. It is SWOOSH, not snap: Chad flew the snap
+	-- version and reported "catching a squirrel now sounds like a RELOAD" — two bright switch.wav
+	-- clicks 0.08s apart is a reload gesture. playPomf's low thump carries the impact; the accent
+	-- adds an airy rising ZIP over it.
+	H.eq(RescueRules.soundClass(R, "catchAccent", { carry = 3, capacity = cap }), "swoosh",
+		"the catch accent must still FIRE (as an airy zip, NOT a mechanical click) — silence is not the fix")
 	H.eq(RescueRules.soundClass(R, "woohoo", { carry = 3, capacity = cap }), "swoosh",
 		"the woohoo must still fire, as a rising rush of air")
 	H.eq(RescueRules.soundClass(R, "chirp", { carry = 6, capacity = cap }), "snap",

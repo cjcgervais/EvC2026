@@ -668,7 +668,12 @@ function RescueRules.soundClass(cfg, event, ctx)
 	end
 
 	-- The re-voiced per-catch layer (the actual offenders).
-	if event == "catchAccent" then return cfg.gotchaOnPing and "ping" or "snap" end
+	-- catchAccent: SWOOSH, not snap. S44 first pass voiced it as a two-note switch.wav and Chad flew it:
+	-- *"catching a squirrel now sounds like a RELOAD."* Correct — two bright clicks 0.08s apart IS a
+	-- gun-reload gesture. The impact is already carried by playPomf (a low SNAP thump); what the accent
+	-- must add is the "GOT you!" lift, and with only three rbxasset voices available the organic one is
+	-- air. A rising airy zip over the thump reads as thump-ZIP, not click-CLACK.
+	if event == "catchAccent" then return cfg.gotchaOnPing and "ping" or "swoosh" end
 	if event == "woohoo"      then return cfg.woohooOnPing and "ping" or "swoosh" end
 	if event == "chirp"       then return cfg.chirpOnPing  and "ping" or "snap" end
 
