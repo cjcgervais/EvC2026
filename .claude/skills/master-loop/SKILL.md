@@ -29,8 +29,58 @@ it or is flagged `PLACEHOLDER(expiry)`; reports always state which halves were
 verified (LOGIC tests / APPEARANCE images / FEEL flight — "green" alone is
 banned).
 
-**Goal (one metric):** advance MASTER-PLAN packets to GREEN (ladder-passing,
-commit-ready checkpoints), top-down within the current phase, until a STOP fires.
+**Goal (two-part, S48):** advance MASTER-PLAN packets to GREEN (ladder-passing,
+commit-ready checkpoints) **along the plan's declared HEADING**, top-down within
+the current phase, until a STOP fires. Packets-to-green is the *pace*; the
+HEADING is the *direction*. A packet that goes green without advancing the
+heading — or that invests in a LANDFILL asset — is a loss, not a win: S46
+("fighting mediocrity") and S48 (polishing the rejected gray-box map to green)
+both happened because the loop optimized green alone.
+
+## The HEADING gate (S48 — checked at EVERY packet pick, before any work)
+
+The MASTER-PLAN active-phase banner and the HANDOFF cold-start each carry a
+one-line **HEADING** — the current definition of "forward" in Chad's terms.
+The HANDOFF cold-start also keeps a **LANDFILL registry** — assets/approaches
+Chad has REJECTED wholesale.
+
+Before taking ANY packet, answer three questions in the ledger (one line each):
+
+1. **Heading:** how does this packet visibly advance the heading? "It's next in
+   the plan" is NOT an answer — plans rot faster than headings, and the plan's
+   own author may have sequenced it before the heading changed.
+2. **Landfill:** does it invest ANY effort in a LANDFILL asset — polish, fix,
+   extract, harden, test? If yes, the packet is ILLEGAL no matter what the plan
+   says: STOP and do plan surgery (or queue a Fable consult) instead of
+   building. A technically clean job on the wrong target is still the wrong
+   target (S48/V0).
+3. **Plumbing ratio:** if the packet is plumbing (harness / extraction /
+   refactor / test rig), is it sequenced BEHIND the first heading-visible
+   packet it serves, or does it hard-unblock it? Plumbing may never lead a
+   phase — the S48 failure mode was three plumbing packets queued ahead of the
+   first visible map improvement.
+
+When Chad rejects something mid-loop, the driver's FIRST act — before finishing
+or reverting any packet — is to update the HANDOFF's LANDFILL registry and
+HEADING line so every later context inherits the rejection. A halt that doesn't
+update the registry will repeat (S46 → S48 was exactly this).
+
+## Invocation (Chad types `/master-loop` — works from ANY session)
+
+Adapt to the session's main model; never make Chad `/model`-switch first:
+- **Session model is Opus (the intended default) or Sonnet:** YOU are the
+  driver — run the loop below directly, spawning Fable subagents at the
+  brackets.
+- **Session model is Fable:** do NOT grind packets inline (token policy).
+  Stay in the supervisor seat: for each packet, spawn an **Opus subagent as
+  the implementing driver** (Agent tool, `model: "opus"`, prompt = the packet
+  verbatim + design spec + acceptance criteria + the per-packet iteration
+  rules below), and perform inline ONLY the Fable brackets — design specs,
+  image audits, red-team adjudication, gate prep, plan surgery. The loop's
+  outer bookkeeping (packet pick, ledger, checkpoint, DECIDE) is cheap and
+  stays with you.
+- Either way the STOP conditions, ASK-gated git, and bracket rules are
+  identical.
 
 ## Orient (every session start)
 
@@ -40,7 +90,8 @@ commit-ready checkpoints), top-down within the current phase, until a STOP fires
 4. `git status --short` — the tree must be clean OR every dirty file accounted
    for by the HANDOFF (e.g. a Chad-pending batch). An unexplained diff = STOP
    and surface; never build on it.
-5. State the FRAME: current phase, the packet you're taking, done-criteria,
+5. State the FRAME: current phase, **the HEADING (quoted from the HANDOFF
+   cold-start) + the LANDFILL registry**, the packet you're taking, done-criteria,
    session budget (default: 3-5 packets or the first STOP).
 
 ## Packet selection
@@ -54,7 +105,10 @@ commit-ready checkpoints), top-down within the current phase, until a STOP fires
   Exception: a packet explicitly marked as its own track (e.g. B7 design consult)
   may run when its own preconditions are met.
 - **Pick** = the top packet in the current phase that is not `✅ DONE`, not
-  `SKIP`-marked by Chad, and whose stated `Blocked-on:` is satisfied.
+  `SKIP`-marked by Chad, whose stated `Blocked-on:` is satisfied, **and that
+  passes the HEADING gate above** (heading-advancing, landfill-free, plumbing
+  behind value). A top packet that fails the gate is a plan bug — surface it,
+  don't build it.
 - On completion, edit the packet's heading line in MASTER-PLAN.md to append
   `✅ DONE S<n> (<commit-ready|committed>)` — the plan is self-tracking.
 

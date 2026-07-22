@@ -4,6 +4,45 @@ Read this first. It tells the next agent exactly where the project stands, the o
 
 ---
 
+## ▶▶ S48 COLD START — MAP-FIRST (the strategy of record; this box supersedes every queue below)
+
+**HEADING:** *build the REAL map — Terrain + lighting first (code-only, zero assets), meshes when
+sourced; every packet leaves the published look visibly closer.*
+
+**LANDFILL registry (never invest ANY effort — polish, fix, extract, harden, test):**
+- The **flat-primitive gray-box map** (BuildMap plane + GroundDetail patches + primitive
+  mountains/lake/sea + the S45b scatter). Rejected wholesale by Chad, S46+S48. It survives only
+  as the untouched legacy path behind `Map.worldV2=false` until Gate V passes, then dies.
+
+**How to run:** `/model` **Opus** → `"run the master loop"`. The SKILL now has a **HEADING gate**
+— answer its 3 questions (heading / landfill / plumbing-ratio) in the ledger at every packet pick.
+
+**The queue is MASTER-PLAN §5.5, re-cut S48 (map-first M-series):**
+**M1** Terrain valley + lighting rig v1 — new pure `src/shared/WorldGen.luau` (FRESH build, not an
+extraction), flag `Map.worldV2`, gates: datum + water-P3 + canopy + drift + Part-coplanarity +
+side-effect contract → **M2** the eyes (screenshot harness, old V2 spec verbatim, pointed at the
+new world) → **M3** Fable image-iterates the look → **Gate V-LOOK** (Chad ratifies from
+screenshots in chat; the mesh-source question is asked THERE with a recommendation) → **M4** mesh
+props (blocked on that answer) → **M5** polish → **M6** audio → **Gate V** (the ONE flight).
+Read M1's invariants in the plan before building — the water-P3 landmine (①–④) is real.
+
+**Decisions taken by Fable at the S48 consult (`docs/CONSULT-QUALITY-BUILD-STRATEGY.md` — don't
+re-litigate):** D1 = Terrain+lighting NOW, meshes later (unblocked, biggest lever; mesh sourcing
+asked at Gate V-LOOK, batched, with a recommendation — never as homework). D2 = the eyes are KEPT
+but sequenced BEHIND the first map packet (the S48 failure was plumbing leading the phase, not the
+harness existing). D3 = V0 + V1 CANCELLED (V0 polished landfill; V1's extraction value is
+inherited by writing WorldGen natively pure). D4 = whole valley bowl at once (Terrain generation
+is code — a corner slice saves nothing; the staged part is meshes, which come later anyway).
+
+**S48 halt record (history):** Chad halted mid-loop on V0 — *"why are we fixing a rejected asset?
+I want a plan for a better map."* V0 was built clean, then REVERTED (record in the S48 ledger
+block + git reflog). The tree's pending batch (SKILL heading gate, plan re-cut, this box,
+consult doc, `assets/` audio) awaits Chad's ASK-gated commit.
+
+*The S46 "loop paused" box and the S47 Phase-V cold-start below remain accurate as HISTORY only.*
+
+---
+
 ## 🛑 STOP — THE LOOP IS PAUSED. READ `docs/CONSULT-VISUAL-QUALITY.md` FIRST.
 **Chad halted autonomous work at the S46 close (2026-07-22) and asked for a STRATEGY CONSULT with a
 Fable model before any further building.** His charge, in his words: *"Everything looks cheap and
@@ -43,7 +82,8 @@ The sections below remain accurate as state; their queues are superseded by Phas
 **RATIFIED by Chad 2026-07-22 (same day), committed.** Backlog question answered **(b)**:
 of the 7 unjudged items below, 2/6/7 are WRITTEN OFF as superseded by the V4 world rebuild
 (their mechanics are re-judged as part of the new world); only **1, 3, 4 + audio** fold into
-the Gate V flight. No pre-V4 flight. Next session: model → Opus, "run the master loop" → V0.
+the Gate V flight. No pre-rebuild flight. ~~Next session: model → Opus, "run the master loop" →
+V0.~~ **(SUPERSEDED S48 — V0/V1 cancelled; the queue is the M-series in the top box → M1.)**
 
 *The session sections below are the historical log, newest first. **This box is the authoritative
 current state.** The older "COLD START — Session 32" box further down is superseded; ignore its queue.*
