@@ -594,4 +594,148 @@ function RescueRules.catchChime(cfg, ridersAfter, capacity)
 	return (ridersAfter or 0) >= (capacity or cfg.carryCapacity or 10)
 end
 
+--------------------------------------------------------------------------------
+-- THE PING LAW (S44) — the fix for the complaint Chad has now made SIX times:
+-- *"I hear pinging after picking up 6. I asked for this only on 10/10."*
+--
+-- WHY EVERY PREVIOUS FIX MISSED. Chad's word "ping" names an ASSET —
+-- rbxasset://sounds/electronicpingshort.wav — not any one function. S38 gated the music build
+-- layers; S43 gated `catchChime`/playChord. Both times the OTHER emitters of that same asset kept
+-- ringing: playGotcha (every catch, vol 0.6 — LOUDER than the chord S43 removed), playWoohoo (every
+-- catch), the crew choir (every ~1.7s from the first rider) and playCount/the deliver chord on
+-- PARTIAL loads. To a player who cannot tell one wav from another, nothing changed. Each session
+-- fixed the symbol whose NAME matched the complaint instead of inventorying what actually emits.
+--
+-- THE STRUCTURAL FIX. Which ASSET CLASS each audible event uses is now a pure decision made HERE,
+-- swept by `SOUND_EVENTS` in the spec. The law: no cue may be "ping" class below a full load. The
+-- test sweeps every event × every carry, so a NEW event added to SOUND_EVENTS is automatically
+-- under the law — you cannot add a bell below 10/10 and stay green. A companion source-text gate in
+-- the spec stops anyone hand-wiring an inline ping in the client to bypass this module entirely.
+--
+-- A catch must still LAND, so this RE-VOICES rather than silences (volume/pitch/timing stay in the
+-- client — presentation; only the timbre is decided here):
+--   • the catch accent → SNAP ("switch.wav"): a closing talon IS a snap, not a chime.
+--   • the woohoo       → SWOOSH: the pull-up after the grab is a rising rush of air.
+--   • the crew chirp   → SNAP, pitched high: rapid clicks read as squirrel chitter (and this is the
+--                        seam the real squeak asset drops into if one is ever previewed).
+-- The bell then exists ONLY at 10/10 — which is exactly what makes 10/10 feel like the jackpot.
+--------------------------------------------------------------------------------
+
+-- Every audible one-shot event on the rescue path. The spec sweeps THIS list, so the law covers any
+-- event added here — keep it exhaustive when adding a voice.
+RescueRules.SOUND_EVENTS = {
+	"catchStart",      -- the leap's effort swoosh (playHup)
+	"catchContact",    -- the pillow-thump at the talon (playPomf)
+	"catchAccent",     -- the success sting on the contact frame (was playGotcha's two pings)
+	"woohoo",          -- the delayed "wheee!" after the snap-back
+	"climbWhip",       -- the scramble-up whip
+	"riderLatch",      -- the settle-hop arrival on the back
+	"crewContact",     -- a crew catch landing in the crew's arms
+	"chirp",           -- crew-choir rider chatter (the continuous one)
+	"fillChime",       -- THE earned fanfare: the catch that FILLS the back
+	"jingle",          -- the "get to the waterfall!" two-note, full load only
+	"deliverFanfare",  -- the payout chord at the waterfall
+	"countNote",       -- one note per rider dismount (the skip-count tally)
+}
+
+-- soundClass — which asset class does this event speak in right now?
+--   "ping"   = the bell (electronicpingshort) — LEGAL ONLY AT A FULL LOAD
+--   "snap"   = switch.wav (talon snap / chitter click)
+--   "swoosh" = action_falling.ogg (effort, air, rush)
+-- ctx = { carry = the load in play at the moment of the sound, capacity = the resolved cap }.
+-- The three `*OnPing` flags each restore ONE legacy voice for A/B comparison; all ship false.
+function RescueRules.soundClass(cfg, event, ctx)
+	cfg = cfg or {}
+	ctx = ctx or {}
+	local cap = ctx.capacity or cfg.carryCapacity or 10
+	local full = (ctx.carry or 0) >= cap
+
+	-- The sanctioned bells. Conditioned on `full` HERE rather than trusting the caller's own gate, so
+	-- a future miswiring degrades to a snap instead of reintroducing the exact complaint.
+	if event == "fillChime" or event == "jingle" or event == "deliverFanfare" or event == "countNote" then
+		return full and "ping" or "snap"
+	end
+
+	-- The re-voiced per-catch layer (the actual offenders).
+	if event == "catchAccent" then return cfg.gotchaOnPing and "ping" or "snap" end
+	if event == "woohoo"      then return cfg.woohooOnPing and "ping" or "swoosh" end
+	if event == "chirp"       then return cfg.chirpOnPing  and "ping" or "snap" end
+
+	-- Always-legal texture: these never spoke in bells to begin with.
+	if event == "catchStart" or event == "climbWhip" then return "swoosh" end
+	return "snap"   -- catchContact / riderLatch / crewContact
+end
+
+--------------------------------------------------------------------------------
+-- THE SKY GEM (S44) — the fix for Chad's *"I can barely see the squirrels, they render in after
+-- 30s."* Nothing renders late: all 15 spawn on the round's FIRST frame. He simply cannot SEE them
+-- until he is close, and flying blind to the first grove takes about thirty seconds.
+--
+-- WHY THE CURRENT SIGNAL FAILS. Every Stage-1 marker is a fixed WORLD-size object, but acquisition
+-- happens at 600–2,600 studs. At 70° FOV / 1080p (≈771 px per radian) the 2.2-stud chevron is ~2.4 px
+-- at a typical 1,140-stud approach and subpixel beyond; the flat 20-stud halo foreshortens to a
+-- ~13×6 px smudge and — for the 45% of perches that sit UNDER the canopy — lives entirely beneath
+-- the leaves along with the critter. Stage 1 was gated on the DIVE-IN read ("does your eye land on a
+-- waving animal") and never carried a range term; it traded the old shaft's weak-but-real long-range
+-- line for nothing. This is that regression, quantified.
+--
+-- WHY THIS TECHNIQUE AND NOT THE OTHERS (SOP: vet the approach, don't offer a menu of mediocre ones):
+--   • emoji BillboardGui — TOMBSTONED (Chad S39 "drop the icons"); reads as a UI sticker and abandons
+--     "the critter IS the landmark".
+--   • fat neon cylinder — TOMBSTONED (Chad S40 "its just a light cylinder, I don't even see
+--     squirrels"); any world-fixed column readable at 2 km engulfs the critter at 70 studs.
+--   • reverting the thin shaft — ~1 px wide at 1,140 studs, and its top still sits INSIDE the crown
+--     band for under-canopy perches. Ceiling below the read.
+--   • a bigger halo — a flat disc foreshortens by sin(elevation) and is under the leaves anyway.
+--   • particles — Roblox caps particle size at 10 studs ⇒ ≤4 px at 2 km.
+--   • Highlight — outlining a subpixel silhouette is subpixel.
+-- The ONE technique whose ceiling reaches the read is to keep the certified Stage-1 gem and make it a
+-- DISTANCE PROJECTION: constant ANGULAR size (so it is the same ~11 px at any range, like a real nav
+-- marker) and a lift that clears the tree envelope at distance, descending back onto the critter's
+-- head as you close. Far: an unmissable rarity-coloured kite floating over the canopy. Near: byte-
+-- identical to today's gem, so occluding the critter is geometrically impossible. The descent itself
+-- guides you under the crown to the hidden squirrels — F2 fixed without touching perch placement.
+--
+-- Stateless per frame (the project's proven projection law — no tweens, no stored state), and INERT
+-- until `Rescue.skyGem` is true: with the flag false this returns the identity and the Stage-1 frame
+-- is byte-identical.
+--------------------------------------------------------------------------------
+
+-- skyGemProjection — where and how big is the head chevron for an eagle `dist` studs away?
+--   baseSize = the gem's BUILT base size in studs (rarity-scaled by the server; the client caches it)
+--   baseY    = the gem's Stage-1 centre Y this frame (head + chevronY + bob)
+-- Returns { size, y, t } where t is the 0..1 far-ness the caller also blends transparency with.
+function RescueRules.skyGemProjection(cfg, dist, baseSize, baseY)
+	cfg = cfg or {}
+	baseSize = baseSize or (cfg.chevronSize or 2.2)
+	baseY = baseY or 0
+	if not cfg.skyGem then
+		return { size = baseSize, y = baseY, t = 0 }   -- INERT: exactly today's Stage-1 gem
+	end
+	local near = cfg.skyGemNear or 70
+	local far = cfg.skyGemFar or 260
+	local t = math.clamp(((dist or 0) - near) / math.max(1, far - near), 0, 1)
+
+	-- Constant angular size: studs of gem per stud of distance. 0.015 rad ≈ 11.6 px at 1080p/FOV70.
+	-- Clamped below by the built size (never SHRINK a near gem) and above by skyGemMaxSize so a
+	-- 2 km gem cannot become a billboard filling the sky.
+	--
+	-- SCALED BY THE GEM'S OWN BASE. The server builds gold/rainbow gems 1.35× (buildBeacon), and a
+	-- naive `dist × k` throws that away the instant the projection takes over — every gem converges
+	-- to one size and triage-by-value dies exactly where it matters most: PICKING a target from
+	-- altitude. Carrying the ratio keeps a rare gem 1.35× at every range. (The spec caught this.)
+	local rarityMul = baseSize / (cfg.chevronSize or 2.2)
+	local farSize = math.clamp((dist or 0) * (cfg.skyGemStudsPerStud or 0.015) * rarityMul,
+		baseSize, (cfg.skyGemMaxSize or 34) * rarityMul)
+	local size = baseSize + (farSize - baseSize) * t
+
+	-- Lift so the gem's BOTTOM clears the worst-case tree envelope (buildTree: crownY up to 115 +
+	-- blob 35 = 150; skyGemClearY 160 keeps a margin). The gem is built 1.6× tall and rolled 45°, so
+	-- its half-height is size·aspect/2. Never pulls a gem DOWN — max(0, …).
+	local targetY = (cfg.skyGemClearY or 160) + size * (cfg.chevronAspect or 1.6) * 0.5
+	local y = baseY + t * math.max(0, targetY - baseY)
+
+	return { size = size, y = y, t = t }
+end
+
 return RescueRules

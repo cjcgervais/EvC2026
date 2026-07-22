@@ -719,6 +719,182 @@ H.test("catchChime: capacity falls back sanely, and the legacy flag restores the
 end)
 
 --------------------------------------------------------------------------------
+-- S44 — THE PING LAW. The tests above are GREEN and were green through every one of
+-- Chad's six complaints, because `catchChime` governs ONE of the game's bell emitters.
+-- playGotcha (every catch, at a LOUDER 0.6), playWoohoo (every catch), the crew choir
+-- (every ~1.7s from the first rider) and playCount/the deliver chord on PARTIAL loads
+-- all rang the same electronicpingshort.wav. "Ping" names the ASSET, not a function.
+--
+-- So the law is asserted over the whole SET of emitters, not one predicate: sweep every
+-- event in RescueRules.SOUND_EVENTS × every carry below capacity and demand that no cue
+-- is ping-class. SOUND_EVENTS is owned by the module, so a newly-voiced event is under
+-- the law automatically — you cannot add a bell below 10/10 and stay green.
+--------------------------------------------------------------------------------
+H.test("PING LAW: no sound event may ring a BELL below a full load", function()
+	local R = GameConfig.Rescue
+	local cap = R.carryCapacity or 10
+	H.ok(#RescueRules.SOUND_EVENTS >= 8, "fixture: the event list must be populated or this sweep is vacuous")
+	local checked = 0
+	for _, ev in ipairs(RescueRules.SOUND_EVENTS) do
+		for carry = 0, cap - 1 do
+			local cls = RescueRules.soundClass(R, ev, { carry = carry, capacity = cap })
+			H.ok(cls ~= "ping",
+				("%s rings a PING at %d/%d — Chad's law, asked six times: bells ONLY at 10/10"):format(ev, carry, cap))
+			checked += 1
+		end
+	end
+	H.ok(checked >= 80, "the sweep must actually cover the event × carry space")
+end)
+
+H.test("PING LAW: the celebration is PRESERVED, not deleted — a full load DOES ring", function()
+	local R = GameConfig.Rescue
+	local cap = R.carryCapacity or 10
+	for _, ev in ipairs({ "fillChime", "jingle", "deliverFanfare", "countNote" }) do
+		H.eq(RescueRules.soundClass(R, ev, { carry = cap, capacity = cap }), "ping",
+			ev .. " must ring at a FULL load — scarcity is what makes 10/10 the jackpot")
+	end
+	-- …and the per-catch layer is RE-VOICED, never silenced: a catch still lands hard.
+	H.eq(RescueRules.soundClass(R, "catchAccent", { carry = 3, capacity = cap }), "snap",
+		"the catch accent must still FIRE (as a talon snap) — a silent catch is not the fix")
+	H.eq(RescueRules.soundClass(R, "woohoo", { carry = 3, capacity = cap }), "swoosh",
+		"the woohoo must still fire, as a rising rush of air")
+	H.eq(RescueRules.soundClass(R, "chirp", { carry = 6, capacity = cap }), "snap",
+		"crew chatter must still fire, as chitter clicks — 'the crew is the choir' survives")
+end)
+
+H.test("PING LAW: the legacy A/B flags restore each old voice, and all three ship OFF", function()
+	local R = GameConfig.Rescue
+	local cap = R.carryCapacity or 10
+	for flag, ev in pairs({ gotchaOnPing = "catchAccent", woohooOnPing = "woohoo", chirpOnPing = "chirp" }) do
+		H.eq(R[flag], false, flag .. " must ship FALSE — that is the whole point of the fix")
+		local legacy = table.clone(R)
+		legacy[flag] = true
+		H.eq(RescueRules.soundClass(legacy, ev, { carry = 1, capacity = cap }), "ping",
+			flag .. " must restore the old bell for an A/B comparison")
+	end
+end)
+
+-- THE ESCAPE HATCH. The law above only binds sounds that go THROUGH the policy. Hand-wiring a fresh
+-- `playSound(SFX_PING, …)` inline in the client is the exact move that regressed this five times, and
+-- no pure test can see it. So pin it by source text: SFX_PING may be NAMED (declaration + the class
+-- map) but never PLAYED directly.
+H.test("PING LAW: no inline playSound(SFX_PING) may bypass the policy in BirdController", function()
+	local fs = require("@lune/fs")
+	local src = fs.readFile("src/client/BirdController.client.luau")
+	H.ok(#src > 1000, "fixture: the client source must actually have been read")
+	local offenders = {}
+	local n = 0
+	for line in src:gmatch("[^\r\n]+") do
+		n += 1
+		-- comments may NAME the pattern (this rule is documented at the seam); only real code counts
+		if not line:match("^%s*%-%-") and line:match("playSound%s*%(%s*SFX_PING") then
+			offenders[#offenders + 1] = ("line %d: %s"):format(n, line:match("^%s*(.-)%s*$"))
+		end
+	end
+	H.eq(#offenders, 0,
+		"a bell is being played outside RescueRules.soundClass — route it through playCue instead:\n    "
+			.. table.concat(offenders, "\n    "))
+	-- and the seam itself must still exist (so deleting playCue can't make this test vacuously pass)
+	H.ok(src:find("RescueRules.soundClass", 1, true) ~= nil,
+		"BirdController must consume the pure policy — if this fails the law has no teeth")
+end)
+
+--------------------------------------------------------------------------------
+-- S44 — THE SKY GEM. Chad: "I can barely see the squirrels, they render in after 30s."
+-- The two halves of the read are asserted as GEOMETRY, before he ever flies:
+--   "visible from altitude"   → angular size stays in a legible band across the whole approach
+--   "never occludes up close" → at catch range the projection is bit-identical to Stage 1
+-- Stage 1 shipped with neither (its gate was the dive-in read only), which is how the long-range
+-- signal was traded away without anyone noticing.
+--------------------------------------------------------------------------------
+local PX_PER_RAD = 771   -- 1080p at Camera.baseFOV 70° vertical: (1080/2) / tan(35°) ≈ 771 px/radian
+
+H.test("SKY GEM: ships INERT — with the flag off the Stage-1 gem is untouched at every range", function()
+	local R = GameConfig.Rescue
+	H.eq(R.skyGem, false, "skyGem must ship FALSE — Chad flies the change, he doesn't inherit it")
+	for _, d in ipairs({ 0, 40, 70, 130, 260, 600, 1140, 2600 }) do
+		local p = RescueRules.skyGemProjection(R, d, R.chevronSize or 2.2, 40)
+		H.eq(p.size, R.chevronSize or 2.2, ("inert: size must not move at %d studs"):format(d))
+		H.eq(p.y, 40, ("inert: the gem must not lift at %d studs"):format(d))
+		H.eq(p.t, 0, "inert: the far-ness blend must be zero")
+	end
+end)
+
+H.test("SKY GEM: never occludes the critter — at catch range it IS the Stage-1 gem", function()
+	local R = table.clone(GameConfig.Rescue)
+	R.skyGem = true
+	local base = R.chevronSize or 2.2
+	for _, d in ipairs({ 0, 10, 35, 69, 70 }) do
+		local p = RescueRules.skyGemProjection(R, d, base, 40)
+		H.eq(p.size, base, ("at %d studs (inside skyGemNear) the gem must be its BUILT size"):format(d))
+		H.eq(p.y, 40, ("at %d studs the gem must sit on the critter's head, unlifted"):format(d))
+	end
+end)
+
+H.test("SKY GEM: visible from altitude — angular size stays legible across the whole approach", function()
+	local R = table.clone(GameConfig.Rescue)
+	R.skyGem = true
+	local base = R.chevronSize or 2.2
+	local worst = math.huge
+	for d = R.skyGemFar or 260, 2600, 20 do
+		local p = RescueRules.skyGemProjection(R, d, base, 40)
+		local px = PX_PER_RAD * (p.size / d)
+		worst = math.min(worst, px)
+		H.ok(px >= 8, ("at %d studs the gem is %.1f px — that is the ~2.4 px Chad could not see"):format(d, px))
+		H.ok(px <= 40, ("at %d studs the gem is %.1f px — a marker, not a billboard"):format(d, px))
+	end
+	print(("      [skygem] worst on-screen size over 260-2600 studs: %.1f px (Stage 1 at 1140 studs: %.1f px)")
+		:format(worst, PX_PER_RAD * (base / 1140)))
+end)
+
+H.test("SKY GEM: at range the gem CLEARS the worst-case tree — the under-canopy half becomes findable", function()
+	local R = table.clone(GameConfig.Rescue)
+	R.skyGem = true
+	-- buildTree's worst case: trunk 115 + crown blob 35 = 150. An under-canopy perch sits at Y 22-38,
+	-- so its Stage-1 gem (base + chevronY 14) lives at ~36-52 — entirely beneath the leaves.
+	local TREE_TOP = 150
+	for _, baseY in ipairs({ 36, 45, 52, 121 }) do           -- under-canopy perches … and a crown perch
+		for _, d in ipairs({ 260, 600, 1140, 2600 }) do
+			local p = RescueRules.skyGemProjection(R, d, R.chevronSize or 2.2, baseY)
+			local bottom = p.y - p.size * (R.chevronAspect or 1.6) * 0.5
+			H.ok(bottom >= TREE_TOP - 1e-6,
+				("baseY %d @ %d studs: gem bottom %.1f is INSIDE the canopy (top %d) — still invisible")
+					:format(baseY, d, bottom, TREE_TOP))
+		end
+	end
+end)
+
+H.test("SKY GEM: the projection is monotone, capped, and never pulls a gem DOWN", function()
+	local R = table.clone(GameConfig.Rescue)
+	R.skyGem = true
+	local base = R.chevronSize or 2.2
+	local prevSize, prevY = -1, -1
+	for d = 0, 3000, 25 do
+		local p = RescueRules.skyGemProjection(R, d, base, 45)
+		H.ok(p.size >= prevSize - 1e-9, ("size must never shrink as you pull away (at %d)"):format(d))
+		H.ok(p.y >= prevY - 1e-9, ("the gem must never sink as you pull away (at %d)"):format(d))
+		H.ok(p.size <= (R.skyGemMaxSize or 34) + 1e-9, "size must respect skyGemMaxSize")
+		H.ok(p.y >= 45 - 1e-9, "the projection must never pull a gem BELOW its Stage-1 height")
+		prevSize, prevY = p.size, p.y
+	end
+	-- a gem already above the clear height is left alone (max(0, …)), not dragged down to it
+	local high = RescueRules.skyGemProjection(R, 2000, base, 400)
+	H.eq(high.y, 400, "a gem already above the treeline must not be pulled down to skyGemClearY")
+end)
+
+H.test("SKY GEM: rare gems keep their size ADVANTAGE at range (triage-by-value survives)", function()
+	local R = table.clone(GameConfig.Rescue)
+	R.skyGem = true
+	-- the server builds gold/rainbow gems 1.35× (RescueServer.buildBeacon), so the projection must
+	-- read each gem's OWN base, never a config literal — else every gem converges to one size far out
+	-- and the rare read dies exactly where it matters most: choosing a target from altitude.
+	local common = RescueRules.skyGemProjection(R, 900, R.chevronSize or 2.2, 40)
+	local rare = RescueRules.skyGemProjection(R, 900, (R.chevronSize or 2.2) * 1.35, 40)
+	H.ok(rare.size > common.size,
+		"a rare gem must still read BIGGER at 900 studs — triage-by-value is the point of the hue+size channel")
+end)
+
+--------------------------------------------------------------------------------
 -- B4.1 — SOLID TREES. World-gen runs in a server script no Lune tier can fly, but
 -- the DECISIONS it makes (which parts are solid, how a bonk is flavoured) are pure
 -- and gated here. The feel — delicious roof vs sticky ceiling — stays Chad's flight.

@@ -4,6 +4,104 @@ Read this first. It tells the next agent exactly where the project stands, the o
 
 ---
 
+## ▶▶ S44 (2026-07-21) — 🔔 THE PING LAW (the 6× complaint, root-caused) · 💎 SKY GEM built INERT · 🔥 fire-visibility QUEUED
+
+**Chad opened with two complaints and asked for a huge Fable audit. Four Fable-5 auditors ran in
+parallel (acquisition / audio / timeline+perf / claimed-vs-actual drift). Their findings drove both
+changes below. Nothing is pushed; the ping law is LIVE, the sky gem is INERT.**
+
+### ① THE PING LAW — why "fixed" five times and never fixed
+Chad: *"I hear pinging after picking up 6. I asked for this only on 10/10 about 5 or 6 times now."*
+**Root cause, confirmed independently by two auditors: "ping" names the ASSET**
+(`electronicpingshort.wav`), not a function. S38 gated the music layers; S43 gated `catchChime`/
+`playChord`. **SIX emitters shared that one wav**, and the S43 fix removed the *quietest*:
+- `playGotcha` — **every catch, vol 0.6** (the chord it replaced was 0.5 — the "fix" made it LOUDER)
+- `playWoohoo` — every catch · `playCount` + the deliver chord — on **partial** loads
+- the **crew choir** — the only CONTINUOUS bell: every `2.4 − 0.14·(riders−1)` s from rider **1**
+  (**1.70s at six aboard** — exactly "pinging after picking up 6")
+
+**The reasoning error to never repeat: fixing the symbol whose NAME matched the complaint instead of
+inventorying what actually emits.** One `grep SFX_PING` would have falsified it in ten seconds.
+
+**The fix RE-VOICES, never silences** (a catch must still land): catch accent → bright two-note **talon
+snap** (a closing talon IS a snap), woohoo → rising **rush of air**, crew chatter → high **chitter
+clicks** (and that is the seam a real squeak asset drops into). Bells now exist in exactly three
+places: the catch that FILLS the back, the waterfall jingle, the full-load payout. Scarcity is what
+makes 10/10 the jackpot.
+
+**Structural, so it cannot regress:** `RescueRules.soundClass` + `SOUND_EVENTS` is the pure policy;
+the spec **sweeps every event × every carry** and fails if any can ring below a full load (a new event
+is under the law automatically). Plus a **source-text gate**: `playSound(SFX_PING, …)` may not appear
+inline in BirdController — the exact bypass that caused five regressions. **Both gates mutation-tested:
+crew-choir-back-on-the-bell → 2 fails; inline ping at the catch site → source gate fails.**
+`Rescue.sfxDiag=true` now prints every one-shot (event/class/vol/pitch/carry) — audio was the one
+subsystem with no diagnostic, which is how six guess-cycles happened. A/B flags: `gotchaOnPing`,
+`woohooOnPing`, `chirpOnPing` (all ship false).
+
+⚠️ **Adding the seam pushed BirdController over Luau's 200-local cap and BRICKED the client.**
+`compile.spec` caught it headlessly. Paid back by merging playGotcha+playWoohoo into one `playAccent`.
+**BirdController has ~zero local headroom — budget one before adding any module-local.**
+
+### ② THE SKY GEM — "I can barely see the squirrels" (built, INERT, `Rescue.skyGem=false`)
+**Nothing renders late: all 15 squirrels spawn on the round's FIRST frame** (timeline lane ruled out
+every mechanism). Chad simply cannot SEE them. Quantified at 70° FOV / 1080p (≈771 px/rad):
+
+| signal | @600 | @1,140 (typical approach) | @2,000 |
+|---|---|---|---|
+| chevron gem | 3–4 px | **≤2.4 px** | subpixel |
+| halo (flat, foreshortened) | 26 px | 13×6 px | 8×3 px |
+| *(the retired shaft)* | 90 px | *47 px line* | 27 px |
+
+…and **45% of perches are UNDER the canopy** (crowns span Y 25–80), so ~7 of 15 have **no sky signal at
+all**. **This is a REGRESSION**: Stage 1's gate was the dive-in read only ("does your eye land on a
+waving animal") — the word *range* is not in the d9630b0 diff. It traded the shaft's weak-but-real
+long-range line for nothing.
+
+**Vetted technique (SOP #8 — tombstones respected):** keep the certified Stage-1 gem, make it a
+**per-frame distance projection** — constant ANGULAR size (~11.6 px at ANY range) + a lift that clears
+the worst-case tree envelope (150) at distance, descending back onto the head as you close. Near ≤70
+studs it is **byte-identical Stage 1**, so occluding the critter is geometrically impossible; the
+descent itself guides you under the crown to the hidden half. Rejected on CEILING, not taste: emoji
+billboard (S39 tombstone), fat cylinder (S40 tombstone), shaft revert (~1 px at range, still inside
+the crown band), bigger halo (foreshortens; under the leaves), particles (10-stud engine cap),
+Highlight (outlining a subpixel silhouette is subpixel).
+
+**Headless gate asserts the READ, not opinion:** never-occludes-up-close (identity ≤70 studs),
+visible-from-altitude (8–40 px across 260–2,600 studs; **worst 10.1 px vs Stage 1's 1.5 px @1,140**),
+clears-the-canopy (gem bottom ≥150 for under-canopy perches), monotone/capped/never-pulls-down, and
+**rare gems keep their 1.35× size advantage at range** — that last test FAILED first and caught a real
+design flaw (every gem converged to one size far out, killing triage-by-value from altitude).
+
+### ③ Ladder: **Tier-4 161/161 · rojo PASS · luau-lsp 0 NEW (17 pre-existing) · selene UNAVAILABLE(404)**
+
+**▶ CHAD'S PLAY (only he can judge these):**
+① **The ear:** carry 6+ and keep catching — every catch should land as a *snap/thump*, the crew as
+chitter, and **the bell should appear ONLY as you hit 10/10**. If you hear ANY bell before 10, set
+`Rescue.sfxDiag=true`, fly once, and paste the `[SFXDiag]` lines — they NAME the sound. No more guessing.
+② **The sky gem:** set `Rescue.skyGem=true`, Play, and from spawn altitude ask "can I see where the
+critters are?" Then dive one: the gem must shrink back onto its head and fade exactly as it does today
+(if it ever occludes the critter at catch range, that is a BUG — the test says it cannot).
+Knobs: `skyGemStudsPerStud` (bigger = larger on screen), `skyGemMaxSize`, `skyGemClearY`, `skyGemFarT`.
+
+**▶ NEXT (in order):** **fire visibility** — Chad confirmed *"it takes a while for me to see fire too."*
+CONVICTED: `igniteAt=10` then **15–25s of SMOLDER, a state FireVisuals does not render at all**, so the
+first flame appears ~1:35 on the clock and accretes cell-by-cell at ~1 Hz. Knock-on: **squirrels panic
+at an invisible fire** for up to 25s (Danger keys off any non-GREEN cell). Fix = render smolder as a
+cheap wisp (FireVisuals is perf-pinned — budget it) *or* shorten seed smolder; do NOT blanket-cut
+`smolderMin/Max` (smolder spreads, so that races the whole front = a balance change).
+→ then **B7-P2** touch proof-of-feel (Chad answered nothing on DRAG vs TAP yet) → **B4** canopy trails
+→ **B5** leap variety → Stage **3b** only if pressure still missing → **PHASE C** persistence/levels.
+
+**▶ DRIFT the audit found (not yet fixed):** `GameConfig:1178` claims ember_valley is "INERT-by-default"
+while `:1124` makes it the ACTIVE mission (same file contradicts itself) · 4 dead music knobs
+(`musicPizzAt/RhythmAt/BrassAt/HeartAt`) read by nothing, with a comment describing removed behaviour ·
+HANDOFF S43 ④/⑤ still tell Chad to look for a roar-asset log line that cannot print (ids list is empty) ·
+`_ScratchTele.server.luau` says "DELETE after; non-committed" but is committed and Rojo-mapped ·
+CLAUDE.md still describes COMBAT as the product · two silent one-shot `WaitForChild(…,30)` timeouts in
+BirdController leave the rescue layer dead (frozen 0:00 clock, uncatchable squirrels) with no warn/retry.
+
+---
+
 ## ▶▶ S43 (2026-07-21) — 🧰 SHORE-UP (perf envelope pinned + fire tick 4× cheaper) · 🐿️🔥 STAGE 3a FEAR is LIVE
 
 **Two loop items, both red-teamed, both committed on `updraft` (NOT pushed — push stays ASK-gated).**

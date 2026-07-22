@@ -1265,18 +1265,40 @@ local function playSound(id, vol, speed)
 	task.delay(4, function() if s and s.Parent then s:Destroy() end end)
 	return s
 end
--- rising major-third "magic" chord: root then ×1.26.
-local function playChord()
-	playSound(SFX_PING, 0.5, 1.0)
-	task.delay(0.12, function() playSound(SFX_PING, 0.5, 1.26) end)
+-- THE PING LAW SEAM (S44). Every bell-capable one-shot goes through `playCue`, which asks the pure
+-- RescueRules.soundClass what TIMBRE this event may speak in right now. The law it enforces: no
+-- ping-class sound below a full load (Chad, six times: "it should only ping when I have 10/10").
+-- Volume/pitch/timing stay here — presentation. Only the asset choice moved, so it is testable.
+-- INVARIANT: the ping asset must never be handed to playSound directly — every bell-capable one-shot
+-- goes through here. tests/rescuerules.spec.luau pins that by source text: hand-wiring a fresh inline
+-- play of the ping is exactly the move that regressed this five times, and now it fails Tier-4.
+--
+-- Built as an immediately-invoked closure so the class map is an UPVALUE, not a second module-local:
+-- BirdController sits hard against Luau's 200-local-per-function cap (S41 bricked the whole client
+-- that way, which is why tests/compile.spec exists). Two new module-locals overflowed it again during
+-- this very edit — the gate caught it headlessly. One local, map hidden inside.
+local playCue = (function()
+	local MAP = { ping = SFX_PING, snap = SFX_SNAP, swoosh = SFX_SWOOSH }
+	return function(event, carry, vol, speed)
+		local cap = rescueState.capacity or RES.carryCapacity or 10
+		local cls = RescueRules.soundClass(RES, event, { carry = carry, capacity = cap })
+		if RES.sfxDiag then
+			print(string.format("[SFXDiag] %-14s -> %-6s vol=%.2f pitch=%.2f  carry=%s/%s",
+				event, cls, vol or 0.5, speed or 1, tostring(carry or 0), tostring(cap)))
+		end
+		return playSound(MAP[cls] or SFX_SNAP, vol, speed)
+	end
+end)()
+
+-- rising major-third "magic" chord: root then ×1.26. `event` is "fillChime" (the catch that fills
+-- the back) or "deliverFanfare" (the payout) — both bells ONLY at a full load.
+local function playChord(event, carry)
+	playCue(event, carry, 0.5, 1.0)
+	task.delay(0.12, function() playCue(event, carry, 0.5, 1.26) end)
 end
 local function playPomf()
 	playSound(SFX_SNAP, 0.7, 0.55)          -- soft low pillow-thump
 	playSound(SFX_SWOOSH, 0.35, 0.7)
-end
-local function playGotcha()
-	playSound(SFX_PING, 0.6, 1.0)
-	task.delay(0.08, function() playSound(SFX_PING, 0.6, 1.5) end)  -- bright two-note stinger
 end
 local function playHup()
 	playSound(SFX_SWOOSH, 0.3, 2.0)         -- tiny-creature effort, pitched up
@@ -1284,19 +1306,37 @@ end
 local function playWhip()
 	playSound(SFX_SWOOSH, 0.45, 1.2)
 end
-local function playCount(i)
-	-- MATH DELIVERY hop-off counting note: one ping per dismount, stepping UP each time so the
-	-- skip-count is heard as a rising scale (the tally ticking toward n²).
-	playSound(SFX_PING, 0.5, 1.0 + 0.12 * (math.max(1, i) - 1))
+local function playCount(i, carry)
+	-- MATH DELIVERY hop-off counting note: one per dismount, stepping UP each time so the skip-count
+	-- is heard as a rising scale (the tally ticking toward n²). PITCH carries the counting information,
+	-- so the scale survives intact on the snap: only a FULL load's payout rings in bells (S44 law).
+	-- `carry` is the size of the LOAD BEING PAID OUT (hopOff.n), not the shrinking rider list — else
+	-- the scale would change timbre halfway down the tally.
+	playCue("countNote", carry, 0.5, 1.0 + 0.12 * (math.max(1, i) - 1))
 end
-local function playWoohoo()
-	-- a happy "wheee!" — one tone bent up 1.2 -> 2.0 while playing.
-	local s = playSound(SFX_PING, 0.5, 1.2)
+-- THE TWO PER-CATCH ACCENTS, merged into ONE function on purpose: BirdController sits against Luau's
+-- 200-module-local cap (compile.spec exists because S41 bricked the client on it), and the ping-law
+-- seam above costs one local — so these two pay it back. Both fired on EVERY catch in the old bell:
+--   "gotcha" — the success sting on the contact frame. TWO pings at 0.6 made it the LOUDEST bell in
+--              the game, louder than the chord S43 removed. Now a bright two-note TALON SNAP: same
+--              rising gesture, same punch, no bell. A closing talon IS a snap.
+--   "woohoo" — the delayed "wheee!", one tone bent UP while playing. Now a rising RUSH OF AIR: the
+--              pull-up after the grab is wind, not a chime.
+-- (gotchaOnPing / woohooOnPing restore the old voices for an A/B.)
+local function playAccent(kind, carry)
+	if kind == "gotcha" then
+		local legacy = RES.gotchaOnPing
+		playCue("catchAccent", carry, 0.6, legacy and 1.0 or 1.4)
+		task.delay(0.08, function() playCue("catchAccent", carry, 0.6, legacy and 1.5 or 2.0) end)
+		return
+	end
+	local base = RES.woohooOnPing and 1.2 or 1.3
+	local s = playCue("woohoo", carry, 0.5, base)
 	if s then
 		task.spawn(function()
 			for i = 1, 8 do
 				if not (s and s.Parent) then return end
-				s.PlaybackSpeed = 1.2 + (0.8 * i / 8)
+				s.PlaybackSpeed = base + (0.8 * i / 8)
 				task.wait(0.035)
 			end
 		end)
@@ -1661,7 +1701,7 @@ local function triggerCatch(sqModel, closing)
 	-- and nagging. It is now reserved for the moment the load fills (see the rider-conversion sites):
 	-- one earned fanfare per full load instead of ten pings per round. playHup stays — that is the
 	-- effort/anticipation swoosh, not a ping.
-	if RES.chimeEveryCatch then playChord() end
+	if RES.chimeEveryCatch then playChord("fillChime", RES.carryCapacity or 10) end
 	if _G.RescueStamp then _G.RescueStamp("tell") end
 end
 
@@ -1703,9 +1743,11 @@ local function stepCatch(dt)
 			burstFeathers(tp, FEATHER_GOLD, 26 + math.floor(big * 34))     -- up to ~60 for a max catch
 			goldRing(tp, 1 + big * 0.9)
 			playPomf()
-			playGotcha()
+			playAccent("gotcha", #riders)
 			if _G.RescueStamp then _G.RescueStamp("gotcha", catch.tier, catch.rarity, catch.styleMult, nil, big) end
-			task.delay(contactEnd - catch.airtime + (RES.slowmoSnapBack or 0.2) + (RES.woohooDelay or 0.5), playWoohoo)
+			local whoCarried = #riders
+			task.delay(contactEnd - catch.airtime + (RES.slowmoSnapBack or 0.2) + (RES.woohooDelay or 0.5),
+				function() playAccent("woohoo", whoCarried) end)
 		end
 		-- THE GRAB (S39): foot snaps from open to curled, hip pulls back — the snatch, right on the pomf frame.
 		talonReach = 1
@@ -1778,7 +1820,7 @@ local function stepCatch(dt)
 				seatIndex = catch.seatIndex,     -- F3: carry the seat claimed at climb-start onto the rider
 			}
 			-- FULL LOAD = the earned ping (Chad S43). Fires exactly on the catch that fills the back.
-			if RescueRules.catchChime(RES, #riders, rescueState.capacity) then playChord() end
+			if RescueRules.catchChime(RES, #riders, rescueState.capacity) then playChord("fillChime", #riders) end
 			catch.sq = nil
 			catch = nil
 		end
@@ -1862,7 +1904,7 @@ local function stepCrewCatches(dt)
 					seatIndex = cc.seatIndex,          -- F3: carry the seat claimed at leap onto the rider
 				}
 				-- FULL LOAD = the earned ping (Chad S43), same rule on the crew path.
-				if RescueRules.catchChime(RES, #riders, rescueState.capacity) then playChord() end
+				if RescueRules.catchChime(RES, #riders, rescueState.capacity) then playChord("fillChime", #riders) end
 				cc.sq = nil
 			end
 			table.remove(crewCatches, i)
@@ -2306,10 +2348,24 @@ local function scanSquirrels(dt)
 					baseT = 0.30 + 0.20 * (1 - flarePulse)
 				end
 				if chev then
-					chev.Transparency = 1 - farVis * (1 - baseT)
 					local cy = (m:GetAttribute("HopBaseY") or m.PrimaryPart.Position.Y) + (RES.chevronY or 14)
 						+ (RES.chevronBobAmp or 1.0) * math.sin(squirrelPhase * 1.4 + (tonumber(sid) or 0))
-					chev.CFrame = chev.CFrame + Vector3.new(0, cy - chev.Position.Y, 0)
+					-- THE SKY GEM (S44). Cache the BUILT size once (the server rarity-scales it ×1.35 for
+					-- gold/rainbow, so we must project off each gem's own base, never a config literal) —
+					-- same one-shot-attribute pattern the hop already uses for HopBaseY. Then project.
+					-- With Rescue.skyGem=false this returns the identity and the next three lines are
+					-- byte-identical to Stage 1.
+					local gemBase = m:GetAttribute("GemBaseSize")
+					if not gemBase then gemBase = chev.Size.X; m:SetAttribute("GemBaseSize", gemBase) end
+					local sg = RescueRules.skyGemProjection(RES, dist, gemBase, cy)
+					if sg.size ~= chev.Size.X then
+						chev.Size = Vector3.new(sg.size, sg.size * (RES.chevronAspect or 1.6), sg.size)
+					end
+					-- At range the Stage-1 read was BOTH subpixel and half-dimmed; blend toward solid as
+					-- the gem climbs, while the near pulse (tell / fear / idle) is preserved untouched.
+					local farT = baseT * (1 - sg.t) + (RES.skyGemFarT or 0.05) * sg.t
+					chev.Transparency = 1 - farVis * (1 - (RES.skyGem and farT or baseT))
+					chev.CFrame = chev.CFrame + Vector3.new(0, sg.y - chev.Position.Y, 0)
 				end
 				if halo then
 					local ringVis = 0.35 + 0.65 * farVis   -- never below 35% presence: the frame survives the dive
@@ -2492,7 +2548,7 @@ local function stepHopOff(dt)
 			m:Destroy()
 		end)
 	end
-	playCount(hopOff.i)
+	playCount(hopOff.i, hopOff.n)
 	if _G.RescueStamp then _G.RescueStamp("tally", nil, nil, nil, hopOff.i * hopOff.n) end
 	if hopOff.i >= hopOff.n then
 		local n = hopOff.n
@@ -2535,7 +2591,9 @@ local function updateDeliver(dt)
 		if deliverRemote then deliverRemote:FireServer() end
 		hopOff = { n = #riders, i = 0, t = 0 }         -- riders now dismount one per beat (stepHopOff)
 		deliverCooldown = #riders * (RES.hopBeat or 0.35) + 1.5
-		playChord()
+		-- S44 PING LAW: the payout rings in BELLS only for a full 10/10 load. A partial deliver still
+		-- gets its fanfare — on the snap voice — so dropping 3 off is celebrated without nagging.
+		playChord("deliverFanfare", hopOff.n)
 	end
 end
 
@@ -2600,10 +2658,10 @@ local function updateMusic(dt)
 		-- every other beat, which STOPS the instant you deliver. There is NO music before 10 now (Chad S38, said
 		-- 3×: "should ONLY be 10/10" — the pizz/rhythm/brass build layers that were firing at 7-8/10 are REMOVED).
 		if carry >= cap and musicBeatFlip then
-			playSound(SFX_PING, vol * 0.7, RES.jingleLo or 1.2)
+			playCue("jingle", carry, vol * 0.7, RES.jingleLo or 1.2)
 			task.delay(0.14, function()
 				if rescueState.phase == "active" and #riders >= cap then
-					playSound(SFX_PING, (RES.musicLayerVol or 0.16) * 0.7, RES.jingleHi or 1.6)
+					playCue("jingle", #riders, (RES.musicLayerVol or 0.16) * 0.7, RES.jingleHi or 1.6)
 				end
 			end)
 		end
@@ -2615,8 +2673,12 @@ local function updateMusic(dt)
 		if chirpTimer <= 0 then
 			chirpTimer = math.max(RES.chirpMinGap or 0.5,
 				(RES.chirpBase or 2.4) - (RES.chirpPerRider or 0.14) * (#riders - 1))
+			-- S44 PING LAW: this was the only CONTINUOUS bell in the game — one ping every
+			-- `2.4 - 0.14*(riders-1)` s from the FIRST rider (1.70s at six aboard), which is precisely
+			-- the "pinging after picking up 6" Chad reported. Re-voiced to high SNAP clicks: rapid
+			-- chitter reads as the crew talking, and it is the seam a real squeak asset drops into.
 			local wobble = 1.6 + 0.5 * math.sin(#riders * 1.3 + #riders)  -- pitch wanders so it's not a metronome
-			playSound(SFX_PING, RES.chirpVol or 0.14, wobble)
+			playCue("chirp", #riders, RES.chirpVol or 0.14, wobble + (RES.chirpOnPing and 0 or 0.7))
 		end
 	else
 		chirpTimer = 0

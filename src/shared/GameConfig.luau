@@ -819,6 +819,19 @@ GameConfig.Rescue = {
 	-- It now fires ONCE, on the catch that fills the back (see BirdController's rider-conversion sites).
 	-- true = the old per-catch ping back, for comparison.
 	chimeEveryCatch  = false,
+	-- THE PING LAW (S44). The S43 fix above gated the CHORD and Chad still heard pinging at 6/10 —
+	-- because the chord was never the loudest offender. `playGotcha` (every catch, vol 0.6 vs the
+	-- chord's 0.5), `playWoohoo` (every catch) and the CREW CHOIR (every ~1.7s from the first rider)
+	-- all played the SAME electronicpingshort.wav. "Ping" names the ASSET, not a function — so the
+	-- class each event speaks in now lives in RescueRules.soundClass and is swept by a spec that
+	-- fails if ANY event can ring a bell below a full load. These three flags each restore ONE
+	-- legacy voice for A/B; all ship false. See RescueRules "THE PING LAW".
+	gotchaOnPing     = false,  -- true → the catch accent is the old two-note BELL again (was per-catch).
+	woohooOnPing     = false,  -- true → the "wheee!" is the old pitch-bent bell instead of a wind rush.
+	chirpOnPing      = false,  -- true → crew chatter is the old bell metronome instead of chitter clicks.
+	sfxDiag          = false,  -- true → every one-shot prints "[SFXDiag] event class vol pitch carry/cap" to
+	                           -- Output. The audio channel is the one subsystem that never had a diagnostic,
+	                           -- which is how six guess-cycles happened; ONE flight now NAMES the sound.
 	carryCapacity    = 10,     -- squirrels ridable on your back before you must deliver (Chad: "he can carry
 	                           -- 10 squirrels that latch onto him"). Grid-packed on the back (SEAT_COLS across,
 	                           -- the rest stacking toward the tail). Read by BOTH the server carry gate and the client.
@@ -877,6 +890,24 @@ GameConfig.Rescue = {
 	                           -- worst-case gem bottom = 14 − 2.73(gold gem halfY) − 1.0(gem bob)
 	                           -- − 1.0(squirrel hop) = 9.27 → clears the head by ≥1.29 always
 	                           -- (models.spec asserts this exact inequality).
+	-- THE SKY GEM (S44) — Chad: "I can barely see the squirrels, they render in after 30s." Nothing
+	-- renders late (all 15 spawn on the round's first frame) — the markers are fixed WORLD-size objects
+	-- and he acquires from 600-2,600 studs, where the 2.2-stud chevron is ~2.4 px and the flat halo is a
+	-- ~13x6 px smudge; 45% of perches are under the canopy with no sky signal at all. So the gem becomes
+	-- a per-frame DISTANCE PROJECTION: constant ANGULAR size + a lift clearing the treeline at range,
+	-- descending back onto the head as you close (near = byte-identical Stage 1). See RescueRules
+	-- "THE SKY GEM" for why every other technique's ceiling is below this read.
+	skyGem            = false, -- INERT-by-default gate. false → skyGemProjection returns the identity.
+	skyGemStudsPerStud = 0.015,-- gem studs per stud of distance ⇒ ~11.6 px at 1080p/FOV70, at ANY range.
+	skyGemMaxSize     = 34,    -- studs; growth ceiling so a 2 km gem can't become a sky-filling billboard.
+	skyGemClearY      = 160,   -- world Y the gem's BOTTOM rises to at range. buildTree's worst case is
+	                           -- crownY 115 + blob 35 = 150 — this clears it with margin.
+	skyGemFarT        = 0.05,  -- transparency the gem blends toward at range. The Stage-1 far read was
+	                           -- held at 0.30-0.50 (half-dimmed AND subpixel); at distance it goes solid.
+	skyGemNear        = 70,    -- reuse the certified Stage-1 fade band so near behaviour is provably…
+	skyGemFar         = 260,   -- …today's: at ≤70 studs the projection is the identity, by construction.
+	chevronAspect     = 1.6,   -- the gem is built this many × taller than wide (buildBeacon) — the
+	                           -- projection needs it to place the gem's BOTTOM at skyGemClearY.
 	chevronSize       = 2.2,   -- studs; gem base size (built 1.6× tall, rolled 45° → a kite pointer,
 	                           -- the known "map marker" icon). Gold/Rainbow (mult ≥ 4) build ×1.35.
 	chevronBobAmp     = 1.0,   -- studs; the gem's own slow bob ("THIS one!" pointer life).
