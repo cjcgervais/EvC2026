@@ -28,7 +28,22 @@ but the *method* that produced it is what is under review. Three things a new ag
 
 ---
 
-## ▶▶ COLD START — READ THIS FIRST (work inventory; current as of S46 close, 2026-07-22)
+## ▶▶ COLD START — READ THIS FIRST (work inventory; current as of S47 close, 2026-07-22)
+
+### 🎨 S47 — THE QUALITY PIVOT (supersedes the S46 "loop paused" state)
+The strategy consult happened (Fable, 2026-07-22). **The work queue is now MASTER-PLAN §5.5
+PHASE V** — visual foundation: V0 z-fight kill → V1 WorldGen extraction → V2 screenshot
+harness → V3 look-dev slice → **Gate V-LOOK (Chad ratifies the look FROM SCREENSHOTS)** →
+V4 Terrain+mesh world conversion → V5 polish → V6 audio last-mile → **Gate V (ONE flight,
+includes the 7-item backlog below + audio audition)**. `docs/VISUAL-QUALITY-BAR.md` is now a
+GATE document; execution model v2 (plan §8): Opus drives, Sonnet does mechanical packets,
+Fable supervises via image audits; a packet whose only gate is "Chad looks at it" is illegal
+outside a phase gate. Reports state which halves were verified (LOGIC/APPEARANCE/FEEL).
+The sections below remain accurate as state; their queues are superseded by Phase V.
+**RATIFIED by Chad 2026-07-22 (same day), committed.** Backlog question answered **(b)**:
+of the 7 unjudged items below, 2/6/7 are WRITTEN OFF as superseded by the V4 world rebuild
+(their mechanics are re-judged as part of the new world); only **1, 3, 4 + audio** fold into
+the Gate V flight. No pre-V4 flight. Next session: model → Opus, "run the master loop" → V0.
 
 *The session sections below are the historical log, newest first. **This box is the authoritative
 current state.** The older "COLD START — Session 32" box further down is superseded; ignore its queue.*

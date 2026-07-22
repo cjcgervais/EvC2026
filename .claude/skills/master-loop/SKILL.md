@@ -14,11 +14,20 @@ description: >-
 
 # Master Loop — execute docs/MASTER-PLAN.md
 
-You are the orchestrator (Fable). **`docs/MASTER-PLAN.md` is the editable source
-of truth** — Chad reorders, edits, retags, or `SKIP`s packets freely; re-read it
-at the top of EVERY iteration and never cache the queue. This skill layers plan
-execution on the evc-loop SOPs; on any conflict, the evc-loop prime directives
-win (`.claude/skills/evc-loop/SKILL.md` + its `references/`).
+You are the orchestrator. **Since the S47 quality pivot the default driver is an
+OPUS session** — Fable is a supervisor reached via subagent (`model: fable`) at
+its brackets only: design specs, screenshot contact-sheet audits, red-team
+adjudication, gate prep, plan surgery. If you ARE Fable (a strategy/gate
+session), delegate implementation; if you are Opus, never silently upgrade
+yourself into Fable's brackets — spawn them. **`docs/MASTER-PLAN.md` is the
+editable source of truth** — Chad reorders, edits, retags, or `SKIP`s packets
+freely; re-read it at the top of EVERY iteration and never cache the queue. This
+skill layers plan execution on the evc-loop SOPs; on any conflict, the evc-loop
+prime directives win (`.claude/skills/evc-loop/SKILL.md` + its `references/`).
+**`docs/VISUAL-QUALITY-BAR.md` is a gate document** — player-visible work meets
+it or is flagged `PLACEHOLDER(expiry)`; reports always state which halves were
+verified (LOGIC tests / APPEARANCE images / FEEL flight — "green" alone is
+banned).
 
 **Goal (one metric):** advance MASTER-PLAN packets to GREEN (ladder-passing,
 commit-ready checkpoints), top-down within the current phase, until a STOP fires.
@@ -36,7 +45,10 @@ commit-ready checkpoints), top-down within the current phase, until a STOP fires
 
 ## Packet selection
 
-- **Current phase** = the first phase (A→B→C→D) whose gate has not been passed.
+- **Current phase** = the phase MASTER-PLAN.md declares ACTIVE (its banner/section
+  headers win over any mechanical rule — since S47 the order is **A→B→V→C→D**, and
+  Phase V is ACTIVE even though Gates A and B are recorded passed). Absent an
+  explicit ACTIVE marker: the first phase whose gate has not been passed.
   A phase's packets may not start until the PREVIOUS phase's gate is recorded
   as passed in the plan/HANDOFF (Gate 0 before A-packets, Gate A before B, …).
   Exception: a packet explicitly marked as its own track (e.g. B7 design consult)
@@ -58,7 +70,10 @@ commit-ready checkpoints), top-down within the current phase, until a STOP fires
    input/kernel: run `references/locked-specs-gate.md` (evc-loop). If a locked
    behavior would move → STOP and ASK Chad.
 3. **IMPLEMENT** — spawn implementation subagent(s) with `model` from the tag
-   (default **opus**; never silently upgrade to fable — Chad's token policy).
+   (default **opus**; `[model: sonnet]` = mechanical spec-determined packets
+   only — ledger/doc sync, scaffolds from a written spec, bootstraps, config
+   plumbing; never design/kernel-adjacent/balance. Never silently upgrade to
+   fable — Chad's token policy).
    The prompt = the packet verbatim + the design spec + acceptance criteria +
    file anchors + "refine, don't regenerate; all Luau starts `--!nonstrict`;
    report what you changed with file:line". One packet may fan out to parallel
@@ -85,18 +100,36 @@ commit-ready checkpoints), top-down within the current phase, until a STOP fires
 8. **DECIDE** — STOP condition fired? If not → next packet (step: re-read
    MASTER-PLAN.md first).
 
+## Image gates (Tier V — Fable's eyes, S47)
+
+Once the screenshot harness (packet V2) exists: any packet tagged
+`gate: image audit` ends with `tools/Capture-World.ps1` producing a contact
+sheet under `captures/`, audited by a **Fable subagent reading the images**
+against `docs/VISUAL-QUALITY-BAR.md` §2. Iterate to a Fable PASS before the
+packet is GREEN — visual iteration costs zero Chad flights. Stills judge
+appearance only; motion/feel items still batch to the flight gate.
+Guardrails: the vantage list is FIXED config in the capture tool (never chosen
+per-packet — no cherry-picked angles); ≤10 images per audit; ≤3 audit rounds
+per packet, then STOP and surface. Every audit logs the contact-sheet path +
+Fable's verdict verbatim in the ledger — an image gate with no logged Fable
+verdict is NOT passed.
+
 ## Feel batching (Tier 5)
 
 Cosmetic/presentation packets are NOT per-item Play gates (the S39
 ANIMATION-BATCH rule, generalized). Accumulate every "only Studio can judge
 this" item into **one playtest checklist per phase gate**, kept at the top of
 the current ledger session block. At the gate: STOP, present the checklist +
-what changed since Chad's last flight, and wait.
+what changed since Chad's last flight, and wait. **A phase-gate flight may only
+be requested after its image audit PASSES** — Chad never flies to discover what
+a screenshot could have shown. Checklist ≤ 12 items.
 
 ## STOP conditions (check every DECIDE)
 
 - **PHASE GATE** — next packet is in a gated-off phase, or the phase is done →
-  present the batched checklist (Gate 0 / A / B / C per plan §8) and stop.
+  present the batched checklist (Gate 0 / A / B / **V-LOOK / V** / C per plan §8)
+  and stop. Gate V-LOOK is a SCREENSHOT gate (Chad ratifies in chat, no flight);
+  Gate V is the one Phase-V flight.
 - **CHAD-DECISION** — the packet's gate says CHAD / design approval (e.g. B7
   touch input) → run the consult, present options, stop. Never decide feel or
   LOCKED-spec questions autonomously.
@@ -115,6 +148,8 @@ block), commits prepared but un-landed, memory updated per
 
 Verify red / new finding → fix trivially or revert the packet; never leave the
 tree red. Subagent returns garbage → re-prompt once with the failure quoted;
-twice → do it yourself (Fable) and note the token cost in the ledger. Crash or
-ambiguous intent → ask, don't guess. Git is the undo button: checkpoint before
-risky edits; each commit green on its own.
+twice → **if it's an implementation task, the driver may do it and note the
+token cost in the ledger; if it's a FABLE-BRACKET task (design spec, image
+audit, adjudication), STOP and surface — the driver never self-substitutes for
+Fable.** Crash or ambiguous intent → ask, don't guess. Git is the undo button:
+checkpoint before risky edits; each commit green on its own.

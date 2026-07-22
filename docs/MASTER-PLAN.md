@@ -74,6 +74,33 @@ zero cost if the answer is TAP. Then: B7-P2 proof-of-feel → B4 → B5 → Phas
 
 ---
 
+## ★★ S47 STRATEGY RE-MASTER (2026-07-22) — THE QUALITY PIVOT (read before picking any packet)
+
+Chad halted the loop at S46: the game is an untextured gray-box treated as shippable, every
+perceptual fix costs him 7–8 passes, and he is *"fighting mediocrity rather than testing
+something competitive."* The full diagnosis is `docs/CONSULT-VISUAL-QUALITY.md`; the answer is:
+
+1. **`docs/VISUAL-QUALITY-BAR.md` is now a gate document** — the written definition of "good"
+   (target look, per-set-piece definition-of-done, perf budget, honesty rule). Player-visible
+   work either meets it or is flagged `PLACEHOLDER(expiry)`. Scope honesty: **this game is
+   being built to publish.**
+2. **PHASE V (VISUAL FOUNDATION, §5.5 below) is the ACTIVE phase** — it runs before the
+   B-remainder (B5/B6) and Phase C. C3's art pass is largely absorbed by it.
+3. **The execution model is inverted (§8)** — grind sessions run on **Opus** (Sonnet for
+   mechanical packets); **Fable supervises**: design brackets, screenshot audits, red-team
+   adjudication, gates. Chad flies at phase gates only, always after a Fable image-audit pass.
+4. **The instrument gap is closed with images, not flights** — a screenshot harness (V2) gives
+   Fable eyes; visual iteration happens at zero Chad cost. Chad ratifies the target look FROM
+   SCREENSHOTS at Gate V-LOOK, then flies once at Gate V.
+5. **"Renders in slow" (REOPENED) is deliberately parked until after V4** — the world that's
+   slow to draw is the world V3/V4 replaces wholesale; diagnosing Auto-graphics behavior on
+   geometry we're about to delete is waste. Boot-to-drawn is measured at Gate V with the
+   existing probe; if still slow, a dedicated DRAWN-clock diagnosis packet runs then
+   (per `feedback-when-a-fix-fails-reinstrument`).
+6. **The 7 unjudged S45/S46 changes** stay live and fold into the Gate V flight checklist —
+   with one exception: V0 fixes the z-fighting *now*, because Chad has already judged it
+   ("flashing all over") — that item is falsified, not unjudged.
+
 ## 1. The thesis (why this plan is shaped this way)
 
 The 14-bug autopsy of every playtest bug Chad chased says: **~10 of 14 were pure
@@ -300,16 +327,19 @@ cap unchanged; tree part count reviewed at C3 (art pass) with an explicit instan
   Balloon pre-collect, never harm). Perf diag prints tick-ms. `[model: opus | gate: tests, perf diag]`
 - **B3 — Crash→bounce.** Complete the non-lethal contract: cartoon bounce + feather poof +
   1.5s dazed recovery (reuse graze-slide; `nonLethalTerrain` already suppresses lethality).
-  Prerequisite for canopy collision. Kernel untouched — presentation + the existing collision
-  seam only. `[model: opus | gate: tests + batched Play]`
-- **B4 — Canopy collision + first trail cuts.** Grove trees become collidable (`CanQuery`),
-  3-4 gray-box named trail corridors under the canopy (the skill layer's geometry). Depends
-  B3. `[model: opus | gate: batched Play]`
+  Kernel untouched — presentation + the existing collision seam only.
+  `[model: opus | gate: tests + batched Play]`
+- **B4 — ⚠️ SUPERSEDED (S47) — DO NOT BUILD AS WRITTEN.** "Grove trees become collidable" now
+  directly violates Chad's S45c decision (`Rescue.treeCollision` stays `"off"` — the ghost
+  forest is a DESIGN DECISION) and would re-entangle collision with scoring, which S46's B4.2
+  deliberately decoupled. Canopy-threading pays via the B4.2 style scorer instead. Any revival
+  of tree collision or trail corridors requires an explicit Chad re-ask first.
 - **B5 — Leap variety + saved-crowd.** 3-4 leap styles (cannonball/swan/flail/cool-guy —
   extends the built `PoseSquirrel` rig) + delivered squirrels persist as a visible crowd on
   the meadow (the crowd IS the scoreboard) + **squirrel squeak SFX (bible line 19 — the audio half of the "want": you
   HEAR a hidden squirrel squeak under the canopy before you see it; spatial Sound on the stranded model, Fable S41
-  found this dropped from the plan).** `[model: opus | gate: batched Play]`
+  found this dropped from the plan).** ⚠️ S47: the squeak-SFX line is ABSORBED by Phase V packet V6a — don't
+  rebuild it here; B5's remaining scope is leap styles + the saved-crowd. `[model: opus | gate: batched Play]`
 - **B6 — FTUE script.** Green-corner spawn, one guided beacon, 1.5× spheres (hooks exist),
   guided first delivery, then the "whoomph — GO!" round start. No tutorial screens.
   `[model: fable designs, opus implements | gate: Gate B Play]`
@@ -318,6 +348,126 @@ cap unchanged; tree part count reviewed at C3 (art pass) with an explicit instan
   touches LOCKED territory (CS registry) and CANNOT be autonomously decided. Fable design
   consult + Chad decision FIRST; implementation packets get written only after. Do not let
   this block B1-B6. `[model: fable consult → CHAD | gate: design approval]`
+
+## 5.5 PHASE V — VISUAL FOUNDATION (S47, ACTIVE): build the game we'd actually publish
+
+> The quality pivot. Exit criteria: the world meets `docs/VISUAL-QUALITY-BAR.md` §2 on every
+> row, inside the §3 perf budget, verified by machine gates + Fable image audits — and Chad has
+> flown it ONCE (Gate V) and called it a game he'd show someone. **Two gates:** **Gate V-LOOK**
+> (Chad ratifies the target look from the look-dev-slice screenshots — in chat, no Studio) and
+> **Gate V** (one flight: look in motion + load time + the 7-item S45/S46 backlog + audio).
+> Batching rule: art passes are BATCHED (the consult's finding — one-change-at-a-time remains
+> law for kernel/logic only). Every packet still config-gated with a kill switch.
+
+- **V0 — Kill the flashing (the falsified item).** Fix `GroundDetail` coplanarity; keeps the
+  altitude cue. **The invariant is PAIRWISE and WHOLE-WORLD:** "no two overlapping
+  visible-or-queryable faces share a plane, checked per face pair across the entire built
+  world" — NOT per-band (patches overlap *within* a band too; per-band Y offsets alone may
+  not pass, use per-patch jitter if needed). Write the failing test FIRST (it must catch the
+  current world), and **the fix bends to the test, never the test to the fix.** Also sweep
+  the other coplanar candidates the S47 survey flagged (landmark patches/lake/desert/rivers
+  all at Y=1; SafePad/RimPool discs). `[model: opus | gate: tests]`
+- **V1 — WorldGen extraction.** Move `GameServer.BuildMap` + `SetupLighting` + RescueServer's
+  world builders into pure shared module(s) (`WorldGen.luau` or split) consumed by both
+  servers — the RescueRules extraction pattern applied to the world. Behavior-preserving:
+  parity gate hashes part counts/CFrames/colors before-vs-after — **AND the full side-effect
+  surface, which parts alone are blind to (S47 red-team):** `Workspace.Gravity =
+  GameConfig.Flight.GRAVITY` (the kernel-coherence line, first thing in BuildMap — gets its
+  own one-line gate), every Lighting/Atmosphere/CC/Bloom property, attributes AND their
+  publish timing (`CanopyCount` — the B4.2 race fix depends on when it lands), folder
+  identities clients `WaitForChild` on ("Map", "RescueWorld"), live handles other systems
+  hold (`worldFolder` parents fox flares/squirrels; FireGrid consumes groves+deliverPos),
+  and Thermals (`CreateThermals` — extract or explicitly leave, but cover its y=0 ring in
+  the datum gate). Builders take an injected RNG seed so parity is deterministic. Unlocks
+  headless geometry gates (Tier 4) AND edit-mode world-building for the screenshot harness.
+  `[model: opus | gate: tests+parity]`
+- **V2 — THE EYES (screenshot harness).** `tools/Capture-World.ps1`: build place → launch
+  Studio via run-in-roblox → script builds the world via WorldGen in EDIT mode, steps
+  `workspace.CurrentCamera` through 8 standard vantage points (spawn, 600-stud overview,
+  grove interior, waterfall approach, dive line, fire line, delivery run, horizon) →
+  PowerShell `CopyFromScreen` captures each → `captures/S<n>/`. **Spec hardenings (S47
+  red-team):** ① camera↔capture sync via the SENTINEL-FILE handshake Smoke-Boot already
+  proved (`tools/Smoke-Boot.ps1` pattern) — never a blind cross-process timer; run-in-roblox
+  closes Studio when its script ends, so the script waits on the capture ack. ② preflight
+  for DPI scaling / foreground window / occluding dialogs. ③ vantage COORDINATES are
+  committed config — changing them is its own reviewable diff, so no session can frame
+  flattering shots. ④ honesty note carried to every audit + Gate V-LOOK: stills are
+  EDITOR-quality renders; Chad's Auto-graphics Play may draw less (the reopened render
+  question) — the boot probe at Gate V is the authority on that. ⑤ **named fallback if
+  capture defeats N attempts: Chad records ONE flythrough, ever** (the consult's Q5 option)
+  — the strategy does not silently depend on an unproven tool. Prove on the CURRENT world
+  (those captures are also the "before" record). `[model: opus | gate: harness produces a
+  sheet Fable can audit]`
+- **V3 — LOOK-DEV SLICE (the environment concept, built in-engine).** ONE valley corner
+  rebuilt to the bar behind a `Map.lookDev` flag: Terrain ground+water patch (measure
+  generation wall-clock — the V4 go/no-go number), 4–6 Synty mesh trees + rocks (ingestion
+  path per bar §1.5: committed `.rbxm` → `ReplicatedStorage.Assets`), the waterfall rebuilt to
+  its DoD (motion + spray + mist + sound), lighting rig v2 (skybox, golden sun, Atmosphere).
+  A/B contact sheets (current vs slice) → Fable iterates to a pass → **Gate V-LOOK: Chad picks
+  from the screenshots.** V3 also measures the numbers V4's go/no-go needs: terrain fill
+  wall-clock, **client join/replication delta + memory with `StreamingEnabled=false`** (the
+  reopened load complaint lives on the client), Synty mesh triangle counts vs the asset
+  budget, one capture at LOW quality level, and re-verifies the Synty pack's
+  publisher/license at ingestion before any `.rbxm` is committed.
+  `[model: fable designs + audits, opus implements | gate: image gate]`
+- **V4 — WORLD CONVERSION.** Roll the ratified look across the valley: baseplate/sea/lake/
+  rivers/patches → Terrain; mountains → terrain rock or mesh; all groves → mesh trees (ghost
+  trees stay ghosts — Chad's `treeCollision` decision LOCKED); §3 perf budget enforced by
+  headless count gates; screenshot audit per region. **Pinned integration invariants (S47
+  red-team — each ships with its machine gate, and each is a LOGIC change wearing art
+  clothes, so the one-change law applies to it individually):**
+  ① **Ground datum:** the playable ground plane stays at its current height ±minor relief —
+  spawn Y / deliverPadY 250 / perch band / thermal columns (y=0, include them in the datum
+  gate even if not extracted) / fire annulus / anti-cheat / crash numbers are all tuned to
+  it. Gate: sample terrain surface height at every load-bearing site (groves, pad approach,
+  spawn core, perches, thermal ring) within a stated band of the old datum; relief spends
+  only on the mountain ring.
+  ② **WATER BEHAVIOR IS AN EXPLICIT DECISION, not a side effect.** Today the sea/lake are
+  queryable Parts — the swept sphere bounces off them (non-lethal). `BirdCollision.luau:41`
+  sets `IgnoreWater=true`, so TERRAIN water would be INVISIBLE to the sweep: a bird dives
+  through the pretty surface, submerges, and the `Y < -40` deep failsafe KILLS it — a P3
+  violation no image audit or Tier-4 test would see. V4's spec must choose: (a) shallow water
+  with a solid floor far above the failsafe (+margin), or (b) a deliberate, kill-switched,
+  Chad-asked change to water-as-surface. Gate: no reachable terrain column has a
+  surface-to-solid gap that crosses the −40 failsafe.
+  ③ **Canopy contract:** the B4.2 scorer resolves trees via `Canopy`-named parts /
+  `CanopyCount` attribute / `canopyRadius` Ball-size semantics. Mesh trees must keep that
+  contract (name/tag + a mesh-aware radius path). Gate: post-WorldGen headless check —
+  `CanopyCount > 0`, equals the client-index count, and the B4.2 inversion test re-runs
+  against the new geometry.
+  ④ **Style-economy drift:** relief + material changes shift the proximity scorer's input
+  distribution (`styleProxDist=40` was tuned flat). Gate: before/after headless proximity
+  sample over a fixed reference flight path within an accepted drift band; "style pay
+  unchanged on the reference path" joins the Gate V checklist.
+  Kill-switch honesty: reverting V4 is NOT one word — it is `Terrain:Clear()` plus the
+  retained legacy part-builder path; the spec states what `false` restores and how long the
+  legacy path is kept. `[model: opus | gate: tests + image audit]`
+- **V5 — SET-PIECE & FX POLISH.** Fire look restyled on the LOCKED §3.3 budgets; beacons/gem/
+  wayfinder harmonized with the palette WITHOUT regressing kid-legibility contrast; sky
+  finalized. `[model: opus | gate: image audit]`
+- **V6 — AUDIO LAST-MILE (the ban on empty tables), split by risk (S47 red-team):**
+  **V6a** `[model: sonnet | gate: smoke]` — fill `Fire.roarAssetIds`, `Rescue.squeakAssetIds`
+  from the verified free/licensed candidates in bar §1.5 (config-only; the plumbing is built
+  and inert-until-ID); smoke-verified loadable. **V6b** `[model: opus | gate: tests+smoke]` —
+  the music bed, ONLY if it touches `BirdController`'s audio band (register headroom 20/floor
+  8, the ping-law source gate, the emitter-inventory SOP all apply — exactly what Sonnet must
+  never touch). Audio saga stays CLOSED — new content, no reopened design. Chad auditions at
+  Gate V, swaps = one config number.
+- **V7 — CRITTER/EAGLE READ PASS (post-Gate-V, optional).** Palette/silhouette polish of the
+  procedural rigs per the `EvC2026_Art` sheets; mesh Tier-3 stays deferred per
+  `bird-art-pipeline-decision` (at altitude the world is ~95% of pixels).
+  `[model: opus | gate: image audit]`
+- **GATE V — the ONE flight.** Look in motion · boot-to-drawn vs the <5s budget (probe on) ·
+  the surviving S45/S46 backlog items · audio audition. Checklist ≤ 12 items, prepared by
+  Fable — the full backlog + look + boot + audio breaches the cap, which forces the ★CHAD-Q
+  below to be answered first.
+- **★ CHAD-Q — ANSWERED (b), Chad 2026-07-22 at strategy ratification:** items 2 (coreDetail
+  altitude patches), 6 (B4.2 grove skim-vs-plow) and 7 (cylinder shapes) are **written off as
+  individually unjudgeable — superseded by the V4 rebuild.** Their MECHANICS survive (the
+  altitude cue via terrain relief/detail, canopy-style pay via invariant ③, the pad/mesa
+  shapes via the new set pieces) and are judged as part of the NEW world at Gate V — just not
+  as attributable verdicts on the S45/S46 diffs. **Gate V folds in items 1 (wayfinder-empty),
+  3 (carry reset on R), 4 (sky gem occlusion) + audio audition only.** No pre-V4 flight.
 
 ## 6. PHASE C — THE LEVELED GAME (bible Phase 2: progression, persistence, the valley)
 
@@ -360,22 +510,36 @@ seam noted in the audit — MANDATORY before any leaderboard/multiplayer surface
 
 ---
 
-## 8. Execution model (how the loop runs this plan)
+## 8. Execution model v2 (S47 — Fable supervises, Opus/Sonnet build, Chad decides)
 
-- **The harness is `/master-loop`** (built S40 via /agent-builder): orient → pick the top
-  unblocked packet in the current phase → (design-heavy? Fable architect consult first) →
-  implement via **Opus subagent(s)** with the packet as spec → red-team (subagent) → ladder
-  v2 → ledger + HANDOFF → commit-ready checkpoint (ASK-gated) → next packet. It STOPS at
-  phase gates, on LOCKED-spec risk, and on anything only Chad can decide (B7).
-- **Model policy (Chad's token directive):** Fable orchestrates, designs module APIs, audits
-  design-critical packets (the S37 before/after bracket pattern), and adjudicates red-team
-  findings. **Opus does the bulk implementation** — packets arrive as tight specs with
-  acceptance tests, which is exactly the shape Opus executes well. Mechanical packets (A4, A5,
-  bootstraps) may run entirely on Opus.
-- **Chad's gates, batched:** Gate 0 = fly the pending S39 animation batch → approve its commit
-  (already prepared). Gate A = one sanity Play after Phase A (should feel IDENTICAL). Gate B =
-  the fire round. Gate C = soft-launch readiness. Plus the B7 design decision. Everything else
-  is machine-gated.
-- **Failure policy:** unchanged from `program.md` — fix trivially or revert, never leave the
-  tree red, one cohesive checkpoint per packet, ledger every iteration
-  (`.loop/rescue-phase0/state.md` continues as the ledger of record).
+- **The harness is `/master-loop`, and the default DRIVER is an Opus session.** Chad launches
+  grind sessions with the main model set to **Opus** (`/model`); Fable is reached as a
+  subagent (`model: fable`) ONLY at its brackets. Fable-driven sessions (like S47) are for
+  strategy, phase gates, and plan surgery — short and rare.
+- **Role routing (the token contract):**
+  - **Fable (supervisor):** plan/strategy edits · design specs for `[model: fable designs]`
+    packets · **screenshot contact-sheet audits** (the image gate — a genuinely Fable-value
+    task) · red-team adjudication when findings conflict · gate-checklist preparation. Fable
+    NEVER implements unless a subagent has failed twice (log the token cost).
+  - **Opus (builder):** all implementation packets, diagnosis work, red-team execution.
+  - **Sonnet (mechanic):** packets tagged `[model: sonnet]` — output fully determined by a
+    written spec: ledger/HANDOFF sync, test scaffolds from a given spec, bootstrap scripts,
+    config plumbing, asset-ID wiring. Never design, never kernel-adjacent, never balance.
+  - Never silently upgrade a tag. Downgrading (opus→sonnet) needs the packet to be genuinely
+    mechanical — when in doubt, Opus.
+- **Token guardrails:** orientation reads = the plan's active-phase section + the HANDOFF cold
+  start box ONLY (not whole files); code lookup via Explore subagents; implementation always
+  in subagents; Fable audits from contact sheets (≤10 images), not from code dumps.
+- **Chad-flight economics (the scarcest resource):** Chad flies ONLY at phase gates; every
+  gate is preceded by a PASSING Fable image audit; checklists ≤ 12 items. **A packet whose
+  only gate would be "Chad looks at it" is illegal outside a gate** — it carries a machine or
+  image gate, or it waits. Decisions (not flights) may be brought to Chad anytime, but
+  batched, with a recommendation, never as homework (no more empty-asset-ID handoffs).
+- **The honesty rule (S46, standing):** every report states which halves were verified —
+  LOGIC (tests) / APPEARANCE (images) / FEEL (flight). "Green" alone is banned; 205 passing
+  tests shipped a flashing meadow.
+- **Chad's gates:** Gate V-LOOK (screenshots, in chat) → Gate V (one flight; includes the
+  S45/S46 7-item backlog + audio audition) → then the B-remainder/Phase-C gates as before
+  (Gate C precondition: B7 resolved). Everything else machine- or image-gated.
+- **Failure policy:** unchanged — fix trivially or revert, never leave the tree red, one
+  cohesive checkpoint per packet, ledger every iteration (`.loop/rescue-phase0/state.md`).
