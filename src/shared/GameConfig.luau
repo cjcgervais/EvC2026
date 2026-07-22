@@ -754,7 +754,20 @@ GameConfig.Rescue = {
 	-- not only deliberate skims — intended (the grove becomes live scoring space). NOT lethal:
 	-- nonLethalTerrain already forces every impact to a graze-slide. "off" = the byte-identical ghost
 	-- forest · "trunks" = wood solid, leaves soft (kid-kind fallback) · "full" = both (Fable's flight
-	-- hypothesis — canopy is a roof you skim). Shipped "off" pending Chad's flight; one word to flip.
+	-- hypothesis — canopy is a roof you skim).
+	-- 🔒 CHAD'S CALL, S45c — STAYS "off". Offered the flip, he chose the ghost forest: *"trees I dont
+	-- collide with which is a positive. Makes it more simple."* That is a DESIGN DECISION about feel,
+	-- not an oversight, and it outranks the scoring argument below. Do not flip it back without asking.
+	-- ⚠️ THE COST, so nobody rediscovers it as a bug: this ONE switch is both things at once. Trees are
+	-- non-queryable, and `computeProximity` (the style meter) only sees CanQuery=true parts — so the
+	-- style meter CANNOT CHARGE NEAR TREES. The advertised canopy-threading skill, the game's headline
+	-- skill-ceiling verb, currently pays nothing. Chad's simplicity and that scoring are in direct
+	-- conflict while they share a flag.
+	-- ▶ THE REAL TASK (open): DECOUPLE them — let the style scorer see trees WITHOUT making them a
+	-- collision surface. `RescueRules.treeQueryable` currently answers one question for two callers
+	-- (BirdCollision's swept sphere AND the proximity scorer); the fix is to give the scorer its own
+	-- source — a collision group the sphere ignores, or scoring against tree POSITIONS directly instead
+	-- of raycast hits. That delivers the ceiling AND keeps the ghost forest Chad likes.
 	treeCollision    = "off",
 	nonLethalTerrain = true,
 
@@ -942,7 +955,8 @@ GameConfig.Rescue = {
 	-- a per-frame DISTANCE PROJECTION: constant ANGULAR size + a lift clearing the treeline at range,
 	-- descending back onto the head as you close (near = byte-identical Stage 1). See RescueRules
 	-- "THE SKY GEM" for why every other technique's ceiling is below this read.
-	skyGem            = false, -- INERT-by-default gate. false → skyGemProjection returns the identity.
+	skyGem            = true,  -- ✅ LIVE (Chad flew it, S45c: "yes on gems"). false → skyGemProjection
+	                           -- returns the identity, i.e. a config-only revert to the Stage-1 gem.
 	skyGemStudsPerStud = 0.015,-- gem studs per stud of distance ⇒ ~11.6 px at 1080p/FOV70, at ANY range.
 	skyGemMaxSize     = 34,    -- studs; growth ceiling so a 2 km gem can't become a sky-filling billboard.
 	skyGemClearY      = 160,   -- world Y the gem's BOTTOM rises to at range. buildTree's worst case is

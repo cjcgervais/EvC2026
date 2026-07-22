@@ -813,9 +813,12 @@ end)
 --------------------------------------------------------------------------------
 local PX_PER_RAD = 771   -- 1080p at Camera.baseFOV 70° vertical: (1080/2) / tan(35°) ≈ 771 px/radian
 
-H.test("SKY GEM: ships INERT — with the flag off the Stage-1 gem is untouched at every range", function()
-	local R = GameConfig.Rescue
-	H.eq(R.skyGem, false, "skyGem must ship FALSE — Chad flies the change, he doesn't inherit it")
+H.test("SKY GEM: the kill switch still returns the Stage-1 gem untouched at every range", function()
+	-- S45c: skyGem is now LIVE (Chad, after flying it: "yes on gems"), so this no longer asserts the
+	-- shipped default — it asserts the REVERT still works. That is the property worth keeping: a
+	-- config-only `skyGem = false` must restore the byte-identical Stage-1 gem at every range.
+	local R = table.clone(GameConfig.Rescue)
+	R.skyGem = false
 	for _, d in ipairs({ 0, 40, 70, 130, 260, 600, 1140, 2600 }) do
 		local p = RescueRules.skyGemProjection(R, d, R.chevronSize or 2.2, 40)
 		H.eq(p.size, R.chevronSize or 2.2, ("inert: size must not move at %d studs"):format(d))

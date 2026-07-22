@@ -73,35 +73,65 @@ bug.** The thing that finally worked was measuring the right clock and asking Ch
 at runtime) — harmless now that the probe confirms the place file already has it off, but it proves
 nothing and should not be cited as if it did.
 
-### Shipped this session, awaiting Chad's eyes (all LIVE, all kill-switched)
+### Shipped in S45, LIVE and kill-switched — the FIRST thing to ask Chad next session
+The render saga ate the session, so **only the render fix has actually been judged.** These four are
+live and unverified by his eye; they are the top of the next session's agenda:
 1. **🧭 The wayfinder** (`Rescue.wayfindEmpty`) — the gold ribbon now points at the nearest squirrel when
    your talons are empty. It was gated on carrying ≥1, i.e. **dark at every moment anyone is lost.**
    *Ask: from spawn, does it tell you where to go within a frame? Does it ever strobe between groves?*
 2. **🌍 Core ground detail** (`Map.coreDetail`) — the ±1200 spawn box was a **uniform plane with no
    altitude cue**, which is why he dove into the ground every start. Multi-scale patches, provably
-   non-queryable (crash surface bit-identical). *Ask: can you judge your dive now?*
+   non-queryable (crash surface bit-identical). *Ask: can you judge your dive now?* ⚠️ Note this was a
+   REAL defect but **not** the cause of "renders slow" — don't let the render fix take credit for it,
+   or vice versa.
 3. **🐿️ Carry reset on bird loss** (`Rescue.carryResetOnLoss`) — *Ask: carry ~5, press **R**, catch 6
    more; all six must count.*
-4. NaN score guard · FireVisuals smolder-pool teardown leak — no player-facing test needed.
+4. **💎 The sky gem** is now LIVE too (below) — *Ask: does it ever occlude a critter up close? The spec
+   says it geometrically cannot; if it does, that is a real bug.*
+5. NaN score guard · FireVisuals smolder-pool teardown leak — no player-facing test needed.
 
-### Built and tested but still INERT — each needs one Chad verdict, zero build cost
-- **`Rescue.skyGem = true`** — the distance-projected squirrel marker (S44; gates all green).
-- **`Rescue.treeCollision = "trunks"`** — today `"off"` makes every tree non-queryable, so **the style
-  meter cannot charge near trees: the advertised canopy-threading skill pays nothing.**
+### Flag decisions Chad made at the S45c close — both are now settled, don't re-open them
+- ✅ **`Rescue.skyGem = true` — LIVE.** He flew it: *"yes on gems."* The spec that used to assert it
+  ships false now asserts the **revert** still works (a config-only `false` restores the Stage-1 gem).
+- 🔒 **`Rescue.treeCollision` STAYS `"off"` — a DESIGN DECISION, not an oversight.** Offered the flip,
+  he chose the ghost forest: *"trees I dont collide with which is a positive. Makes it more simple."*
+  **Do not flip it back without asking him.**
+  ⚠️ **The cost, so nobody rediscovers it as a bug:** that one switch is two things at once. Trees are
+  non-queryable, and `computeProximity` (the style meter) only sees `CanQuery=true` parts — **so the
+  style meter cannot charge near trees, and the canopy-threading verb, the game's headline
+  skill-ceiling mechanic, currently pays nothing.** His simplicity and that scoring are in direct
+  conflict *while they share a flag*.
+  ▶ **THE REAL TASK (open, and a good one):** **decouple them** — let the style scorer see trees
+  WITHOUT making them a collision surface. `RescueRules.treeQueryable` answers one question for two
+  callers (BirdCollision's swept sphere AND the scorer); give the scorer its own source — a collision
+  group the sphere ignores, or score against tree POSITIONS instead of raycast hits. That delivers the
+  ceiling **and** keeps the ghost forest he likes.
+
+### Still inert, still needing Chad
 - **`Controls.touchAim`** — B7-P1 built inert; **blocked on Chad answering DRAG vs TAP.**
-- `Fire.roarAssetIds` is EMPTY ⇒ the fire is silent; needs a Toolbox asset id pasted.
+- `Fire.roarAssetIds` and `Rescue.squeakAssetIds` are EMPTY ⇒ the fire and the squirrels are **silent**;
+  each needs a Toolbox asset id pasted (both print a 30-second how-to in Output at boot).
 
-### Queue, in order (nothing here needs a decision except where marked)
-1. **The probe flight** (above) → then the render lane.
-2. **Event-driven spawn-on-join** — READY, deliberately held so it doesn't muddy the probe. The 1.906s
-   to the Birds folder is purely GameServer's 2s poll cadence; `onPlayerAdded` does not spawn.
-3. Flip the inert flags above, one flight each.
-4. **PHASE C — progression/levels.** Chad's standing #1 directive ("levels unlock"). Nothing persists
-   today (no DataStore anywhere). Design work is done: cumulative acorns as currency, one DataStore
-   profile, and **a first unlock inside 5 minutes (~400 acorns) so round 2 has a reason** — the
-   2,500-acorn valley gate is a 4th-session reward and fatal as the first rung.
-5. Round-arc display (`roundIndex` is tracked but never shown; rounds are otherwise identical forever,
-   and `Random.new(20260713)` is a FIXED seed so round 1 is byte-identical every session).
+### Queue, in order
+0. **Get Chad's verdict on the five LIVE-but-unjudged changes above.** They shipped and the render
+   saga consumed the session before he could judge any of them. Cheapest value in the queue.
+1. **PHASE C — progression/levels.** ⭐ **Chad's standing #1 directive since S42** ("Definately need to
+   have levels unlock"). *He was offered a start at the S45c close and chose to wrap up instead — so
+   this is NOT yet explicitly green-lit; confirm before building.* Nothing persists today (no DataStore
+   anywhere in `src/`). Design is done: cumulative acorns as currency, one DataStore profile, and **a
+   first unlock inside 5 minutes (~400 acorns) so round 2 has a reason to exist** — the 2,500-acorn
+   valley gate is a 4th-session reward and fatal as the first rung. Increment 1 = pure `Progression`
+   module + DataStore wrapper + total-acorns HUD line + that one unlock, `Rescue.persistence` gated.
+2. **Decouple tree scoring from tree collision** (see the treeCollision box above) — unlocks the
+   skill ceiling *without* touching the ghost forest Chad just chose. Self-contained and well-scoped.
+3. **Event-driven spawn-on-join** — READY, was held back so it couldn't muddy the render probe. That
+   probe is done, so this is unblocked. The 1.906s to the Birds folder is purely GameServer's 2s poll
+   cadence; `onPlayerAdded` does not spawn. Worth ≤2s of dead air.
+4. **Round-arc display** — `roundIndex` is tracked but never shown, rounds are otherwise identical
+   forever, and `Random.new(20260713)` is a FIXED seed, so round 1 is byte-identical every session.
+   Cheapest possible retention work and it is the display plumbing Phase C's numbers will live on.
+5. `leaderstats` — the platform-native scoreboard every Roblox player looks for; no seam exists today.
+   Rides along with Phase C (same numbers, one packet).
 
 ### 🚨 Landmines — real, unfixed, deliberately deferred
 - **A 2nd player joining destroys the rescue round.** Nothing in GameServer is gated on
@@ -129,8 +159,18 @@ nothing and should not be cited as if it did.
 - ONE change at a time · config-gate everything with a kill switch · **mutation-test every new gate** ·
   ground truth is Chad's Studio Play (`build.ps1` does not run or syntax-check Luau).
 
-### Ladder at close: **Tier-4 191/191 · rojo PASS · luau-lsp 0 new · selene UNAVAILABLE(404)**
-Branch `updraft`, everything committed **and pushed** through `bb9c113`.
+### Ladder at close: **Tier-4 193/193 · rojo PASS · luau-lsp 0 new · selene UNAVAILABLE(404)**
+Branch `updraft`, working tree clean, everything committed **and pushed**.
+
+### Two process lessons this session earned the hard way — both cost real time
+1. **Never trust a gate you have not MUTATED.** Twice this session a new gate could not fail. The
+   `default.project.json` mapping gap would have bricked the server silently (compile, luau-lsp and
+   `rojo build` all stayed green), and the first `CastShadow` source gate **passed against a mutant
+   with the assignment deleted** because it was matching the word in its own explanatory comment.
+   **A source gate must read CODE, not prose** — strip `--` lines before matching.
+2. **A real defect that produces the symptom is not proof you found the cause.** S45b's featureless
+   spawn core was genuinely broken and genuinely worth fixing — and it was *not* why the world
+   rendered late. Fix it, keep it, and keep measuring.
 
 ---
 
