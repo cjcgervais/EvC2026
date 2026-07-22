@@ -41,11 +41,25 @@ but not drawn until the level climbs or you fly closer. **The probe printed `gra
 because both properties were read inside ONE pcall, so a single missing property blinded the whole
 read. **S45c fixes that** (per-property pcalls, and quality is now sampled at EVERY mark — a level that
 CLIMBS while the counts stay FLAT is the complete diagnosis).
-**▶ NEXT: (a) Chad re-flies for the quality trace, and (b) the 30-second A/B — Esc → Settings →
-Graphics Mode → Manual → max, re-fly.** Ground present immediately at max ⇒ convicted; the fix is then
-to cut the GPU pressure that holds auto-quality down (the audit's costed list: **78 shadow-casting Map
-parts** — `addPart` never clears `CastShadow` while RescueServer's builder always does — plus the
-6000×18000 Glass sea with Reflectance 0.25, and a BloomEffect over 4 Neon 220×2200 beacons).
+### ✅ CONVICTED, and Chad confirmed the cure: **QUALITY-SCALED RENDER DISTANCE**
+He ran the A/B — **Graphics → Manual → max — and the problem VANISHED** ("that fixed it!"). Combined
+with the counts above, the chain is closed: the parts are all present, Roblox's **Automatic** mode was
+throttling how far it would draw them to protect the frame budget, and raising the level lifted the
+throttle. **His slider fixes it for HIM ONLY — every player lands on Automatic**, so the shippable fix
+is to stop spending the frame budget. Shipped (`Map.cheapScenery`, false = the pre-S45c look):
+- **`CastShadow = false` on Map parts.** `addPart` never cleared it, so **all 78 cast shadows** —
+  including a **16,000-stud baseplate** and **45 mountains up to 3,400 tall**. RescueServer's builder
+  has *always* set false, so the trees cast nothing: this was an **inconsistency, not an art choice.**
+- **The Sea stops being GLASS with Reflectance 0.25.** It is 6,000 × 18,000 studs — **108 million
+  square studs** of transparent reflective surface across the whole western horizon, blended every
+  frame it is visible (from 600 studs up, always). At 11,000 studs it reads identically as
+  SmoothPlastic. *(Bloom + the lake/rivers were left alone — smaller, and more visually load-bearing.)*
+**Source gates gate both** (`compile.spec`), because each fix is ONE line and nothing looks different
+when it regresses. ⚠️ **The first CastShadow gate was VACUOUS and the mutation test caught it** — it
+matched the word "CastShadow" in its own explanatory comment, so a mutant with the assignment deleted
+passed. Gates now strip `--` lines before matching. **Lesson: a source gate must read CODE, not prose.**
+**▶ Chad's next flight is the verdict:** leave graphics on **Automatic** (the default every player
+gets) and see whether the world is there from the start now.
 ⚠️ Note `GameServer:266`'s `pcall(Workspace.StreamingEnabled = false)` is a **silent no-op** (read-only
 at runtime) — harmless now that the probe confirms the place file already has it off, but it proves
 nothing and should not be cited as if it did.

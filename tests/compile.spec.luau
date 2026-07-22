@@ -127,3 +127,51 @@ H.test("rojo mapping: every ReplicatedStorage module required by src/ is mapped 
 	H.eq(#missing, 0, "UNMAPPED MODULE(S) — WaitForChild would hang forever and silently brick the " ..
 		"script:\n  " .. table.concat(missing, "\n  "))
 end)
+
+--------------------------------------------------------------------------------
+-- S45c SCENERY COST GATE — a source-text gate, in the S44 ping-law tradition.
+--
+-- "Everything renders in so slow" was MEASURED to be quality-scaled render distance: the boot probe
+-- showed every part on the client at t=1s with counts that never climb, and setting Graphics →
+-- Manual → max made it vanish. Roblox throttles draw distance to protect the frame budget, so the
+-- fix is to stop spending it. The two convicted items are one line each — and one line is exactly
+-- what a future edit deletes without noticing, because nothing about the game LOOKS different when
+-- 78 shadow casters come back. This gate makes that regression cost a red test instead of a session.
+--------------------------------------------------------------------------------
+
+-- Strip `--` comment lines. Without this the gates below match their own explanatory prose instead of
+-- the code: the first version of the CastShadow gate PASSED against a mutant that had deleted the
+-- assignment, because the comment above it says "CastShadow" four times. A gate that reads comments
+-- is not a gate.
+local function codeOnly(s)
+	local out = {}
+	for line in (s .. "\n"):gmatch("(.-)\n") do
+		if not line:match("^%s*%-%-") then out[#out + 1] = line end
+	end
+	return table.concat(out, "\n")
+end
+
+H.test("scenery cost: Map's addPart must clear CastShadow", function()
+	local src = fs.readFile("src/server/GameServer.server.luau")
+	local addPart = src:match("local function addPart%(props%).-\n\tend")
+	H.ok(addPart ~= nil, "could not find addPart in GameServer — this gate has gone vacuous, fix the pattern")
+	H.ok(codeOnly(addPart):find("CastShadow%s*=%s*false") ~= nil,
+		"addPart no longer touches CastShadow. Every Map part then casts a shadow again — including a " ..
+		"16,000-stud baseplate and 45 mountains up to 3,400 tall — which is the measured cause of " ..
+		"Automatic graphics throttling the render distance. RescueServer's builder always sets " ..
+		"CastShadow=false; Map must match.")
+end)
+
+H.test("scenery cost: the Sea is not unconditionally Glass-with-Reflectance", function()
+	local src = fs.readFile("src/server/GameServer.server.luau")
+	local sea = codeOnly(src:match('Name = "Sea".-%}%)') or "")
+	H.ok(sea ~= "", "could not find the Sea part in GameServer — this gate has gone vacuous")
+	-- It may still MENTION Glass (the cheapScenery=false revert path keeps it); what it must not do is
+	-- hand the GPU 108 million square studs of transparent reflective surface with no way out.
+	if sea:find("Glass") then
+		H.ok(sea:find("cheapScenery") ~= nil,
+			"the Sea is Glass with no cheapScenery gate. It is 6,000 x 18,000 studs of transparent, " ..
+			"reflective surface across the whole horizon — one of the most expensive things the GPU " ..
+			"draws here, and it reads identically as SmoothPlastic from 11,000 studs away.")
+	end
+end)

@@ -1427,6 +1427,22 @@ GameConfig.Map = {
 	coreDetail     = true,   -- KILL SWITCH: false → GroundDetail returns {} and the map is byte-identical.
 	coreHalfExtent = 1200,   -- must track GameServer's spawn box (random ±1200 XZ). Bigger = wider carpet.
 	coreDetailSeed = 20260721, -- deterministic LCG seed; the valley is identical on every boot.
+
+	-- S45c — THE RENDER FIX, and the cause is now MEASURED, not guessed. The boot probe proved every
+	-- part is on the client at t=1s and the counts never climb (so: not replication, not streaming —
+	-- StreamingEnabled read false — and zero external assets means nothing downloads). Chad then set
+	-- Graphics → Manual → max and the problem VANISHED. That convicts quality-scaled render distance:
+	-- Roblox's Automatic mode throttles how far it draws parts to protect the frame budget, so parts
+	-- exist but go undrawn until you fly at them. His slider fixes it for HIM only — every player lands
+	-- on Automatic — so the shippable fix is to stop spending the frame budget:
+	--   • CastShadow=false on Map parts. addPart never cleared it, so all 78 cast shadows (a
+	--     16,000-stud baseplate; 45 mountains up to 3,400 tall). RescueServer's builder has always set
+	--     false, so the trees cast nothing — this was an inconsistency, not an art choice.
+	--   • The Sea stops being GLASS with Reflectance. It is 6,000 × 18,000 studs of transparent
+	--     reflective surface across the whole western horizon; at 11,000 studs it reads the same as
+	--     SmoothPlastic and costs a fraction.
+	-- false = the pre-S45c look, byte-identical (shadows back on, glass sea back).
+	cheapScenery   = true,
 }
 
 GameConfig.Debug = {

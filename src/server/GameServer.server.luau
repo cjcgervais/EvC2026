@@ -272,11 +272,23 @@ local function BuildMap()
 	map.Name = "Map"
 	map.Parent = Workspace
 
+	local cheapScenery = not (GameConfig.Map and GameConfig.Map.cheapScenery == false)
+
 	local function addPart(props)
 		local p = Instance.new("Part")
 		p.Anchored = true
 		p.TopSurface = Enum.SurfaceType.Smooth
 		p.BottomSurface = Enum.SurfaceType.Smooth
+		-- S45c — CONVICTED CAUSE of "everything renders in so slow". The probe proved every part is on
+		-- the client at t=1s and simply not DRAWN; Chad then set graphics to Manual/max and it was fixed.
+		-- That is quality-scaled render distance: Roblox's Automatic mode throttles how far it draws
+		-- based on the frame budget, so the cure is to stop spending the budget. This line is the single
+		-- biggest item — `addPart` never cleared CastShadow, so all 78 Map parts cast shadows, including
+		-- a 16,000-stud baseplate and 45 mountains up to 3,400 tall. RescueServer's own builder has ALWAYS
+		-- set CastShadow=false on every part it makes, so the trees already cast nothing: this was an
+		-- INCONSISTENCY, not an art choice — the world has no shadow vocabulary for these to join.
+		-- Set BEFORE the props loop so an explicit CastShadow in props still wins.
+		if cheapScenery then p.CastShadow = false end
 		for k, v in pairs(props) do p[k] = v end
 		p.Parent = map
 		return p
@@ -291,8 +303,17 @@ local function BuildMap()
 
 	-- A distant SEA beyond the western mountains — a real coastline/horizon for "I can see where I'm flying"
 	-- depth. A huge thin water plane PAST the ring so it reads as the edge of the world without touching combat.
+	-- S45c: this is a 6,000 × 18,000 stud plane — 108 MILLION square studs of GLASS with Reflectance,
+	-- i.e. a transparent, reflective surface spanning the whole western horizon that the GPU blends
+	-- every frame you can see it (which, from 600 studs up, is always). Glass is among the most
+	-- expensive materials Roblox has. At 11,000 studs away it reads as "ocean" regardless, so
+	-- SmoothPlastic at the same colour is visually ~identical and costs a fraction. Second-biggest item
+	-- on the quality-throttle list after shadows. Revert: Map.cheapScenery = false.
 	addPart({ Name = "Sea", Size = Vector3.new(6000, 14, 18000), Position = Vector3.new(-11000, -4, 0),
-		Material = Enum.Material.Glass, Color = Color3.fromRGB(48, 104, 168), Transparency = 0.18, Reflectance = 0.25 })
+		Material = cheapScenery and Enum.Material.SmoothPlastic or Enum.Material.Glass,
+		Color = Color3.fromRGB(48, 104, 168),
+		Transparency = cheapScenery and 0 or 0.18,
+		Reflectance = cheapScenery and 0 or 0.25 })
 
 	-- GROUND COLOUR PATCHES (thin, at Y≈1): break up the uniform grass so altitude/speed/heading read at a
 	-- glance from far up (a flat green plain gives no perspective cue). Deterministic; all clear of the ±1200 core.
