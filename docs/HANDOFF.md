@@ -4,6 +4,140 @@ Read this first. It tells the next agent exactly where the project stands, the o
 
 ---
 
+## ▶▶ S45 (2026-07-21) — 🧭 THE WAYFINDER LAW · 🐿️ THE RESPAWN CARRY DESYNC · ⏱️ "still slow" is UNRESOLVED and now instrumented
+
+**Chad: *"I dont even know where to fly at the start everything renders in so slow."* Five Fable-5
+auditors ran in parallel (first-60-seconds / startup+render / code-health / game-design / correctness).
+He then answered two questions that re-aimed the whole session:**
+- **"Newest build, still slow"** → **S44's intermission fix did NOT resolve it. That explanation is
+  FALSIFIED and closed.** Do not re-litigate it.
+- **"Both — I'm just dropped in cold"** → no goal, no direction, nothing visible. A full onboarding hole.
+
+### ① 🧭 THE WAYFINDER LAW — the compass was switched OFF at every moment anyone is lost (LIVE)
+**Two auditors found this independently and both ranked it the #1 change in the game.** The gold
+streamer (`updateWayfinder`, Fable §D "a diegetic compass, ZERO UI") is the **only** directional
+mechanism that exists — and it was gated `#riders > 0` (`BirdController:2141`). So it was dark at
+spawn and dark after **every** delivery: off at the ~6 moments per round you are empty-handed and
+scanning. The other "direction" machinery is a **combat relic** — `GameUI:653-739` edge-arrows iterate
+enemy *birds*, of which the rescue round has zero, so it is permanently dormant.
+**Now:** empty-handed in an active round → the same certified ribbon points at the **nearest catchable
+squirrel**, in **full 3D with no tip lift** (groves sit ~40° BELOW a Y=600 spawn frame — the whole
+answer is "down there"; the waterfall ribbon keeps its horizontal+lift arc, byte-identical).
+**Deliberately NEAREST, not "best"** — triage-by-rarity/danger/route is the skill ceiling (§3.2 pays a
+skilled round 6.7×) and stays the player's. Policy is pure in `RescueRules.wayfindTarget` with
+**hysteresis** (`wayfindSwap` 0.2) because the real failure mode is a ribbon that **strobes** between
+two equidistant groves. Gates: carrying-path unchanged · kill switch · never-lies (no candidate or
+non-active phase ⇒ dark) · hysteresis holds AND releases · a 60-step approach sweep changes hands ≤1×.
+**Mutation-tested:** swap→0 reds the strobe gate; flag→false reds two. Knobs: `Rescue.wayfindEmpty`
+(kill switch = byte-identical pre-S45), `wayfindSwap`, `wayfindTipLift`.
+
+### ② 🐿️ THE RESPAWN CARRY DESYNC — the defect both auditors called "most likely to hit the next flight" (FIXED)
+The server zeroed `carry` in exactly two places (startRound, successful deliver). **Nothing zeroed it
+when the player's BIRD was destroyed** — while the client drops every rider on any teardown
+(`teardownDrive → releaseRiders`). **Press R while carrying 7** → client shows 0/10, server still
+believes 7. The next 3 catches fill the server to 10; **every catch after that is silently REJECTed as
+FULL while the client plays the entire sacred catch beat and mounts a rider** (the reconciler only
+trims DOWN, so it cannot heal it). First waterfall pass then pays for TEN squirrels never carried.
+**That is verbatim the "8-9/10 of my catches don't get counted" complaint S35/S36 burned two sessions
+chasing — reachable from one keypress.** Fixed by watching `Birds.ChildRemoved` (covers R, death,
+crash, ownership reclaim — the same event the client keys its own reset off), pure rule
+`RescueRules.carryOnReset`. **Invariant gated: a lost bird clears what you CARRIED and nothing you
+EARNED** (score/delivered/rescued/perfect stamps survive — otherwise a desync fix becomes a
+punishment). Knob `Rescue.carryResetOnLoss`.
+
+### ③ Two more confirmed defects, both one-liners with teeth
+- **NaN poisons the round score.** `math.clamp` is `v<min ? … : v>max ? …` and **every comparison with
+  NaN is false**, so a NaN `styleMult` (client-supplied) sailed through both rails → `floor(NaN)=NaN`
+  → `ps.score` is NaN for the rest of the round and the HUD renders **"nan" acorns**. Guarded in
+  `catchScore` with the same `x ~= x` test `fireRoarVolume` already used.
+- **`FireVisuals.destroy` leaked the S44 smolder pool** — the same create/teardown asymmetry class as
+  the fire-roar bug. Masked on the normal path (the folder dies too), but the **mid-round failure path
+  destroys the controller and KEEPS the folder** to "drop to logic-only fire" — stranding up to 14
+  **Enabled** wisp emitters smoking at frozen positions while the real front moved on. Both
+  mutation-tested.
+
+### ④ 🚨 THE 200-LOCAL CLIFF IS LITERAL: BirdController's top-level chunk measured **199/200**
+Not a function — the **module chunk**; every column-0 `local`, *including every `local function`*, is a
+register that never goes out of scope. Measured by binary-search injection at Studio's exact compile
+settings. **One free.** The next agent adding two module-locals (or one `local function` plus one
+`local`) bricks the client. Banked +1 this session by deleting the write-only `renderConn`
+(byte-identical; luau-lsp went 17 → 16). The rescue presentation band (lines 1199-2845) holds **87 of
+the 199** and provably reads **none** of the LOCKED control state — the audit's costed extraction
+ladder (`RescueAudio` +25, `RescucePresentation` +55) is in the queue below.
+
+**RESOLVED THIS SESSION (step 2 of the ladder):** headroom is now **1 → 20**, measured. 23 module-locals
+were grouped into **5 tables** — `RETICLE` (reticle colours), `FEATHER` (feather palette + pool size),
+`RIDER` (back-rider animation constants), `music` (beat-clock state), `scan` (squirrel-scan latches).
+Mechanical rename, values untouched, and verified non-shadowable (no local, parameter, or bare
+reference to any of the five names exists anywhere in the file). **The cliff now has a tripwire:**
+`compile.spec` binary-searches the real headroom at Studio's compile settings and **fails at a floor of
+8** — while there is still room to think, instead of after the client refuses to run. Mutation-tested:
+15 injected locals (headroom 5, still compiling) turns it red. The error message names the two ways to
+pay for space and carries the ping-law warning.
+**Remaining ladder if more is ever needed:** `RescueAudio` ≈ +25 (⚠️ **must move the ping-law source
+gate with it or that gate goes silently vacuous**), `RescuePresentation` ≈ +55.
+
+### ⑤ ⏱️ THE "STILL SLOW" HALF IS **UNRESOLVED** — and the probe to name it is already shipped, never flown
+S44's BootDiag measured when instances **EXIST**, never when they are **DRAWN**. Those are different
+clocks and the gap is the whole remaining question. Census (counted, not estimated): **~1,300-1,400
+Workspace instances, ZERO external assets** (no meshes/textures/decals — so asset-download is ruled
+out by construction). Leading suspect is **quality-scaled draw distance + the auto-quality ramp**
+(inferred from symptom fit, not measured). Two hard facts found while looking:
+`Workspace.StreamingEnabled = false` at `GameServer:266` is inside a `pcall` and **that property is
+not scriptable at runtime — it is a silent no-op**, so the live session's true value is unverified;
+and **78 Map parts are shadow-casting** (`addPart` never clears the default, while RescueServer's
+builder always does). **Verdict: streaming should STAY off** — at ~1,400 instances there is nothing to
+defer, and every gameplay-critical object (client-owned birds, attribute-driven squirrels, the
+distance-keyed fire roar) would need `Persistent` anyway.
+**⚠️ THE TRAP, named explicitly: do not ship another timeline "fix" before the probe flight.** That is
+exactly what S44 did. The diagnostic is already in the build (`fc111fd`, `Rescue.bootDiag` is true).
+
+**▶ CHAD'S PLAY (this is the ask):**
+① **Fly once and paste the `[BootDiag]`/probe lines** — they print `StreamingEnabled`, the quality
+level, and descendant counts at t=1/5/10/20/30s. That ONE flight decides between streaming-bound,
+replication-bound, and render/quality-bound. **Also do the 60-second A/B:** Esc → Settings → Graphics
+Mode **Manual → max**, re-fly. If the forest is all there at ~2s on max, it is quality-culling and the
+answer is cheap.
+② **The wayfinder:** from spawn, empty-handed — does a gold ribbon now tell you where to go, within a
+frame? Does it ever strobe between two groves? Knobs: `wayfindSwap`, `wayfindTipLift`.
+③ **The carry fix:** carry ~5, press **R**, then catch 6 more — all six must count.
+
+**▶ NEXT (in order):** the probe flight decides the render lane → then **event-driven spawn-on-join**
+(measured: the 1.906s to the Birds folder is purely GameServer's 2s poll cadence; `onPlayerAdded` does
+not spawn — READY to ship, held back deliberately so it doesn't muddy the probe) → **`skyGem=true`**
+(built, tested, still awaiting its verdict) → **`treeCollision="trunks"`** (built + gated; today
+`="off"` makes every tree non-queryable, so **the style meter — the entire skill ceiling — cannot
+charge near trees**, i.e. the advertised canopy-threading verb pays nothing) → **BirdController
+extraction ladder** (the 199/200 cliff) → **PHASE C** progression.
+
+**▶ HIGH-SEVERITY, NOT YET FIXED (from the audit, ranked):**
+- **A 2nd player joining destroys the rescue round.** Combat is shelved *by player count, not by
+  config* — nothing in GameServer is gated on `Rescue.enabled`. Player #2 is auto-assigned **Crows**
+  (`pickTeamFor:487`), which flips the combat `RoundLoop` on, and `startRound:1958` calls **`clearBirds`
+  on everyone** — deleting the rescue player's eagle mid-round — then runs a second round clock against
+  `RescueRoundLoop`. **This detonates the first time Chad tests with his kid.** Fix is one guard + a
+  Chad decision on what player #2 should actually be.
+- **Anti-cheat cascade:** a rubber-band writes a CFrame to a *client-owned* part (overridden next
+  packet) and the baseline is deliberately frozen, so one 2s network stall fires a strike **every
+  Heartbeat** → reclaim at 3 → **kick at 6**, and reclaim is one-way with no recovery. Invisible in
+  Studio (client and server hitch together); real on a published/mobile session.
+- **Deliver has zero spatial validation** (`RescueServer:686`) — phase + `carry>0` only; the waterfall
+  objective exists only client-side.
+- **Fox missions visually pin relocated squirrels** at their OLD perch height (`HopBaseY` is cached
+  once, never invalidated) — dormant under `ember_valley`, certain when Phase C rotates the fox in.
+- **14 orphan config knobs read by nothing**, incl. a dead `mouseSensitivity` block **54 lines above**
+  the live `aimMouseSensitivity` (the exact `musicPizzAt` trap S44 just closed), and `updraftStrength`
+  — **the waterfall updraft applies no force at all**; thermals sit on a ring at radius 3200, outside
+  the 1600-stud valley. The audit's fix: a `config.spec` **orphan gate** that fails when a knob's last
+  reader dies.
+
+### ⑥ Ladder: **Tier-4 182/182** (169 → 182; +13 new gates, all mutation-tested) · **rojo PASS** ·
+**luau-lsp 17 → 16 (0 NEW)** · selene UNAVAILABLE(404). Nothing committed — awaiting Chad.
+*(Chad's call this session: the 2nd-player landmine is DEFERRED — "forget second player for now". It
+stays on the high-severity list above; it is dormant while he plays solo.)*
+
+---
+
 ## ▶▶ S44 (2026-07-21) — 🔔 THE PING LAW (the 6× complaint, root-caused) · 💎 SKY GEM built INERT · 🔥 THE SMOLDER TELL is LIVE
 
 **Chad opened with two complaints and asked for a huge Fable audit. Four Fable-5 auditors ran in
@@ -223,7 +357,8 @@ chevron) from a common at scan altitude, or did the red wash out triage-by-value
 ④ **Smoke (perf, behavior-preserving):** set `Fire.perfDiag=true` — fire seeds ~10s, the wall sweeps downwind,
 a cut-off grove rings then balloon-lifts ~8s later, `[Fire] tick … ms=` stays sub-ms. **Any behavioral
 difference at all in the burn = revert** (the perf change claims bit-identity).
-⑤ **The roar (3c):** FIRST check Output for `[FireAudio] roar asset 1/3 LOADED` (if every id failed, the fix
+⑤ **The roar (3c) — ⚠️ S44 CORRECTION: `Fire.roarAssetIds` is EMPTY (see ⑥ below), so the fire is
+SILENT and the log line named here CANNOT print. The rest of this item is stale; ignore it.** ~~FIRST check Output for `[FireAudio] roar asset 1/3 LOADED`~~ (if every id failed, the fix
 is in the warning — 30 seconds in the Toolbox). Then fly at the grove from >900 studs: silence → a swell from
 ~900 → a deep roar inside 200. Knobs: `roarFarR / roarNearR / roarGamma / roarPitch / roarMaxVol`.
 ⑥ **The roar's regression test:** crash into terrain *inside* the roar band — it must go SILENT during the

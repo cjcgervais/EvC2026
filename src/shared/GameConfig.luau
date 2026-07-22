@@ -853,6 +853,10 @@ GameConfig.Rescue = {
 	carryCapacity    = 10,     -- squirrels ridable on your back before you must deliver (Chad: "he can carry
 	                           -- 10 squirrels that latch onto him"). Grid-packed on the back (SEAT_COLS across,
 	                           -- the rest stacking toward the tail). Read by BOTH the server carry gate and the client.
+	carryResetOnLoss = true,   -- S45: when a player's BIRD is destroyed (R, death, crash), zero the SERVER's
+	                           -- carry to match the client, which drops every rider on any teardown. Without
+	                           -- this, one R-press mid-carry silently ate capacity for the rest of the round
+	                           -- and paid out for squirrels never carried. false = pre-S45 (the bug).
 
 	-- THE LEAP ARC (Fable §A). Ballistic, solved to intercept the eagle's PREDICTED talon position.
 	arcAirtimeMin    = 0.50,   -- s; airtime floor.
@@ -908,6 +912,19 @@ GameConfig.Rescue = {
 	                           -- worst-case gem bottom = 14 − 2.73(gold gem halfY) − 1.0(gem bob)
 	                           -- − 1.0(squirrel hop) = 9.27 → clears the head by ≥1.29 always
 	                           -- (models.spec asserts this exact inequality).
+	-- THE WAYFINDER (S45) — Chad: "I dont even know where to fly at the start… dropped in cold."
+	-- The gold streamer (BirdController updateWayfinder) is the ONLY directional mechanism in the game,
+	-- and it was gated on carrying ≥1 rider — dark at spawn, dark after every delivery, i.e. off at
+	-- precisely the six-or-so moments a round when you are empty-handed and looking for somewhere to go.
+	-- Un-gated, an empty-handed eagle gets the same certified ribbon pointing at the nearest catchable
+	-- squirrel. Policy (incl. the anti-strobe hysteresis) is pure in RescueRules.wayfindTarget.
+	wayfindEmpty      = true,  -- KILL SWITCH: false → empty-handed is dark again (pre-S45 byte-identical).
+	wayfindSwap       = 0.2,   -- a challenger must be this fraction CLOSER to steal the ribbon from the
+	                           -- held target. 0 = re-pick every frame (strobes between equal groves).
+	wayfindTipLift    = 12,    -- studs the WATERFALL ribbon's tip lifts (arcs up toward the mesa). The
+	                           -- squirrel ribbon deliberately does NOT lift: groves sit ~40° BELOW the
+	                           -- spawn frame, so the whole answer is "point down there".
+
 	-- THE SKY GEM (S44) — Chad: "I can barely see the squirrels, they render in after 30s." Nothing
 	-- renders late (all 15 spawn on the round's first frame) — the markers are fixed WORLD-size objects
 	-- and he acquires from 600-2,600 studs, where the 2.2-stud chevron is ~2.4 px and the flat halo is a
@@ -1091,22 +1108,20 @@ GameConfig.Rescue = {
 	groveRadius      = 130,    -- studs; a grove's trees/perches cluster within this radius of its centre.
 	groveMinGap      = 520,    -- studs; keep grove centres at least this far apart (distinct clumps).
 
-	-- MUSIC ESCALATION (Packet-03 §6, queue #14). ONE number — deliveredThisRound + carry — drives a
-	-- layered gray-box swell toward the Perfect Ten: base wind → +pizzicato@1 → +rhythm@4 → +brass@7 →
-	-- @8-9 strip to a heartbeat pulse. GRAY-BOX (pitched rbxasset one-shots on a beat clock + a looped
-	-- wind bed); real stems are a later asset pass. Client PRESENTATION only (audio) — the SWELL FEEL is
-	-- Chad's Play to certify (the #14 FUN gate). All consumed with `or`-defaults so a config-only revert
-	-- stays build-green.
+	-- MUSIC (Packet-03 §6, queue #14 — as it ACTUALLY is after S38 + the S44 ping law).
+	-- ⚠️ This block used to describe a layered swell (pizzicato@1 → rhythm@4 → brass@7 → heartbeat@8)
+	-- that has NOT existed since S38: Chad said three times "should ONLY be 10/10", so every build layer
+	-- below a full load was REMOVED (BirdController updateMusic). The four knobs that drove them
+	-- (musicPizzAt / musicRhythmAt / musicBrassAt / musicHeartAt) were left behind reading from NOTHING
+	-- and are now deleted — a next agent "tuning the pizzicato entry" would have turned a dead dial.
+	-- WHAT IS LIVE: a beat clock whose tempo tightens with your CARRY, and on it exactly one voice —
+	-- the full-load "di-dah" jingle at 10/10 (jingleLo/jingleHi). Plus the crew choir below. That is all.
+	-- Everything is consumed with `or`-defaults so a config-only revert stays build-green.
 	musicEnabled     = true,
 	musicWindVol     = 0,      -- OFF (Chad S38): this bed also looped SFX_SWOOSH (pitched to a rumble) — killed so
 	                           -- there is truly NO continuous whoosh anywhere. The music BEAT layer (pings/snaps) stays.
 	musicBeatSlow    = 0.75,   -- s between music beats at 0 progress (calm)…
 	musicBeatFast    = 0.34,   -- …tightening to this at the Perfect Ten (urgent, driving).
-	musicPizzAt      = 1,      -- progress (delivered+carry) at which the pizzicato layer enters (1st catch).
-	musicRhythmAt    = 4,      -- …the offbeat rhythm layer fills the groove…
-	musicBrassAt     = 7,      -- …the low brass swell note joins…
-	musicHeartAt     = 8,      -- …@8-10 STRIP the melody to a HURRY-UP CLOCK TICK (was a low heartbeat THUMP that
-	                           -- read as "flapping that speeds up" — Chad S38; now a bright alternating tick-tock).
 	jingleLo         = 1.2,    -- FULL-LOAD JINGLE (Chad S38): only at a FULL 10/10 carry, a warm rising two-note
 	jingleHi         = 1.6,    -- "di-dah" says "get to the waterfall!" — then STOPS on deliver. Lower/warmer than the old tick.
 	musicLayerVol    = 0.16,   -- per-layer one-shot volume (low; layered they build without clipping).
@@ -1224,8 +1239,9 @@ GameConfig.Missions = {
 	-- walls a grove off from safety (cut-off), a short cutoffGraceS countdown then lifts THAT grove's
 	-- still-stranded squirrels on the SAME Ranger Balloon (P3 non-lethal — no damage path, ever). The fire
 	-- wind is FICTIONAL (shapes the burn only); it NEVER touches FlightPhysics/WIND_BASE/the kernel. This
-	-- mission is INERT-by-default: activeMission STAYS "waterfall_meadow" → the shipped round is byte-identical.
-	-- Flip activeMission to "ember_valley" at Gate B to Play it. Same FLY/CATCH/deliver as waterfall_meadow
+	-- mission WAS documented as INERT-by-default ("activeMission STAYS waterfall_meadow"). ⚠️ That has been
+	-- FALSE since the fire shipped: `activeMission = "ember_valley"` above makes THIS the mission you fly.
+	-- The same file contradicting itself 100 lines apart is how a next agent mis-attributes a live bug. Same FLY/CATCH/deliver as waterfall_meadow
 	-- (P8: missions change how you FLY, never how you CATCH); only the hazard differs. All dials → GameConfig.Fire.
 	ember_valley = {
 		displayName = "Ember Valley",
@@ -1349,7 +1365,8 @@ GameConfig.Fire = {
 	                           -- block, so an existing roar would hold its last volume — revert = restart.
 	roarNearR       = 200,     -- studs: full roar at/inside this range of the nearest burning cell.
 	roarFarR        = 900,     -- studs: silent at/beyond. ~2 grove-gaps: the fire is heard before it is legible.
-	roarMaxVol      = 0.35,    -- matches the wind bed's ceiling (windMaxVol 0.38) so it layers, never masks.
+	roarMaxVol      = 0.35,    -- sits just under the flight wind's ceiling so it layers, never masks. (The old
+	                           -- comment cited "windMaxVol 0.38"; that knob is 0.5 — the rationale drifted.)
 	roarGamma       = 1.5,     -- >1 = the roar swells as you COMMIT toward the fire, instead of a flat fade.
 	roarPitch       = 0.85,    -- a shade below source pitch = bigger/deeper fire.
 	-- ⚠️ ASSET IDS ARE THE ONE THING NO HEADLESS GATE CAN VERIFY. Roblox's 2022 audio-privacy change

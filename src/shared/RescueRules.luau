@@ -248,6 +248,13 @@ end
 -- speedTier is the resolved tier string.
 function RescueRules.catchScore(cfg, rarityMult, styleMult, speedTier)
 	cfg = cfg or {}
+	-- NaN GUARD (S45 audit). math.clamp is `v < min ? min : (v > max ? max : v)` and EVERY comparison
+	-- with NaN is false — so a NaN styleMult sails through both rails, math.floor(NaN) is NaN, and
+	-- `ps.score += pts` poisons the score for the rest of the round (the HUD then renders "nan"
+	-- acorns). styleMult is client-supplied, so the clamp is the only thing standing here. Same
+	-- `x ~= x` test fireRoarVolume already uses.
+	if styleMult ~= styleMult then styleMult = 1 end
+	if rarityMult ~= rarityMult then rarityMult = 1 end
 	local mult = math.clamp(styleMult or 1, 1, cfg.styleMultMax or 3)
 	local rarity = rarityMult or 1
 	local energyMult = 1
@@ -752,6 +759,104 @@ function RescueRules.skyGemProjection(cfg, dist, baseSize, baseY)
 	local y = baseY + t * math.max(0, targetY - baseY)
 
 	return { size = size, y = y, t = t }
+end
+
+--------------------------------------------------------------------------------
+-- THE WAYFINDER TARGET (S45) — "I don't even know where to fly at the start" (Chad).
+--
+-- The game HAS a compass and has already certified its read: the faint gold streamer that points at
+-- the waterfall while you carry (BirdController updateWayfinder, Fable §D, "a diegetic compass, ZERO
+-- UI"). The bug is WHEN it is lit. It was gated on `#riders > 0`, so it is dark at spawn and dark
+-- again after every delivery — it switches OFF at exactly the moments the player is empty-handed and
+-- scanning, which is the only time anyone is actually lost. Two independent audits ranked un-gating it
+-- the single highest-value change in the game, and it is ~20 lines on a mechanism that already ships.
+--
+-- The policy is here (pure) rather than inline in the client because the interesting part is not the
+-- geometry, it is the TARGET CHOICE, and that choice has a failure mode a headless test can catch:
+-- a beam that re-picks its target every frame flickers between two equidistant groves and reads as
+-- broken. Hence hysteresis — a challenger must be `wayfindSwap` fraction CLOSER to steal the ribbon.
+--
+-- Deliberately NEAREST, not "best". Triage-by-rarity, by fire danger, by route is the skill ceiling
+-- (§3.2 pays a skilled round 6.7× a casual one) and it stays entirely the player's: a 5-year-old
+-- follows the ribbon, a 15-year-old ignores it and flies the valuable line. Pointing at the
+-- highest-value critter would hand the ceiling's decision to the game.
+--
+-- INERT until `Rescue.wayfindEmpty`: with the flag false an empty-handed eagle returns "off", which is
+-- byte-identical to the pre-S45 gate.
+--------------------------------------------------------------------------------
+
+-- wayfindTarget — what should the gold streamer point at this frame?
+--   args = {
+--     phase      = the round phase ("active" is the only phase that lights the beam),
+--     carrying   = #riders aboard,
+--     bestId     = id of the NEAREST catchable stranded squirrel (nil if none), and
+--     bestDist   = its distance,
+--     currentId  = the id the beam pointed at last frame (nil if none), and
+--     currentDist= its distance THIS frame, or nil if it is no longer a valid candidate
+--                  (caught, claimed, expired, folder gone) — nil is how the caller says "it's gone".
+--   }
+-- Returns { mode = "waterfall" | "squirrel" | "off", id = <squirrel id or nil> }.
+function RescueRules.wayfindTarget(cfg, args)
+	cfg = cfg or {}
+	args = args or {}
+	local OFF = { mode = "off", id = nil }
+
+	-- The beam has only ever existed during the active round; grace/results/intermission stay dark.
+	if args.phase ~= "active" then return OFF end
+
+	-- Carrying: today's behaviour, untouched. The waterfall outranks every critter — once you have
+	-- passengers, "where do I fly" has exactly one answer and the ribbon must not argue with it.
+	if (args.carrying or 0) > 0 then return { mode = "waterfall", id = nil } end
+
+	-- KILL SWITCH: false ⇒ empty-handed is dark, exactly as it was before S45.
+	if not cfg.wayfindEmpty then return OFF end
+
+	local bestId, bestDist = args.bestId, args.bestDist
+	local curId, curDist = args.currentId, args.currentDist
+
+	-- HYSTERESIS. If the held target is still valid, a challenger must be meaningfully closer to take
+	-- the ribbon. Without this, two groves at ~equal range trade the beam every frame and it strobes.
+	if curId ~= nil and curDist ~= nil then
+		if bestId == nil or bestId == curId then
+			return { mode = "squirrel", id = curId }
+		end
+		local swap = cfg.wayfindSwap or 0.2
+		if (bestDist or math.huge) >= curDist * (1 - swap) then
+			return { mode = "squirrel", id = curId }   -- not enough of an improvement: hold.
+		end
+	end
+
+	if bestId == nil then return OFF end   -- nothing catchable anywhere: dark, never a lying arrow.
+	return { mode = "squirrel", id = bestId }
+end
+
+--------------------------------------------------------------------------------
+-- THE CARRIER-LOSS RESET (S45) — the respawn carry desync, found independently by two auditors.
+--
+-- The server zeroed `carry` in exactly two places: startRound and a successful deliver. Nothing zeroed
+-- it when the player's BIRD was destroyed — but the client wipes every rider on any bird teardown
+-- (teardownDrive → releaseRiders). So pressing R (the documented reset key) while carrying 7 left the
+-- client showing 0/10 and the server still believing 7.
+--
+-- What that costs, concretely: the next 3 catches fill the server to 10, and every catch after that is
+-- REJECTed as FULL while the client still plays the entire sacred catch beat and mounts a rider. The
+-- reconciler only ever trims riders DOWN, so it cannot heal this. The player sees "4/10, plenty of
+-- room", nothing counts, and the first waterfall pass then pays for TEN squirrels he never carried.
+-- That is precisely the "a lot of my catches don't get counted" complaint S35/S36 burned two sessions
+-- chasing — reachable from one keypress.
+--
+-- Pure here so the invariant is the testable part: a lost bird clears what you were CARRYING and
+-- nothing you EARNED. Score, delivered, rescued and the Perfect-Ten stamps must survive a respawn —
+-- zeroing those would turn a desync bug into a punishment.
+--------------------------------------------------------------------------------
+
+-- carryOnReset — the player's state after their bird is destroyed. Returns a NEW table (pure).
+function RescueRules.carryOnReset(ps)
+	local out = {}
+	for k, v in pairs(ps or {}) do out[k] = v end
+	out.carry = 0          -- the riders are gone from the player's back; the server must agree.
+	out.loadCombo = nil    -- the chain those riders were building died with them.
+	return out
 end
 
 return RescueRules

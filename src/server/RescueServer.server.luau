@@ -717,6 +717,37 @@ Remotes.DeliverSquirrels.OnServerEvent:Connect(function(player)
 	pushState(player)
 end)
 
+-- CARRIER LOSS → ZERO THE CARRY (S45). See RescueRules.carryOnReset for the full failure trace. The
+-- client drops every rider whenever the bird model goes away (teardownDrive), so the server MUST agree
+-- or it silently rejects the rest of the round's catches as FULL. Watching Birds.ChildRemoved (rather
+-- than the Respawn remote alone) covers EVERY teardown path — R, death, crash, ownership reclaim —
+-- which is the same event the client already keys its own reset off.
+task.spawn(function()
+	local birds = Workspace:WaitForChild("Birds", 60)
+	if not birds then
+		-- Loud, never silent: a dead guard here reads to the player as "my catches stopped counting".
+		warn("[Rescue] Birds folder never appeared in 60s — the carrier-loss carry reset is NOT armed.")
+		return
+	end
+	birds.ChildRemoved:Connect(function(model)
+		if not (R.carryResetOnLoss ~= false) then return end   -- kill switch: false = pre-S45 behaviour
+		local uid = model:GetAttribute("OwnerUserId")
+		if not uid then return end
+		local player = Players:GetPlayerByUserId(uid)
+		if not player then return end
+		local ps = stateFor(player)
+		if (ps.carry or 0) <= 0 then return end
+		local lost = ps.carry
+		local reset = RescueRules.carryOnReset(ps)
+		ps.carry, ps.loadCombo = reset.carry, reset.loadCombo
+		if R.catchDiag then
+			warn(("[RescueDIAG] carrier loss: %s lost their bird carrying %d — carry zeroed to match the client")
+				:format(player.Name, lost))
+		end
+		pushState(player)
+	end)
+end)
+
 --------------------------------------------------------------------------------
 -- ROUND LOOP
 --------------------------------------------------------------------------------

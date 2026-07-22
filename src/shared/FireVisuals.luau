@@ -587,8 +587,14 @@ function FireVisuals.destroy(self)
 	for _, set in ipairs(self.cellPool) do set.part:Destroy() end
 	for _, p in ipairs(self.emberPool) do p.part:Destroy() end
 	for _, r in ipairs(self.ringPool) do r.part:Destroy() end
+	-- S45: the S44 smolder pool was allocated in .new but never freed here — the same create/teardown
+	-- asymmetry as the fire-roar bug. Masked on the normal path (teardownFire destroys the whole
+	-- folder), but the mid-round failure path calls destroy() and KEEPS the folder to "drop to
+	-- logic-only fire" — which left up to 14 wisp emitters Enabled, smoking at frozen positions for the
+	-- rest of the round while the real fire front moved on. A visual lie plus a leak.
+	for _, s in ipairs(self.smolderPool or {}) do s.part:Destroy() end
 	if self.plume then self.plume.part:Destroy(); self.plume = nil end
-	self.cellPool, self.emberPool, self.ringPool = {}, {}, {}
+	self.cellPool, self.emberPool, self.ringPool, self.smolderPool = {}, {}, {}, {}
 end
 
 return FireVisuals

@@ -541,3 +541,32 @@ H.test("SMOLDER TELL: ships LIVE (Chad asked for the fire to show up sooner)", f
 	H.eq(GameConfig.Fire.smolderMin, 15, "the smolder DURATION must not have been cut — that races the whole front")
 	H.eq(GameConfig.Fire.smolderMax, 25, "…and neither may the max: spread is active from SMOLDER (a balance change)")
 end)
+
+--------------------------------------------------------------------------------
+-- S45 TEARDOWN SYMMETRY. destroy() freed cellPool/emberPool/ringPool/plume but NOT the S44 smolderPool
+-- — the same create/teardown asymmetry class as the fire-roar bug that survived death and respawn.
+-- Masked on the normal path (teardownFire destroys the whole folder), but the MID-ROUND FAILURE path
+-- calls destroy() and deliberately KEEPS the folder to "drop to logic-only fire" — stranding up to 14
+-- Enabled wisp emitters smoking at frozen positions while the real fire front moves on.
+--------------------------------------------------------------------------------
+
+H.test("destroy(): frees EVERY pool — a survivor is a leaked emitter smoking on a dead fire", function()
+	local folder = newContainer()
+	local grid = smolderingGrid()
+	local ctrl = FireVisuals.new(FireGrid, flickerCfg(), grid.cellSize, folder)
+	ctrl:sync(grid, {}, 8)
+
+	-- anti-vacuity: there must BE smolder parts to leak, or this gate proves nothing.
+	local built = #ctrl.smolderPool
+	H.ok(built > 0, "fixture: the smolder pool must be allocated or this test is vacuous")
+
+	local before = #folder:GetDescendants()
+	H.ok(before > 0, "fixture: the container must hold the built pools")
+
+	ctrl:destroy()
+
+	-- The container is deliberately NOT destroyed here — that is exactly the mid-round failure path.
+	local after = #folder:GetDescendants()
+	H.eq(after, 0, ("destroy() left %d instances parented — the smolder pool is the known survivor"):format(after))
+	H.eq(#ctrl.smolderPool, 0, "the smolder pool table must be emptied like every other pool")
+end)

@@ -1,5 +1,11 @@
 --!nonstrict
--- ==== SCRATCH TELEMETRY RELAY (Wind Tunnel capture — DELETE after; non-committed) ====
+-- ==== SCRATCH TELEMETRY RELAY (Wind Tunnel capture) ====
+-- ⚠️ S44 AUDIT: this header used to claim "DELETE after; non-committed". It IS committed and IS
+-- Rojo-mapped into ServerScriptService, so that claim was false and self-concealing. What it actually
+-- is: a dev backdoor that exposes a client-fireable RemoteEvent and POSTs client-supplied bodies to
+-- localhost:8080. Harmless while HttpEnabled is off, but it should be a deliberate keep, not a
+-- forgotten one. CHAD'S CALL: delete this file + its default.project.json mapping + the F8/F9/F10
+-- capture block in BirdController, or keep it and drop this warning.
 -- HttpService is server-only, so the client scratch block in BirdController fires the CSV here and
 -- this relays it to the local capture server (flight_sim/harness/capture_server.luau on :8080).
 -- Revert with:  git checkout src/server/_ScratchTele.server.luau  (and remove the default.project.json mapping)

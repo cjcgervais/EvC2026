@@ -995,3 +995,148 @@ H.test("first intermission: the OTHER phases are untouched (no collateral retimi
 	H.eq(RescueRules.phaseDuration(R, "active", 1), R.roundLength or 120,
 		"the round itself must still be the full length on round #1")
 end)
+
+--------------------------------------------------------------------------------
+-- S45 THE WAYFINDER TARGET — the only directional mechanism in the game was gated OFF whenever the
+-- player was empty-handed, i.e. at every moment anyone is actually lost (Chad: "dropped in cold").
+-- These gates pin the un-gating AND the two ways it could go wrong: a strobing ribbon, and a ribbon
+-- that lies (points somewhere when there is nothing to point at).
+--------------------------------------------------------------------------------
+
+H.test("wayfinder: carrying ≥1 still points at the waterfall — the pre-S45 path is untouched", function()
+	local R = GameConfig.Rescue
+	for _, n in ipairs({ 1, 3, 10 }) do
+		local p = RescueRules.wayfindTarget(R, { phase = "active", carrying = n, bestId = 7, bestDist = 50 })
+		H.eq(p.mode, "waterfall", ("carrying %d must point at the waterfall, never at a critter"):format(n))
+		H.eq(p.id, nil, "the waterfall target carries no squirrel id")
+	end
+	-- and the waterfall outranks a critter sitting right next to you: passengers have ONE answer.
+	local off = table.clone(R); off.wayfindEmpty = false
+	H.eq(RescueRules.wayfindTarget(off, { phase = "active", carrying = 1, bestId = 7, bestDist = 1 }).mode,
+		"waterfall", "the kill switch must not affect the carrying path at all")
+end)
+
+H.test("wayfinder: KILL SWITCH — wayfindEmpty=false restores the pre-S45 dark beam", function()
+	local off = table.clone(GameConfig.Rescue); off.wayfindEmpty = false
+	for _, d in ipairs({ 10, 500, 2600 }) do
+		H.eq(RescueRules.wayfindTarget(off, { phase = "active", carrying = 0, bestId = 3, bestDist = d }).mode,
+			"off", "empty-handed with the flag false must be dark — byte-identical to before S45")
+	end
+end)
+
+H.test("wayfinder: empty talons in an active round point at the NEAREST catchable squirrel", function()
+	local R = GameConfig.Rescue
+	H.ok(R.wayfindEmpty, "the S45 fix must ship ON — the whole finding is that it was off")
+	local p = RescueRules.wayfindTarget(R, { phase = "active", carrying = 0, bestId = 42, bestDist = 900 })
+	H.eq(p.mode, "squirrel", "empty + active + a candidate ⇒ the ribbon lights")
+	H.eq(p.id, 42, "…and points at the nearest one")
+end)
+
+H.test("wayfinder: it never lies — no candidate, or a non-active phase, means DARK", function()
+	local R = GameConfig.Rescue
+	H.eq(RescueRules.wayfindTarget(R, { phase = "active", carrying = 0 }).mode, "off",
+		"nothing catchable anywhere ⇒ dark, never an arrow pointing at nothing")
+	for _, ph in ipairs({ "intermission", "grace", "results", "nonsense" }) do
+		for _, carry in ipairs({ 0, 5 }) do
+			H.eq(RescueRules.wayfindTarget(R, { phase = ph, carrying = carry, bestId = 1, bestDist = 20 }).mode,
+				"off", ph .. " must keep the beam dark (it has only ever lit during the active round)")
+		end
+	end
+end)
+
+H.test("wayfinder: HYSTERESIS — a challenger must be meaningfully closer to steal the ribbon", function()
+	local R = GameConfig.Rescue
+	local swap = R.wayfindSwap or 0.2
+	local hold = { phase = "active", carrying = 0, currentId = 1, currentDist = 1000 }
+	-- a challenger only barely closer must NOT take it (this is the strobe case)
+	local near = table.clone(hold); near.bestId = 2; near.bestDist = 1000 * (1 - swap) + 1
+	H.eq(RescueRules.wayfindTarget(R, near).id, 1,
+		"a marginally-closer squirrel must not steal the beam — that is what makes it flicker")
+	-- a decisively closer one must
+	local far = table.clone(hold); far.bestId = 2; far.bestDist = 1000 * (1 - swap) - 1
+	H.eq(RescueRules.wayfindTarget(R, far).id, 2,
+		"a decisively closer squirrel SHOULD take the beam — hysteresis must not freeze the target")
+	-- the held target vanishing (caught/claimed/expired ⇒ currentDist nil) hands off immediately
+	H.eq(RescueRules.wayfindTarget(R, { phase = "active", carrying = 0,
+		currentId = 1, currentDist = nil, bestId = 2, bestDist = 2500 }).id, 2,
+		"once the held squirrel is gone the ribbon must move on, however far the next one is")
+	-- …and with the held target gone AND nothing else, dark.
+	H.eq(RescueRules.wayfindTarget(R, { phase = "active", carrying = 0, currentId = 1 }).mode, "off",
+		"a stale held id must never keep the beam alive on its own")
+end)
+
+H.test("wayfinder: hysteresis is STABLE — a held target survives a full sweep of equal rivals", function()
+	local R = GameConfig.Rescue
+	-- Sweep a rival past the held target's range. The beam may change hands at most ONCE; a policy
+	-- that re-picks per frame would hand it back and forth as the numbers jitter.
+	local heldId, heldDist, swaps = 1, 1200, 0
+	for step = 0, 60 do
+		local rivalDist = 1500 - step * 20   -- a rival closing steadily from 1500 to 300
+		local p = RescueRules.wayfindTarget(R, { phase = "active", carrying = 0,
+			currentId = heldId, currentDist = heldDist, bestId = 2, bestDist = math.min(rivalDist, heldDist) })
+		if p.id ~= heldId then swaps += 1; heldId = p.id end
+	end
+	H.ok(swaps <= 1, ("the ribbon changed hands %d times during one approach — that is a strobe"):format(swaps))
+end)
+
+--------------------------------------------------------------------------------
+-- S45 THE CARRIER-LOSS RESET — the respawn carry desync. Two auditors found this independently and
+-- both called it the defect most likely to hit the next flight: press R while carrying and the server
+-- keeps believing you have passengers the client already dropped.
+--------------------------------------------------------------------------------
+
+H.test("carrier loss: the carry is zeroed — the server must agree with the emptied back", function()
+	local ps = { carry = 7, loadCombo = 4, score = 1200, delivered = 3, rescued = 3 }
+	local out = RescueRules.carryOnReset(ps)
+	H.eq(out.carry, 0, "a destroyed bird carries nobody — the server's carry MUST go to zero")
+	H.eq(out.loadCombo, nil, "the chain those riders were building died with them")
+end)
+
+H.test("carrier loss: everything EARNED survives — a desync fix must not become a punishment", function()
+	local ps = { carry = 7, loadCombo = 4, score = 1200, delivered = 3, rescued = 3,
+		perfectAt = 42, perfectFactor = 2.5 }
+	local out = RescueRules.carryOnReset(ps)
+	H.eq(out.score, 1200, "score is EARNED — a respawn must never take it")
+	H.eq(out.delivered, 3, "already-delivered squirrels are safe at the waterfall; they stay delivered")
+	H.eq(out.rescued, 3, "…same for the rescued tally")
+	H.eq(out.perfectAt, 42, "the Perfect-Ten stamp is earned history, not carried cargo")
+	H.eq(out.perfectFactor, 2.5, "…and so is the banked time factor")
+end)
+
+H.test("carrier loss: it is PURE — the caller's table is not mutated", function()
+	local ps = { carry = 7, loadCombo = 4 }
+	RescueRules.carryOnReset(ps)
+	H.eq(ps.carry, 7, "carryOnReset must return new state, never mutate its argument")
+	H.eq(RescueRules.carryOnReset(nil).carry, 0, "a nil player-state must not throw")
+end)
+
+H.test("carrier loss: after the reset the catch gate has FULL room again (the actual symptom)", function()
+	local R = GameConfig.Rescue
+	local cap = R.carryCapacity or 10
+	-- Before: the server thinks the back is full, so every catch is rejected while the client shows room.
+	H.ok(not RescueRules.hasRoom(cap, 0, cap), "precondition: a full server carry rejects catches")
+	local out = RescueRules.carryOnReset({ carry = cap })
+	H.ok(RescueRules.hasRoom(out.carry, 0, cap),
+		"after a carrier loss the player must be able to catch again — this IS the 'my catches stopped counting' bug")
+end)
+
+--------------------------------------------------------------------------------
+-- S45 NaN GUARD — styleMult is client-supplied and math.clamp does NOT stop NaN (every comparison
+-- with NaN is false), so one hostile/buggy catch poisoned the whole round's score to "nan".
+--------------------------------------------------------------------------------
+
+H.test("catchScore: NaN / inf / garbage multipliers can never poison the score", function()
+	local R = GameConfig.Rescue
+	local nan = 0 / 0
+	for _, bad in ipairs({ nan, math.huge, -math.huge }) do
+		local pts = RescueRules.catchScore(R, 1, bad, "")
+		H.ok(pts == pts, ("styleMult %s produced NaN points — one catch would poison the round"):format(tostring(bad)))
+		H.ok(pts >= 0 and pts < math.huge, ("styleMult %s produced a non-finite score"):format(tostring(bad)))
+	end
+	-- the rarity channel is server-chosen today, but it multiplies the same product — guard it too.
+	local pts = RescueRules.catchScore(R, nan, 1, "")
+	H.ok(pts == pts and pts < math.huge, "a NaN rarity multiplier must not poison the score either")
+	-- and the guard must not disturb ordinary scoring
+	H.eq(RescueRules.catchScore(R, 1, 1, ""), RescueRules.catchScore(R, 1, 1, nil),
+		"the NaN guard must leave normal catches byte-identical")
+end)

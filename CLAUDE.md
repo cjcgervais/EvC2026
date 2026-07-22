@@ -2,6 +2,13 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+> ⚠️ **SUPERSESSION (read before anything below).** The section "What this is" describes **combat**
+> (1-eagle-vs-4-crows, LMB strike, crow squads). **Combat has been SHELVED since S32.** The live game is
+> **EAGLES TO THE RESCUE** — a forest-fire critter rescue loop: `Rescue.enabled=true`,
+> `activeMission="ember_valley"`, `RescueServer` owns the round, and the HUD hides HP/AoA. The flight
+> KERNEL, controls and camera below are still accurate and still LOCKED. See
+> `docs/EAGLES-TO-THE-RESCUE-plan.md` and the `project-updraft-direction` memory for the real product.
+
 ## Orientation (read these first)
 - **Run `/evc-loop`** — the governing session harness for this project. It runs a
   SOP-tuned loop (orient → one-change → verify → red-team → memory → handoff →
