@@ -195,6 +195,61 @@ end
 --------------------------------------------------------------------------------
 -- One EMBER tint patch: a flat charred-ground disc (NO emitter, NO light — a free color per §3.3).
 --------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+-- One SMOLDER-cell visual set (S44): a pale smoke wisp and NOTHING ELSE.
+--
+-- Chad: *"it takes a while for me to see fire too."* SMOLDER had no visual at all, so the first
+-- 25-35s of every ember_valley round looked fire-free while an invisible front spread and scared
+-- squirrels. This renders the state as what it physically is — smoke without flame — which is why
+-- it is the right technique rather than a dim flame (that flattens the smoke→flame escalation) or
+-- a shorter smolder (that races the whole front: a balance change, not a visibility fix).
+--
+-- DELIBERATELY CHEAPER THAN A BURNING CELL: no marker geometry, no PointLight (lights are the
+-- low-end/mobile cliff — §3.4 pins 30 with zero shadow-casters and this must not move that number),
+-- no flame emitter, no flicker breathing. ONE emitter on ONE tiny invisible anchor part. The whole
+-- pool's worst case is budgeted in tests/perf.spec.luau against the same §3.4 particle rail.
+--------------------------------------------------------------------------------
+function FireVisuals.buildSmolderSet(cfg, cellSize, parent)
+	local w = math.max(6, (cellSize or 60) * 0.55)
+
+	-- An invisible anchor: the wisp needs a position, not a body. Transparency 1 + no Material work.
+	local part = Instance.new("Part")
+	part.Name = "SmolderCell"
+	part.Size = Vector3.new(1, 1, 1)
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanQuery = false
+	part.CanTouch = false
+	part.CastShadow = false
+	part.Transparency = 1
+	part.Parent = parent
+
+	local att = Instance.new("Attachment")
+	att.Name = "WispAtt"
+	att.Parent = part
+
+	-- Pale, thin, slow — it must read as "something is starting to burn over there", clearly WEAKER
+	-- than the dark fast plume of a burning cell so the escalation still lands when it ignites.
+	local wisp = Instance.new("ParticleEmitter")
+	wisp.Name = "Wisp"
+	wisp.Color = ColorSequence.new(Color3.fromRGB(190, 185, 178), Color3.fromRGB(225, 222, 216))
+	wisp.LightEmission = 0.25
+	wisp.Size = NumberSequence.new(w * 0.35, w * 1.1)
+	wisp.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.55),   -- fainter than smoke's 0.35: a hint, not a column
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	wisp.Lifetime = NumberRange.new(2.0, cfg.smolderWispLife or 3.2)
+	wisp.Rate = cfg.smolderWispRate or 5
+	wisp.Speed = NumberRange.new(10, 18)       -- lazy curl, not the burning cell's 24-40 rush
+	wisp.SpreadAngle = Vector2.new(22, 22)
+	wisp.Acceleration = Vector3.new(0, 14, 0)
+	wisp.Enabled = false
+	wisp.Parent = att
+
+	return { part = part, att = att, wisp = wisp, baseW = w }
+end
+
 function FireVisuals.buildEmberPatch(cfg, cellSize, parent)
 	local w = math.max(6, (cellSize or 60) * 0.9)
 	local patch = Instance.new("Part")
@@ -299,6 +354,16 @@ function FireVisuals.new(FireGrid, cfg, cellSize, container)
 		self.cellPool[i].light.Enabled = false
 	end
 
+	-- S44 pooled SMOLDER wisps. Allocated once like every other pool; `smolderTell=false` skips the
+	-- allocation entirely so the kill switch restores a byte-identical Instance tree.
+	self.maxSmolder = (cfg.smolderTell ~= false) and (cfg.maxVisualSmolder or 14) or 0
+	self.smolderPool = {}
+	for i = 1, self.maxSmolder do
+		self.smolderPool[i] = FireVisuals.buildSmolderSet(cfg, self.cellSize, container)
+		self.smolderPool[i].part.CFrame = CFrame.new(0, -5000, 0)   -- parked below the world until used
+		self.smolderPool[i].wisp.Enabled = false
+	end
+
 	-- pooled ember tint patches.
 	self.emberPool = {}
 	for i = 1, self.maxEmber do
@@ -350,6 +415,25 @@ function FireVisuals.sync(self, grid, graceUntil, elapsed)
 	local FireGrid = self.FireGrid
 	self.tickN = (self.tickN or 0) + 1
 	FireVisuals._ensureRings(self, grid)
+
+	-- S44 SMOLDER WISPS: newest-first (the freshest smoulder is the leading edge of the front), capped
+	-- at maxSmolder. Same pooled discipline as everything else — reposition + toggle Enabled, never
+	-- allocate. Runs BEFORE the burning pass purely so a cell that ignites this very tick gets its
+	-- wisp parked and its flame raised in the same sync (no one-tick frame where it shows both).
+	if self.maxSmolder > 0 then
+		local smold = FireGrid.smolderCells(grid, self.maxSmolder)
+		for i = 1, self.maxSmolder do
+			local set = self.smolderPool[i]
+			local s = smold[i]
+			if s then
+				set.part.CFrame = CFrame.new(s.x, (self.cfg.smolderWispY or 8), s.z)
+				set.wisp.Enabled = true
+			elseif set.wisp.Enabled then
+				set.wisp.Enabled = false
+				set.part.CFrame = CFrame.new(0, -5000, 0)
+			end
+		end
+	end
 
 	-- BURNING: newest-first, capped at maxBurning. Reposition/recolor the pool; park the rest.
 	local burning = FireGrid.burningCells(grid, self.maxBurning)

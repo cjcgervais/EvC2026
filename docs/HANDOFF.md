@@ -4,7 +4,7 @@ Read this first. It tells the next agent exactly where the project stands, the o
 
 ---
 
-## ▶▶ S44 (2026-07-21) — 🔔 THE PING LAW (the 6× complaint, root-caused) · 💎 SKY GEM built INERT · 🔥 fire-visibility QUEUED
+## ▶▶ S44 (2026-07-21) — 🔔 THE PING LAW (the 6× complaint, root-caused) · 💎 SKY GEM built INERT · 🔥 THE SMOLDER TELL is LIVE
 
 **Chad opened with two complaints and asked for a huge Fable audit. Four Fable-5 auditors ran in
 parallel (acquisition / audio / timeline+perf / claimed-vs-actual drift). Their findings drove both
@@ -72,7 +72,29 @@ clears-the-canopy (gem bottom ≥150 for under-canopy perches), monotone/capped/
 **rare gems keep their 1.35× size advantage at range** — that last test FAILED first and caught a real
 design flaw (every gem converged to one size far out, killing triage-by-value from altitude).
 
-### ③ Ladder: **Tier-4 161/161 · rojo PASS · luau-lsp 0 NEW (17 pre-existing) · selene UNAVAILABLE(404)**
+### ③ THE SMOLDER TELL — "it takes a while for me to see fire too" (LIVE, `Fire.smolderTell=true`)
+**Convicted:** the burn seeds at `igniteAt=10`, then every cell smolders **15-25s** — and FireVisuals
+rendered **BURNING ONLY**, so SMOLDER had *no visual representation at all*. First flame therefore
+appeared ~25-35s in (clock **~1:35**) and accreted cell-by-cell at the ~1 Hz sync. Worse: **spread is
+ACTIVE from SMOLDER** and Danger keys off any non-GREEN cell, so an **invisible front was propagating
+and panicking squirrels for up to 25s** — Stage-3a fear pointing at something you could not see.
+
+**The technique, vetted (SOP #8):** render the state as what it physically IS — **smoke, no flame**.
+That preserves the smoke→flame **escalation** rather than flattening it, and it is why the obvious
+alternative is a trap: **cutting `smolderMin/Max` races the ENTIRE front (smolder spreads) — a balance
+change wearing a visibility costume.** A dim flame would flatten the escalation for the same cost.
+`FireGrid.smolderCells` (read-only, LCG-free ⇒ **B1 determinism untouched**) + a pooled wisp set that
+is deliberately cheaper than a flame: **no PointLight, no flame emitter, no marker geometry, no
+flicker breathing** — one pale slow emitter on an invisible anchor.
+
+**Perf re-pinned, not bypassed:** particles **1384 ≤ 1600** rail (the +224 is exactly the wisp pool),
+**lights still 30 / 0 shadow-casting** (the mobile cliff did not move), **allocation-free 299→299 over
+100 syncs**. Gates assert the READ *and* the cost: visible-during-the-window (14 wisps lit at t=8s with
+20 smouldering cells and **zero flames** — the exact gap Chad reported), no-lights/no-flame-emitters,
+**clean ignition handoff** (never wisp *and* flame on one cell), kill-switch restores the byte-identical
+pre-S44 emitter tree, and a guard asserting `smolderMin/Max` were **not** quietly cut.
+
+### ④ Ladder: **Tier-4 166/166 · rojo PASS · luau-lsp 0 NEW (17 pre-existing) · selene UNAVAILABLE(404)**
 
 **▶ CHAD'S PLAY (only he can judge these):**
 ① **The ear:** carry 6+ and keep catching — every catch should land as a *snap/thump*, the crew as
@@ -82,14 +104,15 @@ chitter, and **the bell should appear ONLY as you hit 10/10**. If you hear ANY b
 critters are?" Then dive one: the gem must shrink back onto its head and fade exactly as it does today
 (if it ever occludes the critter at catch range, that is a BUG — the test says it cannot).
 Knobs: `skyGemStudsPerStud` (bigger = larger on screen), `skyGemMaxSize`, `skyGemClearY`, `skyGemFarT`.
+③ **The fire:** watch the clock from the round's start. Smoke should start curling out of the brush at
+**~0:15-0:20** (seed +10s, wisps immediately), *then* flames grow out of that smoke — you should get to
+watch the fire START instead of finding it already burning. Knobs: `maxVisualSmolder` (more/fewer wisps
+— 14 shows the leading edge of a ~20-cell front), `smolderWispRate/Life/Y`. Kill switch:
+`Fire.smolderTell=false`. ⚠️ If it still feels late, the honest next dial is `Fire.igniteAt` (when the
+burn SEEDS) — NOT `smolderMin/Max`, which would speed the whole front and change the balance.
 
-**▶ NEXT (in order):** **fire visibility** — Chad confirmed *"it takes a while for me to see fire too."*
-CONVICTED: `igniteAt=10` then **15–25s of SMOLDER, a state FireVisuals does not render at all**, so the
-first flame appears ~1:35 on the clock and accretes cell-by-cell at ~1 Hz. Knock-on: **squirrels panic
-at an invisible fire** for up to 25s (Danger keys off any non-GREEN cell). Fix = render smolder as a
-cheap wisp (FireVisuals is perf-pinned — budget it) *or* shorten seed smolder; do NOT blanket-cut
-`smolderMin/Max` (smolder spreads, so that races the whole front = a balance change).
-→ then **B7-P2** touch proof-of-feel (Chad answered nothing on DRAG vs TAP yet) → **B4** canopy trails
+**▶ NEXT (in order):** **Chad's Play on all three above** (the ear, the sky gem, the fire timing) →
+**B7-P2** touch proof-of-feel (Chad answered nothing on DRAG vs TAP yet) → **B4** canopy trails
 → **B5** leap variety → Stage **3b** only if pressure still missing → **PHASE C** persistence/levels.
 
 **▶ DRIFT the audit found (not yet fixed):** `GameConfig:1178` claims ember_valley is "INERT-by-default"

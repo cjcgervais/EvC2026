@@ -614,6 +614,46 @@ function FireGrid.burningCells(grid, maxN)
 end
 
 --------------------------------------------------------------------------------
+-- FireGrid.smolderCells — up to maxN SMOLDER cells, NEWEST-FIRST, each as {x, z, age}.
+--
+-- S44 (Chad: *"it takes a while for me to see fire too"*). The audit convicted the mechanism: the
+-- burn seeds at igniteAt=10s, but a cell then sits in SMOLDER for smolderMin..smolderMax (15-25s) —
+-- and FireVisuals renders BURNING ONLY, so SMOLDER had NO visual representation whatsoever. The
+-- first flame therefore popped at ~25-35s into the round (clock ~1:35) and accreted cell-by-cell at
+-- the ~1Hz sync cadence, which reads exactly as "assets rendering in late" rather than a fire
+-- spreading. Worse: spread is ACTIVE from SMOLDER (see §0 above) and Danger keys off any NON-GREEN
+-- cell, so an INVISIBLE front was propagating and scaring squirrels for up to 25 seconds.
+--
+-- This is the read seam for the fix: smoke with no flame — physically what smoldering IS, and it
+-- preserves the smoke→flame ESCALATION instead of flattening it (the alternative, cutting
+-- smolderMin/Max, would race the whole front because smolder spreads = a balance change wearing a
+-- visibility costume).
+--
+-- Read-only and LCG-free, exactly like burningCells ⇒ B1 determinism is untouched by construction.
+--------------------------------------------------------------------------------
+function FireGrid.smolderCells(grid, maxN)
+	maxN = maxN or grid.maxVisualSmolder or 0
+	local list = {}
+	for idx = 1, grid.N * grid.N do
+		if grid.state[idx] == FireGrid.SMOLDER then
+			local cz = math.floor((idx - 1) / grid.N) + 1
+			local cx = (idx - 1) % grid.N + 1
+			local x, z = cellToWorld(grid, cx, cz)
+			list[#list + 1] = { x = x, z = z, order = grid.igniteOrder[idx] }
+		end
+	end
+	-- newest-first by ignition order (the freshest smoulder is the leading edge of the front)
+	table.sort(list, function(a, b)
+		return a.order > b.order
+	end)
+	local out = {}
+	for i = 1, math.min(maxN, #list) do
+		out[i] = { x = list[i].x, z = list[i].z, age = list[i].order }
+	end
+	return out
+end
+
+--------------------------------------------------------------------------------
 -- FireGrid.dangerAt — how frightened should the critter standing at world (x,z) be?
 -- Returns 0 (calm) | 1 (worried) | 2 (panic). The Stage-3 "urgency becomes visceral" seam
 -- (docs/KID-LEGIBILITY-PLAN.md): a kid reads ANOTHER CREATURE'S FEAR with no decoding, so the

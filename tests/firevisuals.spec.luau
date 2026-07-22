@@ -355,10 +355,13 @@ H.test("Stage-2 flicker: exactly ONE centroid plume, grows with fire, parks when
 	local plumeCount = countNamed(folder, "ParticleEmitter", "MegaPlume")
 	H.eq(plumeCount, 1, "flicker: exactly ONE MegaPlume emitter in container")
 
-	-- total ParticleEmitters: maxVisualBurning*2 (smoke+flame each) + 1 (plume).
+	-- total ParticleEmitters: maxVisualBurning*2 (smoke+flame each) + 1 (plume)
+	--                        + S44 maxVisualSmolder (one wisp each, allocated only when smolderTell).
 	local cap = cfg.maxVisualBurning or 30
+	local smoldCap = (cfg.smolderTell ~= false) and (cfg.maxVisualSmolder or 14) or 0
 	local totalPE = countClass(folder, "ParticleEmitter")
-	H.eq(totalPE, cap * 2 + 1, "flicker: total emitters = cap*2 (smoke+flame each) + 1 (plume)")
+	H.eq(totalPE, cap * 2 + 1 + smoldCap,
+		"flicker: total emitters = cap*2 (smoke+flame) + 1 (plume) + maxVisualSmolder (wisps)")
 
 	-- after sync with burning cells: plume enabled, rate matches formula.
 	local drawn = ctrl:sync(grid, {}, 10)
@@ -424,4 +427,117 @@ H.test("Stage-2 flicker: breathing is deterministic + bounded (no math.random)",
 			H.ok(sz1.Y <= baseH * (1 + amp + 1e-6), "flicker: Size.Y <= baseH*(1+amp) (upper bound)")
 		end
 	end
+end)
+
+--------------------------------------------------------------------------------
+-- S44 — THE SMOLDER TELL. Chad: "it takes a while for me to see fire too."
+--
+-- The convicted mechanism was that SMOLDER rendered NOTHING while spreading and while Stage-3a
+-- fear keyed off it, so the first ~25-35s of a round looked fire-free. These gates assert the READ
+-- ("I can see the fire starting") and the COST ("and it did not buy that with the mobile cliff"),
+-- because a visual that ships without a range/cost gate is exactly how Stage 1 traded away the
+-- long-range squirrel signal without anyone noticing.
+--------------------------------------------------------------------------------
+
+-- A grid stepped to the SMOLDER window: seeded, but well before any cell reaches BURNING
+-- (smolderMin is 15s, so ~8s in the whole front is still smouldering).
+local function smolderingGrid()
+	local groves = {
+		{ center = Vector3.new(500, 0, 0), radius = 130 },
+		{ center = Vector3.new(-500, 0, 300), radius = 130 },
+	}
+	local grid = FireGrid.new(GameConfig.Fire, 4242, Vector3.new(1, 0, 0), groves, GameConfig.Rescue.deliverPos)
+	FireGrid.seedUpwind(grid)
+	FireGrid.step(grid, 8)
+	return grid
+end
+
+H.test("SMOLDER TELL: the fire is VISIBLE during the window that used to render nothing", function()
+	local grid = smolderingGrid()
+	local stats = FireGrid.stats(grid)
+	H.ok(stats.smolder > 0, "fixture: the grid must actually be smouldering or this gate is vacuous")
+	H.eq(stats.burning, 0, "fixture: this is the pre-flame window — the exact gap Chad reported")
+
+	local folder = newContainer()
+	local cfg = flickerCfg()
+	local ctrl = FireVisuals.new(FireGrid, cfg, grid.cellSize, folder)
+	ctrl:sync(grid, {}, 8)
+
+	local lit = 0
+	for _, set in ipairs(ctrl.smolderPool) do
+		if set.wisp.Enabled then
+			lit += 1
+			H.ok(set.part.CFrame.Position.Y > -100, "a lit wisp must be IN the world, not parked below it")
+		end
+	end
+	H.ok(lit > 0,
+		"nothing renders during the smolder window — this is the bug: an invisible fire spreading for 15-25s")
+	print(("      [smolder] %d/%d wisps lit at t=8s with %d smouldering cells and ZERO flames")
+		:format(lit, ctrl.maxSmolder, stats.smolder))
+end)
+
+H.test("SMOLDER TELL: costs NO lights and no flame emitters — the mobile cliff is untouched", function()
+	local folder = newContainer()
+	local cfg = flickerCfg()
+	local grid = smolderingGrid()
+	local ctrl = FireVisuals.new(FireGrid, cfg, grid.cellSize, folder)
+	ctrl:sync(grid, {}, 8)
+	-- Lights live on FireCell parts only; a SmolderCell must never carry one.
+	for _, set in ipairs(ctrl.smolderPool) do
+		H.eq(#set.part:GetChildren(), 1, "a smolder set is ONE attachment and nothing else (no light, no core)")
+		H.eq(set.part:FindFirstChildWhichIsA("PointLight"), nil,
+			"a smouldering cell must never carry a PointLight — lights are the low-end/mobile cliff")
+		H.eq(set.part.Transparency, 1, "the wisp anchor is invisible — the smoke IS the tell")
+	end
+	-- worst case: the ENTIRE pool alight must still fit the §3.4 particle rail alongside the flames.
+	local perWisp = (cfg.smolderWispRate or 5) * (cfg.smolderWispLife or 3.2)
+	local worst = ctrl.maxSmolder * perWisp
+	H.ok(worst <= 300,
+		("the smolder pool's worst case is %.0f alive particles — re-derive the §3.4 budget before raising it")
+			:format(worst))
+end)
+
+H.test("SMOLDER TELL: a cell that IGNITES hands off cleanly — never wisp and flame at once", function()
+	local folder = newContainer()
+	local cfg = flickerCfg()
+	local grid = smolderingGrid()
+	local ctrl = FireVisuals.new(FireGrid, cfg, grid.cellSize, folder)
+	ctrl:sync(grid, {}, 8)
+	-- run the fire well past the smolder window so the front has ignited, then re-sync
+	FireGrid.step(grid, 40)
+	local drawn = ctrl:sync(grid, {}, 48)
+	H.ok(drawn > 0, "fixture: the fire must have reached BURNING by now")
+
+	-- every position rendering a flame must NOT also be rendering a wisp
+	local flameXZ = {}
+	for i = 1, drawn do
+		local p = ctrl.cellPool[i].part.CFrame.Position
+		flameXZ[("%d:%d"):format(math.floor(p.X + 0.5), math.floor(p.Z + 0.5))] = true
+	end
+	for _, set in ipairs(ctrl.smolderPool) do
+		if set.wisp.Enabled then
+			local p = set.part.CFrame.Position
+			H.eq(flameXZ[("%d:%d"):format(math.floor(p.X + 0.5), math.floor(p.Z + 0.5))], nil,
+				"a cell is showing a smolder wisp AND a flame — the escalation must be a handoff, not a stack")
+		end
+	end
+end)
+
+H.test("SMOLDER TELL: the kill switch restores the pre-S44 Instance tree exactly", function()
+	local folder = newContainer()
+	local cfg = flickerCfg()
+	cfg.smolderTell = false
+	local grid = smolderingGrid()
+	local ctrl = FireVisuals.new(FireGrid, cfg, grid.cellSize, folder)
+	H.eq(ctrl.maxSmolder, 0, "smolderTell=false must allocate NO wisp pool")
+	H.eq(countNamed(folder, "ParticleEmitter", "Wisp"), 0, "no wisp emitters may exist under the kill switch")
+	H.eq(countClass(folder, "ParticleEmitter"), (cfg.maxVisualBurning or 30) * 2 + 1,
+		"under the kill switch the emitter tree is byte-identical to pre-S44")
+	ctrl:sync(grid, {}, 8)   -- must not error with an empty pool
+end)
+
+H.test("SMOLDER TELL: ships LIVE (Chad asked for the fire to show up sooner)", function()
+	H.eq(GameConfig.Fire.smolderTell, true, "smolderTell must ship ON — this is a reported bug, not an experiment")
+	H.eq(GameConfig.Fire.smolderMin, 15, "the smolder DURATION must not have been cut — that races the whole front")
+	H.eq(GameConfig.Fire.smolderMax, 25, "…and neither may the max: spread is active from SMOLDER (a balance change)")
 end)

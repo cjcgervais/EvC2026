@@ -1260,6 +1260,27 @@ GameConfig.Fire = {
 	smokeRate       = 6,       -- particles/sec per burning marker's ONE smoke emitter.
 	emberTint       = Color3.fromRGB(46, 34, 28),  -- charred-ground tint for EMBER cells (cheap color swap, NO light/emitter).
 	maxVisualEmber  = 40,      -- coarse cap on ember tint patches (a pooled subset — ember is a free color, but instances aren't free).
+
+	-- THE SMOLDER TELL (S44). Chad: "it takes a while for me to see fire too." Convicted mechanism:
+	-- the burn seeds at igniteAt=10s, then each cell smolders smolderMin..smolderMax (15-25s) — and
+	-- FireVisuals rendered BURNING ONLY, so SMOLDER had NO visual at all. First flame therefore
+	-- appeared ~25-35s in (clock ~1:35) and accreted cell-by-cell. Meanwhile spread is ACTIVE from
+	-- SMOLDER and Danger keys off any non-GREEN cell, so an INVISIBLE front was propagating and
+	-- panicking squirrels for up to 25s (Stage 3a fear pointing at nothing you could see).
+	-- The fix renders the state as what it physically IS — smoke, no flame — which keeps the
+	-- smoke→flame escalation. Do NOT "fix" this by cutting smolderMin/Max instead: smolder SPREADS,
+	-- so that races the entire front — a balance change wearing a visibility costume.
+	smolderTell     = true,    -- false → no wisp pool is even allocated (byte-identical to pre-S44).
+	maxVisualSmolder= 14,      -- pooled wisp cap. Worst case is rail-checked in tests/perf.spec.luau
+	                           -- against the SAME §3.4 particle budget as the flames.
+	smolderWispRate = 5,       -- particles/s per wisp…
+	smolderWispLife = 3.2,     -- …× this max lifetime = alive per wisp. 14 × 5 × 3.2 = 224 alive worst
+	                           -- case, on top of the ~1160 the flames already use (rail 1600).
+	smolderWispY    = 8,       -- studs; wisp origin above the ground — low, so it reads as ground-level
+	                           -- smoke curling up out of the brush rather than a floating cloud.
+	                           -- NOTE: deliberately NO PointLight on a smoldering cell. Lights are the
+	                           -- low-end/mobile cliff; §3.4 pins 30 with zero shadow-casters and this
+	                           -- tell must not move that number.
 	ringColor       = Color3.fromRGB(255, 90, 40),  -- cut-off countdown warning ring (grove about to be ranger-rescued).
 	perfDiag        = false,   -- print "[Fire] tick N cells=%d ms=%.2f" per render when true (OFF by default).
 
