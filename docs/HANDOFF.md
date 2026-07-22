@@ -4,7 +4,31 @@ Read this first. It tells the next agent exactly where the project stands, the o
 
 ---
 
-## ▶▶ COLD START — READ THIS FIRST (current as of S46 close, 2026-07-22)
+## 🛑 STOP — THE LOOP IS PAUSED. READ `docs/CONSULT-VISUAL-QUALITY.md` FIRST.
+**Chad halted autonomous work at the S46 close (2026-07-22) and asked for a STRATEGY CONSULT with a
+Fable model before any further building.** His charge, in his words: *"Everything looks cheap and
+broken… we have to start building for quality and good runtime at the same time… It feels like this
+project is treated as a dead end… Every fix I try to get done takes 7 or 8 passes."*
+
+**Do not pick up the queue below and start building.** The queue is still accurate as a work inventory,
+but the *method* that produced it is what is under review. Three things a new agent must know up front:
+
+1. **The flashing ground is OUR bug, diagnosed:** all 133 `GroundDetail` patches sit at `Y=0.6` with
+   `Size.Y=4`, so every top face is coplanar at **Y=2.6** and overlapping patches z-fight
+   (`GameServer.server.luau:336-343`). Fix is 3 lines or one config word — **deliberately not applied**,
+   pending the consult.
+2. **⚠️ "RENDERS IN SLOW" IS REOPENED — I closed it prematurely.** Chad is back on Auto graphics and
+   reports it *still* takes forever. The S45c fixes were real and stay, but the cold-start box below
+   still describes this as solved+confirmed; **that claim is falsified.** And beware the S44/S45 trap
+   for a fourth time: *"the world arrives late"* and *"the world flickers once it is here"* are
+   probably TWO defects behind one complaint. Separate them before touching anything.
+3. **The whole game is untextured primitives** — zero MeshParts, textures, decals or SurfaceAppearance
+   anywhere in `src/`. This is a gray-box prototype that has been treated as shippable for ~14
+   sessions. **Read the consult packet for the full audit.**
+
+---
+
+## ▶▶ COLD START — READ THIS FIRST (work inventory; current as of S46 close, 2026-07-22)
 
 *The session sections below are the historical log, newest first. **This box is the authoritative
 current state.** The older "COLD START — Session 32" box further down is superseded; ignore its queue.*
@@ -16,9 +40,14 @@ to scoop squirrels onto your back, carry up to 10, deliver at the waterfall. 2-m
 shelved *by player count, not by config*; see the landmine list. Chad's S42 verdict on the core loop
 was **"addictive and fun… actually fun!"** — **do not re-litigate the loop.**
 
-### ✅ "RENDERS IN SLOW" — **SOLVED AND CONFIRMED BY CHAD (S45c). History only — skip to the queue.**
-*Kept in full because the three-session arc is the best worked example in this repo of diagnosing the
-wrong clock. Nothing here is open. If you are cold-starting to do work, jump to "Queue, in order".*
+### 🔴 "RENDERS IN SLOW" — **REOPENED at the S46 close. The section below is NOT the final word.**
+*S45c's two fixes (CastShadow, the Glass Sea) were real and stay. But Chad, back on **Auto** graphics
+on 2026-07-22: it **still takes forever**, and the world **flashes** once it arrives. The "solved and
+confirmed" framing this box carried for one day is **falsified**. See `docs/CONSULT-VISUAL-QUALITY.md`
+§2.1 and §2.3 — the flashing is a separately-diagnosed z-fighting bug of our own making, and conflating
+it with the load-time problem would repeat the exact S44/S45 error a fourth time.*
+*The arc below is still the best worked example in this repo of diagnosing the wrong clock — read it
+for method, not for a verdict.*
 
 ### 🔴 (historical) the probe FLEW. It is **RENDERING**, not replication or streaming.
 S44 blamed the boot intermission and shipped a fix; Chad re-flew and it was **still slow**, so that
