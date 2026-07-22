@@ -58,8 +58,17 @@ is to stop spending the frame budget. Shipped (`Map.cheapScenery`, false = the p
 when it regresses. ⚠️ **The first CastShadow gate was VACUOUS and the mutation test caught it** — it
 matched the word "CastShadow" in its own explanatory comment, so a mutant with the assignment deleted
 passed. Gates now strip `--` lines before matching. **Lesson: a source gate must read CODE, not prose.**
-**▶ Chad's next flight is the verdict:** leave graphics on **Automatic** (the default every player
-gets) and see whether the world is there from the start now.
+**✅ CHAD CONFIRMED IT (2026-07-21): flown on the shipped fix — *"yep graphics worked."* THE RENDER
+SAGA IS CLOSED.** `Rescue.bootDiag` is now **OFF** (its answer is preserved in the knob's comment):
+the diagnostic did its job and noise buries the next one. Turn it back on only for a NEW startup
+question — and if you do, remember it measures when things **EXIST** vs when they are **DRAWN**, which
+are different clocks; conflating them cost S44 an entire session.
+
+**The three-session arc, for the record:** S44 blamed the boot intermission (real, but not the cause) →
+S45 falsified it in two words from Chad ("newest build, still slow") → S45b found a *genuine second
+defect* with the same symptom (the featureless spawn core, fixed and kept) → S45c's probe flight
+convicted the actual cause. **Three plausible mechanisms, two of them real bugs, only one of them THE
+bug.** The thing that finally worked was measuring the right clock and asking Chad what he was *doing*.
 ⚠️ Note `GameServer:266`'s `pcall(Workspace.StreamingEnabled = false)` is a **silent no-op** (read-only
 at runtime) — harmless now that the probe confirms the place file already has it off, but it proves
 nothing and should not be cited as if it did.

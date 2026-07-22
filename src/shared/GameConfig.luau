@@ -837,8 +837,18 @@ GameConfig.Rescue = {
 	-- the valley of squirrels and then bursts ~600 instances in a single frame when the round starts.
 	-- Guessing between them is how the ping bug survived five "fixes" — so: one flight, timestamped
 	-- milestones on BOTH sides, and the answer is in the Output. Zero behaviour when false.
-	bootDiag         = true,   -- prints [BootDiag/server] and [BootDiag/client] milestone timings.
-	                           -- Turn OFF once the startup cause is named.
+	bootDiag         = false,  -- prints [BootDiag/server] and [BootDiag/client] milestone timings.
+	                           -- ✅ S45c: OFF — the cause is NAMED, FIXED and Chad-confirmed, so this is
+	                           -- now just console noise on every flight (and noise buries the next
+	                           -- diagnostic). THE ANSWER IT GAVE, keep it: StreamingEnabled=false, and
+	                           -- RescueWorld=249 on the CLIENT at t=1s, flat at every later mark — every
+	                           -- part present immediately, counts never climbing ⇒ NOT replication, NOT
+	                           -- streaming, NOT assets (there are none). It was Roblox's AUTOMATIC
+	                           -- graphics mode throttling RENDER DISTANCE to protect the frame budget.
+	                           -- Fixed for everyone (not just a maxed slider) via Map.cheapScenery.
+	                           -- Turn back on only for a NEW startup question — and if you do, remember
+	                           -- the probe measures when things EXIST vs are DRAWN; those are different
+	                           -- clocks and conflating them is what cost S44 a whole session.
 	-- …and it WAS named, first flight. The server builds the whole world in 4 MILLISECONDS; then the
 	-- valley sits deliberately EMPTY for the whole 6s intermission while the player already has a bird
 	-- (Birds folder at 1.906s) and nothing to fly at. All 15 squirrels then appear in ONE frame at
