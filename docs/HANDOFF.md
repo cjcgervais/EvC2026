@@ -4,6 +4,70 @@ Read this first. It tells the next agent exactly where the project stands, the o
 
 ---
 
+## ▶▶ S45b (2026-07-21) — 🌍 THE FEATURELESS CORE: why he flies into the ground
+
+**Chad, after the commit above: *"I just always crash at the start… I nose down into the ground every
+time"* — then the clarification that cracked it: *"im diving so the ground will render but it does so
+too late."* He is not flying badly, and this is only partly a render bug.**
+
+**THE FINDING, straight out of BuildMap's own comments.** `GameServer:297` states the mechanism
+verbatim — ground patches exist to "break up the uniform grass so altitude/speed/heading read at a
+glance from far up (**a flat green plain gives no perspective cue**)". Then **every landmark in the map
+is explicitly excluded from the box the player occupies**:
+| feature | where | the in-line comment |
+|---|---|---|
+| ground patches | ±2,200-5,200 | *"all clear of the ±1200 core"* (`:298`) |
+| the river | between landmarks | *"not the spawn core"* (`:316`) |
+| the buttes | ±1,300-2,600 | *"kept clear of the ±1200 spawn zone"* (`:369`) |
+| lake / desert | r ≈ 3,000-3,800 | — |
+| 3 mountain rings | r = 3,600 / 5,400 / 7,400 | — |
+
+The eagle spawns at **random XZ inside ±1200, Y=600** (`:592`). So the one region the player flies is a
+**2,400 × 2,400 stud UNIFORM PLANE**. That is the classic featureless-terrain problem: with no object
+of known size and no texture gradient there is **no closure cue**, so altitude is unreadable until
+Roblox's material texture resolves at short range — which from the cockpit reads *exactly* as **"the
+ground rendered too late."** They diagnosed the mechanism correctly and then placed the cure everywhere
+except where the patient was.
+
+**THE FIX — `src/shared/GroundDetail.luau`** (pure module + `tests/grounddetail.spec.luau`, 7 gates):
+a deterministic **multi-scale jittered-grid** scatter of flat patches across the core.
+**Multi-scale is the whole technique** — a cue helps only while it subtends a useful visual angle, so
+one patch size fixes exactly one altitude: **coarse** 4×4 @420-760 studs ("there is a floor", reads
+from 600+), **mid** 6×6 @150-320 (through the dive), **fine** 9×9 @48-118 (**blooms in the last ~150
+studs — the flare cue that is missing today**). 133 parts, all flat at Y=0.6.
+**COSMETIC BY CONSTRUCTION:** every patch is emitted `CanQuery/CanCollide/CanTouch/CastShadow = false`,
+so **BirdCollision's Spherecast cannot see them and the crash surface is bit-identical to today.** A
+gate asserts that on every patch; the mutation (canQuery=true) turns it red.
+**Rejected on ceiling, not taste:** bigger patches only (fixes 600 studs, still cueless in the last
+200 — exactly where he hits) · Roblox Terrain (the real long-term "proper map" answer, but a different
+replication/collision system, and not while the render question is open) · a texture/decal grid (needs
+an asset ID — the one thing no headless gate here can verify, cf. the S43 roar tombstone) · raising
+spawn or slowing the dive (**that is a FLIGHT change and the kernel is LOCKED — the defect is in the
+world, so the fix belongs in the world**).
+**The coverage gate is the load-bearing one:** it sweeps the whole core on a 60-stud grid and fails if
+any point is >220 studs from a patch edge — *a hole is a corridor you can dive with no cue, i.e. the
+original bug reintroduced by luck.* **It failed twice for real during development** (263 then 264
+studs), which is how the apron and the band tuning were found. Now **worst gap 140 studs**. Knobs:
+`Map.coreDetail` (kill switch = byte-identical map), `coreHalfExtent`, `coreDetailSeed`.
+
+**⚠️ AND IT CAUGHT A BRICK I ALMOST SHIPPED.** `default.project.json` maps every shared module
+**individually**, not the folder — so a new `src/shared/X.luau` is **not** in ReplicatedStorage, and
+`require(ReplicatedStorage:WaitForChild("X"))` **blocks forever and kills the script silently**, with
+compile, luau-lsp and `rojo build` all still green. New gate in `compile.spec` scans every
+ReplicatedStorage require in `src/` against the project file's paths; mutation-tested by deleting the
+mapping. **Any agent adding a shared module: add the project.json entry or the gate reds.**
+
+**▶ HONEST SCOPE — this is NOT the render fix.** It is a code-confirmed defect in the MAP that produces
+the same symptom, and it stands on its own. **The quality/streaming question is still unresolved and
+the probe is still unflown.** If the ground still appears late after this, that is the render lane and
+the probe flight is still the answer. Do not treat one as evidence about the other.
+
+### Ladder: **Tier-4 191/191** · rojo PASS · luau-lsp 17 (the +1 vs 16 is the new module's
+`Unknown require` sourcemap noise — the documented tool-noise class, and `rojo build` proves the
+mapping resolves) · selene UNAVAILABLE(404).
+
+---
+
 ## ▶▶ S45 (2026-07-21) — 🧭 THE WAYFINDER LAW · 🐿️ THE RESPAWN CARRY DESYNC · ⏱️ "still slow" is UNRESOLVED and now instrumented
 
 **Chad: *"I dont even know where to fly at the start everything renders in so slow."* Five Fable-5

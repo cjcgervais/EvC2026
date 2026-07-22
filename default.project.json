@@ -49,6 +49,9 @@
       },
       "TouchAimAdapter": {
         "$path": "src/shared/TouchAimAdapter.luau"
+      },
+      "GroundDetail": {
+        "$path": "src/shared/GroundDetail.luau"
       }
     },
 

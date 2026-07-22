@@ -93,3 +93,37 @@ H.test("register headroom: BirdController can still take a new module-local", fu
 		"⚠️ Extracting the audio band MUST carry the ping-law source gate with it or that gate goes vacuous."
 	):format(room, HEADROOM_FLOOR)))
 end)
+
+--------------------------------------------------------------------------------
+-- S45 ROJO MAPPING GATE — a module that compiles but was never MAPPED is a silent brick.
+--
+-- default.project.json maps every shared module INDIVIDUALLY (not the folder). So adding
+-- `src/shared/Foo.luau` and requiring it does NOT put Foo in ReplicatedStorage: the require's
+-- `WaitForChild("Foo")` blocks FOREVER, and the whole script dies quietly at startup with no error —
+-- the exact "dead-but-quiet" class that left the rescue layer frozen with zero console evidence in
+-- S44. Nothing caught it: the module compiles, luau-lsp only emits its usual "Unknown require" noise,
+-- and `rojo build` succeeds because the file simply isn't referenced. This gate closes that hole.
+--------------------------------------------------------------------------------
+
+H.test("rojo mapping: every ReplicatedStorage module required by src/ is mapped in the project file", function()
+	local project = fs.readFile("default.project.json")
+	local missing, checked = {}, 0
+	for _, path in ipairs(listLuau()) do
+		local src = fs.readFile(path)
+		for name in src:gmatch('require%b()') do
+			local mod = name:match('ReplicatedStorage:WaitForChild%("([%w_]+)"%)')
+			if mod then
+				checked += 1
+				-- The mapping is what puts it in ReplicatedStorage at runtime; match the PATH so a
+				-- renamed key with a stale path can't pass.
+				if not project:find('src/shared/' .. mod .. '%.luau') then
+					missing[#missing + 1] = ("%s requires %s, which default.project.json does not map")
+						:format(path, mod)
+				end
+			end
+		end
+	end
+	H.ok(checked > 0, "the scanner found no ReplicatedStorage requires at all — it has gone vacuous")
+	H.eq(#missing, 0, "UNMAPPED MODULE(S) — WaitForChild would hang forever and silently brick the " ..
+		"script:\n  " .. table.concat(missing, "\n  "))
+end)

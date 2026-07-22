@@ -1414,6 +1414,21 @@ GameConfig.Visual = {
 	                  -- The client's talon/seat offsets multiply by this so riders sit ON the scaled body.
 }
 
+--------------------------------------------------------------------------------
+-- MAP — the world's readability knobs. Cosmetic only (see GroundDetail: every patch is emitted
+-- non-queryable, so BirdCollision cannot see them and the crash surface is unchanged).
+--------------------------------------------------------------------------------
+GameConfig.Map = {
+	-- S45, Chad: "I nose down into the ground every time… I'm diving so the ground will render but it
+	-- does so too late." BuildMap's own comment says patches exist because "a flat green plain gives no
+	-- perspective cue" — and then placed EVERY landmark outside the ±1200 spawn core (patches, river,
+	-- buttes all say so in-line). So the box the player actually flies in is a uniform 2,400-stud plane
+	-- with nothing to judge height against. This scatters multi-scale flat patches back INTO it.
+	coreDetail     = true,   -- KILL SWITCH: false → GroundDetail returns {} and the map is byte-identical.
+	coreHalfExtent = 1200,   -- must track GameServer's spawn box (random ±1200 XZ). Bigger = wider carpet.
+	coreDetailSeed = 20260721, -- deterministic LCG seed; the valley is identical on every boot.
+}
+
 GameConfig.Debug = {
 	soloFlight = true,
 	-- aiCrowOpponents: when a lone HUMAN Eagle is present with no human Crow, spawn a fully

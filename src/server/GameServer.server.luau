@@ -42,6 +42,7 @@ local BirdBuilder    = require(ReplicatedStorage:WaitForChild("BirdBuilder"))
 local Boids          = require(ReplicatedStorage:WaitForChild("Boids"))
 local BirdCollision  = require(ReplicatedStorage:WaitForChild("BirdCollision"))
 local SpatialHash    = require(ReplicatedStorage:WaitForChild("SpatialHash"))
+local GroundDetail   = require(ReplicatedStorage:WaitForChild("GroundDetail"))
 
 --------------------------------------------------------------------------------
 -- TUNING CONSTANTS local to the server (combat/collision feel knobs)
@@ -304,6 +305,20 @@ local function BuildMap()
 	for _, p in ipairs(patches) do
 		addPart({ Name = p.n, Size = Vector3.new(p.w, 6, p.l), Position = Vector3.new(p.x, 1, p.z),
 			Material = p.m, Color = p.c })
+	end
+
+	-- CORE GROUND DETAIL (S45) — the cure, applied where the patient actually is. Every block above and
+	-- below this one is explicitly "clear of the ±1200 spawn core", which left the box the player flies
+	-- in a uniform plane with NO closure cue — Chad flew into it repeatedly. GroundDetail returns a
+	-- deterministic multi-scale scatter; each patch is non-queryable so BirdCollision's Spherecast
+	-- cannot see it and the crash surface stays exactly the baseplate. Kill switch: Map.coreDetail.
+	for _, d in ipairs(GroundDetail.patches(GameConfig.Map)) do
+		addPart({
+			Name = d.name, Size = Vector3.new(d.w, 4, d.l),
+			Position = Vector3.new(d.x, 0.6, d.z),   -- below the Y=1 landmark layer, above the baseplate top
+			Material = Enum.Material.Grass, Color = Color3.fromRGB(d.r, d.g, d.b),
+			CanCollide = d.canCollide, CanQuery = d.canQuery, CanTouch = d.canTouch, CastShadow = d.castShadow,
+		})
 	end
 
 	-- Distinct ground LANDMARKS you fly over (a lake + a desert basin).
