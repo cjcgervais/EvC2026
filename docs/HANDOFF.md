@@ -4,6 +4,95 @@ Read this first. It tells the next agent exactly where the project stands, the o
 
 ---
 
+## ▶▶ COLD START — READ THIS FIRST (current as of S45b close, 2026-07-21)
+
+*The session sections below are the historical log, newest first. **This box is the authoritative
+current state.** The older "COLD START — Session 32" box further down is superseded; ignore its queue.*
+
+### What the game is right now
+**EAGLES TO THE RESCUE** — fly a signed-off eagle over a burning valley, dive into a slow-mo auto-catch
+to scoop squirrels onto your back, carry up to 10, deliver at the waterfall. 2-minute rounds.
+`Rescue.enabled=true`, `activeMission="ember_valley"`. **Combat is SHELVED** (S32) — but note it is
+shelved *by player count, not by config*; see the landmine list. Chad's S42 verdict on the core loop
+was **"addictive and fun… actually fun!"** — **do not re-litigate the loop.**
+
+### 🔴 THE ONE THING BLOCKING PROGRESS — Chad must fly the probe
+**"Everything renders in so slow" is UNRESOLVED.** S44 blamed the boot intermission, shipped the fix,
+and Chad flew it: **still slow.** That explanation is **falsified and closed.** The reason it was wrong:
+BootDiag measured when instances **EXIST**, not when they are **DRAWN** — different clocks.
+**The probe that separates them is already in the build (`Rescue.bootDiag` is true) and has never been
+flown.** One flight prints `StreamingEnabled`, the quality level, and descendant counts at
+t=1/5/10/20/30s, which decides between streaming-bound / replication-bound / render-quality-bound.
+Plus a 60-second A/B: **Esc → Settings → Graphics Mode → Manual → max**, re-fly.
+**⚠️ NAMED TRAP: do not ship another timeline "fix" before that flight.** That is exactly what S44 did.
+Ruled out already by counting: **~1,400 Workspace instances and ZERO external assets** (no meshes,
+textures or decals ⇒ nothing is downloading). Leading suspect is quality-scaled draw distance
+(*inferred, not measured*). Verdict on the obvious fix: **keep `StreamingEnabled` OFF** — nothing to
+defer at that instance count, and every gameplay-critical object would need `Persistent` anyway.
+⚠️ `GameServer:266`'s `pcall(Workspace.StreamingEnabled = false)` is a **silent no-op** (not scriptable
+at runtime), so the live session's true value is unverified until the probe prints it.
+
+### Shipped this session, awaiting Chad's eyes (all LIVE, all kill-switched)
+1. **🧭 The wayfinder** (`Rescue.wayfindEmpty`) — the gold ribbon now points at the nearest squirrel when
+   your talons are empty. It was gated on carrying ≥1, i.e. **dark at every moment anyone is lost.**
+   *Ask: from spawn, does it tell you where to go within a frame? Does it ever strobe between groves?*
+2. **🌍 Core ground detail** (`Map.coreDetail`) — the ±1200 spawn box was a **uniform plane with no
+   altitude cue**, which is why he dove into the ground every start. Multi-scale patches, provably
+   non-queryable (crash surface bit-identical). *Ask: can you judge your dive now?*
+3. **🐿️ Carry reset on bird loss** (`Rescue.carryResetOnLoss`) — *Ask: carry ~5, press **R**, catch 6
+   more; all six must count.*
+4. NaN score guard · FireVisuals smolder-pool teardown leak — no player-facing test needed.
+
+### Built and tested but still INERT — each needs one Chad verdict, zero build cost
+- **`Rescue.skyGem = true`** — the distance-projected squirrel marker (S44; gates all green).
+- **`Rescue.treeCollision = "trunks"`** — today `"off"` makes every tree non-queryable, so **the style
+  meter cannot charge near trees: the advertised canopy-threading skill pays nothing.**
+- **`Controls.touchAim`** — B7-P1 built inert; **blocked on Chad answering DRAG vs TAP.**
+- `Fire.roarAssetIds` is EMPTY ⇒ the fire is silent; needs a Toolbox asset id pasted.
+
+### Queue, in order (nothing here needs a decision except where marked)
+1. **The probe flight** (above) → then the render lane.
+2. **Event-driven spawn-on-join** — READY, deliberately held so it doesn't muddy the probe. The 1.906s
+   to the Birds folder is purely GameServer's 2s poll cadence; `onPlayerAdded` does not spawn.
+3. Flip the inert flags above, one flight each.
+4. **PHASE C — progression/levels.** Chad's standing #1 directive ("levels unlock"). Nothing persists
+   today (no DataStore anywhere). Design work is done: cumulative acorns as currency, one DataStore
+   profile, and **a first unlock inside 5 minutes (~400 acorns) so round 2 has a reason** — the
+   2,500-acorn valley gate is a 4th-session reward and fatal as the first rung.
+5. Round-arc display (`roundIndex` is tracked but never shown; rounds are otherwise identical forever,
+   and `Random.new(20260713)` is a FIXED seed so round 1 is byte-identical every session).
+
+### 🚨 Landmines — real, unfixed, deliberately deferred
+- **A 2nd player joining destroys the rescue round.** Nothing in GameServer is gated on
+  `Rescue.enabled`; player #2 is auto-assigned **Crows**, which starts the combat round and calls
+  **`clearBirds` on everyone** mid-round. **Detonates the first time Chad tests with his kid.**
+  *(Chad S45: "forget second player for now" — deferred, not fixed.)*
+- **Anti-cheat cascades to a KICK** from one network stall (rubber-band writes to a client-owned part,
+  baseline frozen ⇒ a strike every Heartbeat). Invisible in Studio; real when published/mobile.
+- **Deliver has zero spatial validation** — phase + `carry>0` only.
+- **Fox missions visually pin relocated squirrels** at their old perch height (`HopBaseY` cached once).
+- **14 orphan config knobs read by nothing**, incl. a dead `mouseSensitivity` block 54 lines above the
+  live `aimMouseSensitivity`, and `updraftStrength` — **the waterfall updraft applies no force at all.**
+
+### Invariants a new agent must not violate
+- **The flight kernel, camera and aim law are SIGNED OFF and LOCKED** (CS-1..CS-9 registry below). Grep
+  it before any control edit. Rescue is built AROUND them: triggers, presentation, world, meta.
+  **When a complaint sounds like flight, check the WORLD first** — S45b's "I crash every start" was a
+  map defect, and "raise the spawn / slow the dive" would have been a kernel change for a world bug.
+- **BirdController's top-level chunk is register-capped.** Headroom was 199/200; it is now **20**, and
+  `compile.spec` fails at a floor of 8. Pay for space (group locals into a table, or extract a module)
+  before adding module-locals. ⚠️ Extracting the audio band **must carry the ping-law source gate** or
+  that gate goes silently vacuous.
+- **Adding a `src/shared/` module?** `default.project.json` maps them **individually** — miss it and
+  `WaitForChild` hangs forever, killing the script silently. `compile.spec` now gates this.
+- ONE change at a time · config-gate everything with a kill switch · **mutation-test every new gate** ·
+  ground truth is Chad's Studio Play (`build.ps1` does not run or syntax-check Luau).
+
+### Ladder at close: **Tier-4 191/191 · rojo PASS · luau-lsp 0 new · selene UNAVAILABLE(404)**
+Branch `updraft`, everything committed **and pushed** through `bb9c113`.
+
+---
+
 ## ▶▶ S45b (2026-07-21) — 🌍 THE FEATURELESS CORE: why he flies into the ground
 
 **Chad, after the commit above: *"I just always crash at the start… I nose down into the ground every
