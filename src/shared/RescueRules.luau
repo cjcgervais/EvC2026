@@ -591,6 +591,44 @@ function RescueRules.surfaceKind(name)
 end
 
 --------------------------------------------------------------------------------
+-- B4.2 — TREE STYLE SCORING, decoupled from tree COLLISION.
+--
+-- Chad kept the ghost forest at S45c (treeCollision="off": *"trees I dont collide with which is a
+-- positive. Makes it more simple."*). That one flag was doing two jobs: it also leaves trees
+-- CanQuery=false, and the style meter finds terrain by RAYCAST — so the meter was blind to trees and
+-- canopy-threading, the advertised skill-ceiling verb, paid NOTHING. These two pure functions give
+-- the SCORER its own source (canopy POSITIONS) so the ceiling exists without a single tree ever
+-- becoming a collision surface. The ghost forest is untouched.
+--
+-- ⚠️ THE SHELL, NOT THE BALL — the red-team BLOCK that rewrote this packet, recorded so nobody
+-- "simplifies" it back. The obvious form, max(0, centreDist - radius), returns 0 everywhere INSIDE a
+-- canopy ⇒ closeness 1.0 through the whole interior. The trees are GHOSTS, so flying through them is
+-- free — meaning that form pays MAXIMUM for barging straight through the middle of a crown and LESS
+-- for threading between them. An exact inversion of the mechanic it exists to reward, and it would
+-- have pinned styleMult at its 3.0 cap on essentially every catch (the grove disc saturates).
+-- The line is the canopy SURFACE. So the distance is |centreDist - radius| and the score falls off
+-- on BOTH sides of it: skim the roof and you score, barge through the middle and you do not.
+--------------------------------------------------------------------------------
+
+-- canopyRadius — the TRUE drawn radius of a canopy Part.
+-- A Roblox Ball is always a real sphere and its radius is half the SMALLEST Size component, not half
+-- X. Canopies are built Size = (d, d*0.8, d) (RescueServer.buildTree), so the drawn radius is 0.4*d.
+-- Reading Size.X/2 would score a sphere 25% wider than the one on screen — a 5.6-stud invisible
+-- skirt, the one thing that would turn an honest decoupling into an actual feel lie.
+function RescueRules.canopyRadius(size)
+	return math.min(size.X, size.Y, size.Z) * 0.5
+end
+
+-- shellCloseness — the 0..1 style charge from ONE canopy, measured off its SURFACE (see above).
+-- centreDist = |eaglePos - canopyCentre|. Peaks at 1.0 on the skin, decays to 0 at proxDist on EITHER
+-- side of it, and is flat 0 beyond. sweetSpot is the half-width of the knife-edge plateau.
+function RescueRules.shellCloseness(centreDist, radius, proxDist, sweetSpot)
+	local shell = math.abs(centreDist - (radius or 0))
+	if shell >= proxDist then return 0 end
+	return math.clamp((proxDist - shell) / math.max(1, proxDist - (sweetSpot or 0)), 0, 1)
+end
+
+--------------------------------------------------------------------------------
 -- beatActive — is a sacred presentation beat running right now?
 -- The codebase's rule for "never stomp a beat" is THREE flags (see the pose ladder): the slow-mo
 -- catch, any crew catch still in flight, and the hop-off tally ceremony. A first attempt at the

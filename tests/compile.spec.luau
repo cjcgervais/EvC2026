@@ -175,3 +175,48 @@ H.test("scenery cost: the Sea is not unconditionally Glass-with-Reflectance", fu
 			"draws here, and it reads identically as SmoothPlastic from 11,000 studs away.")
 	end
 end)
+
+--------------------------------------------------------------------------------
+-- B4.2 — TREE STYLE SCORING. The pure math is gated in rescuerules.spec, but the pure module cannot
+-- see the CLIENT GLUE: deleting the whole feature from BirdController leaves that suite fully green.
+-- These are source gates on the glue. They read CODE only (codeOnly strips `--` lines) per the S45c
+-- lesson — the first CastShadow gate passed against a mutant because it matched its own comment.
+--------------------------------------------------------------------------------
+
+H.test("B4.2 glue: the style meter scores canopies through the PURE helpers, not by hand", function()
+	local src = codeOnly(fs.readFile("src/client/BirdController.client.luau"))
+
+	H.ok(src:find("treeStyleScoring") ~= nil,
+		"BirdController no longer reads Rescue.treeStyleScoring — the kill switch gates nothing and " ..
+		"the whole B4.2 decoupling has been deleted or bypassed.")
+
+	-- The radius MUST come from the pure helper. Inlining Size.X/2 scores a sphere 25% wider than the
+	-- drawn canopy (a Ball's radius is half its SMALLEST axis) — an invisible skirt around every tree.
+	H.ok(src:find("RescueRules%.canopyRadius") ~= nil,
+		"the canopy radius is no longer read via RescueRules.canopyRadius. Any hand-rolled Size.X/2 " ..
+		"is wrong for a Ball and is unreachable by the headless gates in rescuerules.spec.")
+
+	-- The SHELL form is the packet. An inline max(0, dist - radius) re-creates the inversion the
+	-- red-team blocked: closeness 1.0 through the whole crown interior, so ghost trees pay you for
+	-- plowing through them instead of threading them.
+	H.ok(src:find("RescueRules%.shellCloseness") ~= nil,
+		"the style meter no longer scores via RescueRules.shellCloseness. If this was inlined, the " ..
+		"inversion gate in rescuerules.spec is now vacuous — the interior may score maximum again.")
+
+	-- Trees must NOT come back as a collision surface through the scoring door.
+	H.ok(src:find("CanQuery%s*=%s*true") == nil,
+		"BirdController is setting CanQuery=true. Chad's ghost forest (S45c) is a design decision; " ..
+		"style scoring must reach trees by POSITION, never by making them queryable.")
+end)
+
+H.test("B4.2 glue: the index waits for the server's published canopy count", function()
+	local src = codeOnly(fs.readFile("src/client/BirdController.client.luau"))
+	H.ok(src:find("CanopyCount") ~= nil,
+		"the client no longer waits on RescueWorld's CanopyCount attribute. Replication is not " ..
+		"atomic, so a build-once index that scans early bakes in a SHORT forest permanently and " ..
+		"silently, per client — the invisible failure class S44/S45 burned two sessions on.")
+	local server = codeOnly(fs.readFile("src/server/RescueServer.server.luau"))
+	H.ok(server:find('SetAttribute%("CanopyCount"') ~= nil,
+		"RescueServer no longer publishes CanopyCount, so the client's wait can never be satisfied " ..
+		"and tree style scoring is dead on every client.")
+end)

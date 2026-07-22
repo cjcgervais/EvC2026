@@ -763,12 +763,24 @@ GameConfig.Rescue = {
 	-- style meter CANNOT CHARGE NEAR TREES. The advertised canopy-threading skill, the game's headline
 	-- skill-ceiling verb, currently pays nothing. Chad's simplicity and that scoring are in direct
 	-- conflict while they share a flag.
-	-- ▶ THE REAL TASK (open): DECOUPLE them — let the style scorer see trees WITHOUT making them a
-	-- collision surface. `RescueRules.treeQueryable` currently answers one question for two callers
-	-- (BirdCollision's swept sphere AND the proximity scorer); the fix is to give the scorer its own
-	-- source — a collision group the sphere ignores, or scoring against tree POSITIONS directly instead
-	-- of raycast hits. That delivers the ceiling AND keeps the ghost forest Chad likes.
+	-- ▶ ✅ DONE (S46, B4.2) — the two ARE decoupled now, see `treeStyleScoring` below. The scorer got
+	-- its own source (canopy POSITIONS via SpatialHash, not raycast hits), so canopy-threading pays
+	-- WITHOUT a single tree becoming a collision surface. The ghost forest above is untouched and
+	-- `treeCollision` still does exactly one job: collision.
 	treeCollision    = "off",
+
+	-- B4.2 — TREE STYLE SCORING (the decoupling). The style meter scores the canopy SURFACE from tree
+	-- positions, independent of CanQuery/collision. false ⇒ provably byte-identical to pre-S46 (the
+	-- index is never even built — no scan, no per-frame lookup).
+	-- ⚠️ Its own prox/sweet knobs ON PURPOSE: styleProxDist=40 was tuned for a 10-ray world-axis fan
+	-- against BIG terrain surfaces (ground, mesa) and systematically under-detects. The tree term is an
+	-- exact analytic distance to ~170 overlapping ~40-stud balls; reusing 40 there would drown the
+	-- ground line-riding feel Chad already signed off. Tune trees here, never in styleProxDist.
+	-- Canopy radius runs 13.6–22.4 studs, so proxDist 16 means the deep interior of a crown scores ~0
+	-- and the skin scores 1.0 — that is the threading mechanic, see RescueRules.shellCloseness.
+	treeStyleScoring   = true,
+	treeStyleProxDist  = 16,   -- studs from the canopy SKIN (either side) where tree style charges.
+	treeStyleSweetSpot = 3,    -- studs; within this of the skin, closeness = 1.0 (the knife-edge).
 	nonLethalTerrain = true,
 
 	-- TERRAIN "OOF" BOUNCE (Packet B3 — PRESENTATION ONLY). A hard terrain contact now reads as a cartoon

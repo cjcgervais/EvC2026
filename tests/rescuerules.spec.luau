@@ -931,6 +931,87 @@ H.test("surfaceKind: canopy scatters leaves, every other solid throws the feathe
 	H.eq(RescueRules.surfaceKind(""), "feather", "an unnamed/unknown surface falls back to feather, never errors")
 end)
 
+--------------------------------------------------------------------------------
+-- B4.2 — TREE STYLE SCORING, decoupled from tree COLLISION.
+-- These gates exist because the FIRST version of this packet was red-team BLOCKED for
+-- inverting the mechanic it was built to reward. Each test below kills one named
+-- mutation; if you weaken one, read RescueRules' B4.2 header before you "simplify".
+--------------------------------------------------------------------------------
+
+H.test("canopyRadius: a Roblox Ball's radius is HALF THE SMALLEST axis, not half X", function()
+	-- Canopies are built Size = (d, d*0.8, d) in RescueServer.buildTree, and a Ball is always a true
+	-- sphere — so the DRAWN radius is 0.4*d. Reading Size.X/2 would score a sphere 25% wider than the
+	-- one on screen: an invisible skirt, i.e. a feel lie. MUTATION: swap min() for size.X.
+	H.eq(RescueRules.canopyRadius(Vector3.new(50, 40, 50)), 20,
+		"radius must come off the SMALLEST axis (40/2=20), not X (50/2=25) — a 25% invisible skirt")
+	H.approx(RescueRules.canopyRadius(Vector3.new(34, 34 * 0.8, 34)), 13.6, 1e-6,
+		"smallest live canopy (d=34) draws at radius 13.6")
+	H.approx(RescueRules.canopyRadius(Vector3.new(56, 56 * 0.8, 56)), 22.4, 1e-6,
+		"largest live canopy (d=56) draws at radius 22.4")
+end)
+
+H.test("shellCloseness: THE INVERSION GATE — the skin scores, the interior does not", function()
+	-- This is the red-team BLOCK, encoded. The obvious form max(0, centreDist - radius) returns 0
+	-- everywhere INSIDE the ball ⇒ closeness 1.0 through the whole crown. Trees are GHOSTS, so that
+	-- pays MAXIMUM for barging straight through a canopy and LESS for threading between them — an
+	-- exact inversion, and it would pin styleMult at its cap on every catch.
+	-- MUTATION: replace math.abs(centreDist - radius) with math.max(0, centreDist - radius).
+	local r, pd, sweet = 20, 16, 3
+	H.eq(RescueRules.shellCloseness(r, r, pd, sweet), 1,
+		"ON THE SKIN is the line — closeness must be exactly 1.0 there")
+	H.eq(RescueRules.shellCloseness(0, r, pd, sweet), 0,
+		"DEAD CENTRE of the crown must score ZERO. If this is 1.0 the mechanic is inverted and the " ..
+		"game pays you for plowing through ghost trees instead of threading them.")
+	H.ok(RescueRules.shellCloseness(r, r, pd, sweet) > RescueRules.shellCloseness(0, r, pd, sweet),
+		"skimming the skin must ALWAYS beat flying through the middle")
+	-- Symmetric falloff: equal shell distance inside and outside scores identically.
+	H.approx(RescueRules.shellCloseness(r - 8, r, pd, sweet), RescueRules.shellCloseness(r + 8, r, pd, sweet), 1e-9,
+		"the surface is the line — 8 studs under the skin must score exactly as 8 studs over it")
+	-- MUTATION: delete the `if shell >= proxDist then return 0 end` early-out.
+	H.eq(RescueRules.shellCloseness(r + pd, r, pd, sweet), 0, "exactly at proxDist from the skin: zero")
+	H.eq(RescueRules.shellCloseness(r + 400, r, pd, sweet), 0, "far outside: zero, never negative")
+	H.eq(RescueRules.shellCloseness(0, 400, pd, sweet), 0, "far INSIDE a huge ball: also zero")
+end)
+
+H.test("shellCloseness: closeness rises to the skin then falls — a monotone march, both sides", function()
+	-- MUTATION: any sign flip / envelope swap survives spot-checks but not a march.
+	local r, pd, sweet = 20, 16, 3
+	local prev, peakAt = -1, nil
+	for step = 0, 60 do                      -- march from the centre outward, 1 stud at a time
+		local c = RescueRules.shellCloseness(step, r, pd, sweet)
+		H.between(c, 0, 1, "closeness must stay normalised at every point of the march")
+		if c == 1 and peakAt == nil then peakAt = step end
+		if peakAt == nil then
+			H.ok(c >= prev, ("approaching the skin, closeness must not fall (step %d)"):format(step))
+		end
+		prev = c
+	end
+	H.ok(peakAt ~= nil and math.abs(peakAt - r) <= sweet,
+		"closeness must peak AT the skin (within the sweet-spot plateau), not at the centre")
+	H.eq(RescueRules.shellCloseness(60, r, pd, sweet), 0, "and be back to zero well past the crown")
+end)
+
+H.test("B4.2 LIVE CONFIG: the crown interior cannot max the meter at shipped numbers", function()
+	-- Reads LIVE values so a config edit can never silently re-create the inversion.
+	local pd, sweet = R.treeStyleProxDist, R.treeStyleSweetSpot
+	H.ok(type(pd) == "number" and type(sweet) == "number", "B4.2 knobs must exist in GameConfig.Rescue")
+	H.ok(sweet < pd, "sweet spot must sit inside the prox distance or the envelope inverts")
+	local smallest = RescueRules.canopyRadius(Vector3.new(34, 34 * 0.8, 34))   -- 13.6, the worst case
+	local centre = RescueRules.shellCloseness(0, smallest, pd, sweet)
+	local skin   = RescueRules.shellCloseness(smallest, smallest, pd, sweet)
+	H.eq(skin, 1, "skimming the smallest crown must still pay full")
+	H.ok(centre < 0.3, ("even the SMALLEST crown's centre must score low (got %.3f) — the interior is " ..
+		"not the line. Raising treeStyleProxDist past the canopy radius re-creates the inversion."):format(centre))
+	H.ok(skin > centre * 3, "the skin must decisively out-score the interior at shipped numbers")
+end)
+
+H.test("B4.2 kill switch + the ghost forest are independent knobs", function()
+	H.eq(R.treeStyleScoring, true, "B4.2 ships LIVE — decoupling the scorer is the point of the packet")
+	H.eq(R.treeCollision, "off",
+		"CHAD'S CALL (S45c): the ghost forest stays. Style scoring must NOT have flipped it — that is " ..
+		"the entire decoupling. If this is red, tree collision came back in through the scoring door.")
+end)
+
 H.test("B4.1 ships INERT: treeCollision is off (the ghost forest, byte-identical)", function()
 	H.eq(GameConfig.Rescue.treeCollision, "off",
 		"treeCollision must ship off — solid trees are a Chad-flown feel question, one word to enable")

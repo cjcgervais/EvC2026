@@ -2644,14 +2644,74 @@ local function scanSquirrels(dt)
 	until true
 end
 
+-- B4.2 — TREE STYLE INDEX: the style meter's own view of the forest, independent of collision.
+-- Trees stay CanQuery=false (Chad's ghost forest), so raycasts cannot see them; this scores canopy
+-- POSITIONS instead. Reuses SpatialHash — its forEachInRadius already derives the cell span from the
+-- radius (span = ceil(radius/cell)), which is the exact bit a hand-rolled 3x3 neighbourhood gets
+-- wrong. ONE module-local on purpose: this chunk is register-capped (compile.spec floor 8) and EVERY
+-- column-0 `local` — `local function` included — costs a register, so the builder and the query hang
+-- off this table as fields and SpatialHash is required function-locally (zero module registers).
+local treeStyle = { grid = nil, maxR = 0 }
+
+-- Build ONCE, but only when the client's view of the forest matches the server's published count.
+-- Replication is not atomic: scanning early yields a SHORT forest, and a build-once index then stays
+-- permanently and silently wrong on that client — symptom "style feels weak today", which is exactly
+-- the invisible failure class S44/S45 burned two sessions on. Waiting on the count self-heals.
+treeStyle.build = function()
+	local world = workspace:FindFirstChild("RescueWorld")
+	if not world then return false end
+	local want = world:GetAttribute("CanopyCount")
+	if type(want) ~= "number" or want <= 0 then return false end
+	local found = {}
+	for _, d in ipairs(world:GetDescendants()) do
+		if d.Name == "Canopy" and d:IsA("BasePart") then found[#found + 1] = d end
+	end
+	if #found < want then return false end            -- still arriving; retry next tick
+	local SpatialHash = require(ReplicatedStorage:WaitForChild("SpatialHash"))
+	local grid, maxR = SpatialHash.new(80), 0
+	for _, part in ipairs(found) do
+		local r = RescueRules.canopyRadius(part.Size)  -- TRUE ball radius = min-axis/2, not Size.X/2
+		if r > maxR then maxR = r end
+		grid:insert(part.Position, r)
+	end
+	treeStyle.grid, treeStyle.maxR = grid, maxR
+	return true
+end
+
+-- Best shell closeness over every canopy near `pos`. The query radius carries maxR because
+-- forEachInRadius spans cells by the radius ALONE — a canopy whose CENTRE sits beyond proxDist can
+-- still have its SKIN inside it, and dropping maxR here would silently under-charge near big crowns.
+treeStyle.closeness = function(pos, proxDist, sweetSpot)
+	if not treeStyle.grid and not treeStyle.build() then return 0 end
+	local best = 0
+	treeStyle.grid:forEachInRadius(pos, proxDist + treeStyle.maxR, function(radius, centre)
+		local c = RescueRules.shellCloseness((centre - pos).Magnitude, radius, proxDist, sweetSpot)
+		if c > best then best = c end
+	end)
+	return best
+end
+
 -- Line-riding STYLE meter (Fable §C) — reuses computeProximity (terrain closeness). Charges when
 -- flying fast + close; decays with a half-life so the line must be flown INTO the catch.
 local function updateStyle(dt)
 	local pd = RES.styleProxDist or 40
 	local minDist = computeProximity(rootPart.Position, pd)
 	local speed = flightEngine.speed
-	if minDist < pd and speed >= (GameConfig.Rescue.minStyleSpeed or 60) then
-		local closeness = clamp((pd - minDist) / math.max(1, pd - (RES.styleSweetSpot or 7)), 0, 1)
+	local fastEnough = speed >= (GameConfig.Rescue.minStyleSpeed or 60)
+	local closeness = 0
+	if minDist < pd and fastEnough then
+		closeness = clamp((pd - minDist) / math.max(1, pd - (RES.styleSweetSpot or 7)), 0, 1)
+	end
+	-- B4.2: trees compete on CLOSENESS, not on distance. A 10-ray world-axis fan distance and an exact
+	-- analytic sphere distance are not the same quantity, so min()-ing them would let the tree term
+	-- dominate at numbers styleProxDist was never validated against. Each source normalises under its
+	-- OWN envelope first; the best line wins. With the flag off this branch cannot run and the meter
+	-- is byte-identical to pre-S46 (closeness > 0 above iff the old `if` charged).
+	if RES.treeStyleScoring and fastEnough then
+		local t = treeStyle.closeness(rootPart.Position, RES.treeStyleProxDist or 16, RES.treeStyleSweetSpot or 3)
+		if t > closeness then closeness = t end
+	end
+	if closeness > 0 then
 		styleMeter = math.min((RES.styleMultMax or 3) - 1, styleMeter + closeness * (RES.styleChargeRate or 0.9) * dt)
 	else
 		styleMeter = styleMeter * (0.5 ^ (dt / (RES.styleDecayHalf or 2.0)))

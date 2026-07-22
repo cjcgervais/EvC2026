@@ -310,6 +310,17 @@ local function buildWorld()
 		buildTree(pos)   -- no perch: pure backdrop
 		placed += 1
 	end
+
+	-- B4.2 — publish the authoritative canopy count so the CLIENT's style index can tell "fully
+	-- replicated" from "still arriving". Replication is not atomic: a client that scans this folder
+	-- early gets a SHORT forest and, because the index is built once, stays permanently and silently
+	-- wrong — symptom "style feels weak today", which is exactly the invisible class S44/S45 burned
+	-- two sessions on. With the count published the client simply waits for the numbers to agree.
+	local canopies = 0
+	for _, d in ipairs(worldFolder:GetDescendants()) do
+		if d.Name == "Canopy" then canopies += 1 end
+	end
+	worldFolder:SetAttribute("CanopyCount", canopies)
 end
 
 --------------------------------------------------------------------------------

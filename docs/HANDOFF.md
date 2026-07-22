@@ -101,11 +101,9 @@ live and unverified by his eye; they are the top of the next session's agenda:
   style meter cannot charge near trees, and the canopy-threading verb, the game's headline
   skill-ceiling mechanic, currently pays nothing.** His simplicity and that scoring are in direct
   conflict *while they share a flag*.
-  ▶ **THE REAL TASK (open, and a good one):** **decouple them** — let the style scorer see trees
-  WITHOUT making them a collision surface. `RescueRules.treeQueryable` answers one question for two
-  callers (BirdCollision's swept sphere AND the scorer); give the scorer its own source — a collision
-  group the sphere ignores, or score against tree POSITIONS instead of raycast hits. That delivers the
-  ceiling **and** keeps the ghost forest he likes.
+  ▶ ✅ **DONE in S46 (B4.2)** — the two are decoupled. The scorer got its own source (canopy POSITIONS
+  via `SpatialHash`, not raycast hits), so canopy-threading pays **without** any tree becoming a
+  collision surface. `treeCollision` now does exactly one job: collision. See the S46 block below.
 
 ### Still inert, still needing Chad
 - **`Controls.touchAim`** — B7-P1 built inert; **blocked on Chad answering DRAG vs TAP.**
@@ -122,8 +120,7 @@ live and unverified by his eye; they are the top of the next session's agenda:
    first unlock inside 5 minutes (~400 acorns) so round 2 has a reason to exist** — the 2,500-acorn
    valley gate is a 4th-session reward and fatal as the first rung. Increment 1 = pure `Progression`
    module + DataStore wrapper + total-acorns HUD line + that one unlock, `Rescue.persistence` gated.
-2. **Decouple tree scoring from tree collision** (see the treeCollision box above) — unlocks the
-   skill ceiling *without* touching the ghost forest Chad just chose. Self-contained and well-scoped.
+2. ✅ **DONE (S46) — tree scoring decoupled from tree collision.** Needs Chad's eye; see the S46 block.
 3. **Event-driven spawn-on-join** — READY, was held back so it couldn't muddy the render probe. That
    probe is done, so this is unblocked. The 1.906s to the Birds folder is purely GameServer's 2s poll
    cadence; `onPlayerAdded` does not spawn. Worth ≤2s of dead air.
@@ -133,7 +130,66 @@ live and unverified by his eye; they are the top of the next session's agenda:
 5. `leaderstats` — the platform-native scoreboard every Roblox player looks for; no seam exists today.
    Rides along with Phase C (same numbers, one packet).
 
+### 🌲 S46 — B4.2: TREE STYLE SCORING, decoupled from tree COLLISION (LIVE, needs Chad's eye)
+Queue item 2, built autonomously. `Rescue.treeStyleScoring = true` (kill switch; `false` is provably
+byte-identical to pre-S46 — the index is never even built). **The ghost forest is untouched**: no tree
+became queryable, `BirdCollision` / the swept sphere / the kernel / camera / aim law were not touched,
+and a gate asserts `treeCollision` is still `"off"` so collision can never sneak back in via scoring.
+- **Mechanism:** the scorer stopped asking the raycast fan (which cannot see `CanQuery=false` parts)
+  and got its own source — canopy **positions** in a `SpatialHash`, scored by `RescueRules.shellCloseness`.
+- **⚠️ THE RED-TEAM BLOCK THAT REWROTE THIS PACKET — do not "simplify" it back.** My first version used
+  `max(0, centreDist - radius)`, which returns 0 everywhere **inside** a canopy ⇒ closeness 1.0 through
+  the whole crown. Trees are GHOSTS, so that pays **maximum for barging straight through a tree** and
+  less for threading between them — an exact inversion of the mechanic, and it would have pinned
+  `styleMult` at its 3.0 cap on nearly every catch (the grove disc saturates, and every treetop perch
+  approach flies through it). **The line is the canopy SURFACE:** distance is `|centreDist - radius|`,
+  falling off on BOTH sides. `tests/rescuerules.spec.luau` has this as "THE INVERSION GATE".
+- **Also caught by red-team:** a Roblox **Ball's radius is half its SMALLEST axis**, not half X.
+  Canopies are `Size=(d, d*0.8, d)`, so `Size.X/2` would have scored a sphere **25% wider than the one
+  drawn** — an invisible skirt, i.e. an actual feel lie. `RescueRules.canopyRadius` does it right.
+- **Own knobs on purpose:** `treeStyleProxDist=16`, `treeStyleSweetSpot=3`. `styleProxDist=40` was tuned
+  for a 10-ray fan against BIG terrain; reusing it for ~170 overlapping 45-stud balls would drown the
+  ground line-riding feel Chad already signed off. **Tune trees there, never in `styleProxDist`.**
+- **Race closed:** the client waits for `RescueWorld`'s server-published `CanopyCount` before building
+  its build-once index. Scanning a half-replicated forest would bake in a short one permanently and
+  silently, per client — the invisible class S44/S45 burned two sessions on.
+- **Verify:** Tier-4 **200/200** (was 193; 7 new gates), rojo PASS, register headroom 20 → **19** (floor 8).
+  luau-lsp FAIL is **pre-existing** — confirmed by stashing this change and re-running: byte-identical
+  16 findings, zero new. **All 5 new gates were mutation-tested and each was killed by its own named
+  test** (inversion, radius, flag-deleted, radius-inlined, count-dropped).
+- ▶ **CHAD'S PLAYTEST ASK (this is the whole point — I cannot judge it):**
+  1. Fly fast and **skim the top of a grove's crowns** → the STYLE bar should climb hard.
+  2. Fly the same speed **straight through the middle** of those canopies → it should climb *much less*.
+     If plowing pays as well as skimming, the inversion is back and `treeStyleScoring=false` reverts it.
+  3. **Does the catch beat still ESCALATE?** `styleMeter` also drives the camera (pull-in, cant, FOV,
+     desat) — that is by design, but if every catch now looks like the biggest one, `treeStyleProxDist`
+     is too generous. This is the one knob I'd expect to want tuning.
+  4. Ground/mesa line-riding should feel **exactly as before** — that path is untouched.
+
 ### 🚨 Landmines — real, unfixed, deliberately deferred
+- **🆕 CYLINDER PARTS ARE BUILT ON THE WRONG AXIS (S46, found while indexing trees — NOT fixed).**
+  A Roblox `Cylinder`'s axis is **local X** (`Size.X` = length, Y/Z = cross-section). Four sites pass
+  height in **Y** and then *also* apply the stand-up rotation `CFrame.Angles(0,0,rad(90))`, so the
+  intended height becomes the cross-section. Same file proves the correct convention at
+  `RescueServer:185` (`UpdraftColumn`, height first). Sites + the one-line fix:
+  - `RescueServer:144` `Trunk` `(7, h, 7)` → `(h, 7, 7)` — trunks are **7 studs tall and h wide**, i.e.
+    pancakes, with the canopy floating at `crownY`. (h = 60–115.)
+  - `RescueServer:166` `Mesa` `(rad, padY/6+2, rad)` → `(padY/6+2, rad, rad)`
+  - `RescueServer:171` `SafePad` `(200, 6, 200)` → `(6, 200, 200)`
+  - `RescueServer:179` `RimPool` `(120, 4, 120)` → `(4, 120, 120)`
+  ⚠️ **Mesa/SafePad/RimPool are `CanQuery=true`, so the EXISTING style scorer already rays against
+  malformed geometry** — whoever tunes `styleProxDist` next is tuning against a wall, not a pad. It
+  also explains why `updateDeliver`'s crowd seating needs its `deliverPadY + 6` raycast fallback
+  (`BirdController:~2605`): seats past ±22 studs in X miss the "pad" entirely. It works by accident.
+  **Deferred because it is a VISIBLE world change Chad did not ask for** — fixing it will alter the
+  look of the trees and the waterfall mesa, so it needs his say-so, not a silent commit. B4.2 sidesteps
+  it entirely by indexing canopy **Balls** only (a Ball is a true sphere on any axis).
+- **⚠️ SOP (S46): never mutation-test with PowerShell `Get-Content`/`Set-Content`.** PS 5.1 reads
+  UTF-8-without-BOM as Windows-1252 and writes UTF-8 **with** BOM, so a read-mutate-restore harness
+  silently mojibaked 161 comment characters across 3 source files and added BOMs — a 254-line diff
+  ballooned to 863. Caught by diffing `--stat` against the intent, repaired via `git checkout` + re-apply.
+  Use `[System.IO.File]::ReadAllText` / `WriteAllText` with `UTF8Encoding($false)`, and **always
+  `git diff --stat` after a scripted edit** — the tests stayed green throughout the corruption.
 - **A 2nd player joining destroys the rescue round.** Nothing in GameServer is gated on
   `Rescue.enabled`; player #2 is auto-assigned **Crows**, which starts the combat round and calls
   **`clearBirds` on everyone** mid-round. **Detonates the first time Chad tests with his kid.**
