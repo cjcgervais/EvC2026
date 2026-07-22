@@ -572,6 +572,20 @@ function RescueRules.surfaceKind(name)
 	return "feather"
 end
 
+--------------------------------------------------------------------------------
+-- beatActive — is a sacred presentation beat running right now?
+-- The codebase's rule for "never stomp a beat" is THREE flags (see the pose ladder): the slow-mo
+-- catch, any crew catch still in flight, and the hop-off tally ceremony. A first attempt at the
+-- terrain-oof suppression checked only `catch` and was rightly blocked — crew-catch timers outlive
+-- the sacred beat and the hop-off ceremony is its own protected ritual.
+--------------------------------------------------------------------------------
+function RescueRules.beatActive(catchActive, crewCount, hopOffActive)
+	if catchActive then return true end
+	if (crewCount or 0) > 0 then return true end
+	if hopOffActive then return true end
+	return false
+end
+
 function RescueRules.catchChime(cfg, ridersAfter, capacity)
 	cfg = cfg or {}
 	if cfg.chimeEveryCatch then

@@ -752,3 +752,20 @@ H.test("B4.1 ships INERT: treeCollision is off (the ghost forest, byte-identical
 	H.eq(GameConfig.Rescue.treeCollision, "off",
 		"treeCollision must ship off — solid trees are a Chad-flown feel question, one word to enable")
 end)
+
+--------------------------------------------------------------------------------
+-- "Never stomp a beat" — the three-flag predicate behind the terrain-oof
+-- suppression. A first attempt checked only `catch` and was red-team BLOCKED:
+-- crew-catch timers outlive the sacred beat and hop-off is its own ritual.
+--------------------------------------------------------------------------------
+H.test("beatActive: ALL THREE sacred beats suppress, not just the slow-mo catch", function()
+	H.eq(RescueRules.beatActive(nil, 0, nil), false, "no beat running → the oof is free to fire")
+	H.eq(RescueRules.beatActive({}, 0, nil), true, "the slow-mo catch is a beat")
+	H.eq(RescueRules.beatActive(nil, 1, nil), true, "a crew catch STILL IN FLIGHT is a beat (it outlives the catch)")
+	H.eq(RescueRules.beatActive(nil, 3, nil), true, "several crew catches count")
+	H.eq(RescueRules.beatActive(nil, 0, {}), true, "the hop-off tally ceremony is a beat")
+	H.eq(RescueRules.beatActive({}, 2, {}), true, "all at once still suppresses")
+	-- falsy inputs must never be read as truthy beats (the bug that would silence the oof forever)
+	H.eq(RescueRules.beatActive(false, 0, false), false, "explicit false flags are not beats")
+	H.eq(RescueRules.beatActive(nil, nil, nil), false, "a nil crew count is zero, not a permanent beat")
+end)

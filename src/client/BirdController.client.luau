@@ -3299,7 +3299,16 @@ local function onFlightStep(dt)
 		-- redundant anyway: onFlightStep runs only for THIS client's possessed bird, which in rescue is the eagle.
 		local rescueOn = GameConfig.Rescue and GameConfig.Rescue.enabled and GameConfig.Rescue.nonLethalTerrain
 		if rescueOn and (RES and RES.bounceEnabled ~= false) then
-			eligibleHit = hitInfo
+			-- NEVER STOMP A BEAT: a treetop clip during the GOTCHA (or a crew leap, or the hop-off
+			-- tally) must not throw a full-screen OOF and a 2s daze halo over the ritual. Suppression
+			-- happens HERE, by withholding the hit — a red-team BLOCK caught an earlier version that
+			-- guarded only the feather burst, AFTER BounceFX.step had already built the GUI, set the
+			-- daze and eaten the cooldown. Withholding also re-arms the graze gap, which is what we
+			-- want: the first bonk after the beat reads as a fresh hard contact.
+			-- The SLIDE is untouched either way — the trajectory stays honest, only the show is held.
+			if not RescueRules.beatActive(catch, #crewCatches, hopOff) then
+				eligibleHit = hitInfo
+			end
 		end
 	end
 	-- TERRAIN oof (B3): BounceFX advances the world-space daze halo + runs the debounced hard-contact gate
