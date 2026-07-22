@@ -85,6 +85,14 @@ warble it as you pan).
   (Studio → Toolbox → Audio). Chad's *"didn't hear any squirrels"* was NOT a bug — squeaks were simply
   unbuilt. Both mechanisms are done and gated; they go live the moment an id exists.
 
+- **⑦ CHAD'S CHIME FIX + B4.1 + the beat guard.** The catch chord now rings **once at a full 10/10 load**
+  instead of on every squirrel (`RescueRules.catchChime`; `chimeEveryCatch=true` restores the old).
+  **B4.1 solid trees is BUILT and INERT** (`Rescue.treeCollision="off"`): the "lethal tree" fear was
+  structurally impossible all along — `nonLethalTerrain` already forces both crash gates to 1e9, so a solid
+  tree is a graze-slide surface, never a killer. Flipping it to `"full"` also retargets the existing style
+  meter onto tree-skimming for free. And the terrain oof no longer stomps a sacred beat (catch / crew catch /
+  hop-off) — it is suppressed by withholding the hit, so no full-screen OOF over a GOTCHA.
+
 **▶ TWO THINGS ARE WAITING ON CHAD (nothing else is blocked):**
 1. **The Play** — Stage 3a + 3c are LIVE and unflown (checklist above). His verdict also decides whether Stage
    **3b** (world-dims-orange) is built or **CUT**: it is the only Stage-3 channel that can fight the legibility
