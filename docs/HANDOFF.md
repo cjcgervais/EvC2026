@@ -16,21 +16,39 @@ to scoop squirrels onto your back, carry up to 10, deliver at the waterfall. 2-m
 shelved *by player count, not by config*; see the landmine list. Chad's S42 verdict on the core loop
 was **"addictive and fun… actually fun!"** — **do not re-litigate the loop.**
 
-### 🔴 THE ONE THING BLOCKING PROGRESS — Chad must fly the probe
-**"Everything renders in so slow" is UNRESOLVED.** S44 blamed the boot intermission, shipped the fix,
-and Chad flew it: **still slow.** That explanation is **falsified and closed.** The reason it was wrong:
-BootDiag measured when instances **EXIST**, not when they are **DRAWN** — different clocks.
-**The probe that separates them is already in the build (`Rescue.bootDiag` is true) and has never been
-flown.** One flight prints `StreamingEnabled`, the quality level, and descendant counts at
-t=1/5/10/20/30s, which decides between streaming-bound / replication-bound / render-quality-bound.
-Plus a 60-second A/B: **Esc → Settings → Graphics Mode → Manual → max**, re-fly.
-**⚠️ NAMED TRAP: do not ship another timeline "fix" before that flight.** That is exactly what S44 did.
-Ruled out already by counting: **~1,400 Workspace instances and ZERO external assets** (no meshes,
-textures or decals ⇒ nothing is downloading). Leading suspect is quality-scaled draw distance
-(*inferred, not measured*). Verdict on the obvious fix: **keep `StreamingEnabled` OFF** — nothing to
-defer at that instance count, and every gameplay-critical object would need `Persistent` anyway.
-⚠️ `GameServer:266`'s `pcall(Workspace.StreamingEnabled = false)` is a **silent no-op** (not scriptable
-at runtime), so the live session's true value is unverified until the probe prints it.
+### 🔴 "RENDERS IN SLOW" — the probe FLEW. It is **RENDERING**, not replication or streaming.
+S44 blamed the boot intermission and shipped a fix; Chad re-flew and it was **still slow**, so that
+explanation is **falsified and closed** (BootDiag measured when instances EXIST, not when they are
+DRAWN). The probe has now flown and the numbers settle it. **Chad's flight, 2026-07-21:**
+```
+[client] 0.001s  workspace.StreamingEnabled = false   |  graphics quality: ?
+[client] t=01s   RescueWorld=249  Squirrels=0    Map=211  Birds=-1
+[client] t=05s   RescueWorld=249  Squirrels=660  Map=211  Birds=134
+[client] t=10s   RescueWorld=249  Squirrels=616  Map=211  Birds=134
+[client] t=20s   RescueWorld=249  Squirrels=660  Map=211  Birds=134
+```
+**Read it:** `StreamingEnabled = false` ⇒ **streaming is RULED OUT.** `RescueWorld=249` on the CLIENT at
+**t=1s** and flat forever after — matching the server's 249 — ⇒ **every tree is fully replicated one
+second in and the counts NEVER climb.** `Map=211` = the original 78 + S45b's 133 ground patches, also
+flat from t=1s. Squirrels populate at 1.324s exactly as designed. **Per the probe's own decision rule
+(counts climbing = replication; counts present but invisible = rendering): the geometry is all there
+and the engine is not DRAWING it.** Also ruled out earlier: ZERO external assets (nothing downloads),
+and **Studio cold-cache** — Chad's back-to-back Play/Stop/Play was *"just as slow"* on the second run.
+
+**REMAINING SUSPECT, now the only one standing: quality-scaled render distance.** Roblox's Automatic
+graphics mode starts conservative and ramps, and draw distance scales with the level — parts present
+but not drawn until the level climbs or you fly closer. **The probe printed `graphics quality: ?`**
+because both properties were read inside ONE pcall, so a single missing property blinded the whole
+read. **S45c fixes that** (per-property pcalls, and quality is now sampled at EVERY mark — a level that
+CLIMBS while the counts stay FLAT is the complete diagnosis).
+**▶ NEXT: (a) Chad re-flies for the quality trace, and (b) the 30-second A/B — Esc → Settings →
+Graphics Mode → Manual → max, re-fly.** Ground present immediately at max ⇒ convicted; the fix is then
+to cut the GPU pressure that holds auto-quality down (the audit's costed list: **78 shadow-casting Map
+parts** — `addPart` never clears `CastShadow` while RescueServer's builder always does — plus the
+6000×18000 Glass sea with Reflectance 0.25, and a BloomEffect over 4 Neon 220×2200 beacons).
+⚠️ Note `GameServer:266`'s `pcall(Workspace.StreamingEnabled = false)` is a **silent no-op** (read-only
+at runtime) — harmless now that the probe confirms the place file already has it off, but it proves
+nothing and should not be cited as if it did.
 
 ### Shipped this session, awaiting Chad's eyes (all LIVE, all kill-switched)
 1. **🧭 The wayfinder** (`Rescue.wayfindEmpty`) — the gold ribbon now points at the nearest squirrel when

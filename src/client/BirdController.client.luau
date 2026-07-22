@@ -1277,13 +1277,20 @@ task.spawn(function()
 	-- level and with it how far Roblox will draw parts, which pops trees/squirrels in as you approach.
 	-- The counts below are the decider: parts PRESENT but invisible = rendering; counts CLIMBING over
 	-- time = replication. One flight, no more guessing.
-	local q = "?"
-	pcall(function()
-		local ugs = UserSettings():GetService("UserGameSettings")
-		q = ("saved=%s master=%s"):format(tostring(ugs.SavedQualityLevel), tostring(ugs.MasterQuality))
-	end)
-	_G.EvCBoot(("workspace.StreamingEnabled = %s   |  graphics quality: %s   (client-side truth)")
-		:format(tostring(streaming), q))
+	-- S45c: the first version read SavedQualityLevel and MasterQuality inside ONE pcall, so a single
+	-- missing property poisoned the whole read and printed "?" — blinding us on the one variable that
+	-- still mattered after streaming came back false. Each property now gets its OWN pcall.
+	local function prop(obj, name)
+		local ok, v = pcall(function() return obj[name] end)
+		return ok and tostring(v) or "n/a"
+	end
+	local function qualityNow()
+		local ok, ugs = pcall(function() return UserSettings():GetService("UserGameSettings") end)
+		if not ok or not ugs then return "unreadable" end
+		return ("saved=%s quality=%s"):format(prop(ugs, "SavedQualityLevel"), prop(ugs, "GraphicsQualityLevel"))
+	end
+	_G.EvCBoot(("workspace.StreamingEnabled = %s   |  graphics: %s   |  GlobalShadows=%s   (client-side truth)")
+		:format(tostring(streaming), qualityNow(), prop(Lighting, "GlobalShadows")))
 	if streaming then
 		warn("[BootDiag] STREAMING IS ON. This is the cause: parts arrive as you fly toward them, and no"
 			.. " runtime script can turn it off (the assignment is read-only once the game is running)."
@@ -1297,8 +1304,11 @@ task.spawn(function()
 			local f = workspace:FindFirstChild(name)
 			return f and #f:GetDescendants() or -1
 		end
-		_G.EvCBoot(("t=%02ds  RescueWorld=%d  Squirrels=%d  Map=%d  Birds=%d  (descendants the CLIENT can see)")
-			:format(mark, n("RescueWorld"), n("Squirrels"), n("Map"), n("Birds")))
+		-- Quality is sampled EVERY mark, not once: Roblox's Automatic mode RAMPS the level over the first
+		-- tens of seconds, and a level that climbs while the counts stay flat is the whole diagnosis —
+		-- the parts were always there and the engine simply widened how far it would draw them.
+		_G.EvCBoot(("t=%02ds  RescueWorld=%d  Squirrels=%d  Map=%d  Birds=%d  |  %s")
+			:format(mark, n("RescueWorld"), n("Squirrels"), n("Map"), n("Birds"), qualityNow()))
 	end
 end)
 
