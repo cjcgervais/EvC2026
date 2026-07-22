@@ -4,7 +4,7 @@ Read this first. It tells the next agent exactly where the project stands, the o
 
 ---
 
-## ▶▶ COLD START — READ THIS FIRST (current as of S45b close, 2026-07-21)
+## ▶▶ COLD START — READ THIS FIRST (current as of S46 close, 2026-07-22)
 
 *The session sections below are the historical log, newest first. **This box is the authoritative
 current state.** The older "COLD START — Session 32" box further down is superseded; ignore its queue.*
@@ -16,7 +16,11 @@ to scoop squirrels onto your back, carry up to 10, deliver at the waterfall. 2-m
 shelved *by player count, not by config*; see the landmine list. Chad's S42 verdict on the core loop
 was **"addictive and fun… actually fun!"** — **do not re-litigate the loop.**
 
-### 🔴 "RENDERS IN SLOW" — the probe FLEW. It is **RENDERING**, not replication or streaming.
+### ✅ "RENDERS IN SLOW" — **SOLVED AND CONFIRMED BY CHAD (S45c). History only — skip to the queue.**
+*Kept in full because the three-session arc is the best worked example in this repo of diagnosing the
+wrong clock. Nothing here is open. If you are cold-starting to do work, jump to "Queue, in order".*
+
+### 🔴 (historical) the probe FLEW. It is **RENDERING**, not replication or streaming.
 S44 blamed the boot intermission and shipped a fix; Chad re-flew and it was **still slow**, so that
 explanation is **falsified and closed** (BootDiag measured when instances EXIST, not when they are
 DRAWN). The probe has now flown and the numbers settle it. **Chad's flight, 2026-07-21:**
@@ -73,9 +77,12 @@ bug.** The thing that finally worked was measuring the right clock and asking Ch
 at runtime) — harmless now that the probe confirms the place file already has it off, but it proves
 nothing and should not be cited as if it did.
 
-### Shipped in S45, LIVE and kill-switched — the FIRST thing to ask Chad next session
-The render saga ate the session, so **only the render fix has actually been judged.** These four are
-live and unverified by his eye; they are the top of the next session's agenda:
+### 🎯 SEVEN CHANGES ARE LIVE AND UNJUDGED — this is the FIRST thing to do next session
+**Chad has not flown anything since the render fix.** Five shipped in S45 (the render saga ate that
+session) and two more in S46, all built autonomously and all kill-switched. **One flight clears the
+whole backlog** — it is by far the cheapest value available, and nothing below should be built on top
+of unjudged work. Items 6–7 are the S46 pair; their full detail + playtest asks are in the S46 blocks
+further down. ⚠️ **6 and 7 interact** — see the note under item 7.
 1. **🧭 The wayfinder** (`Rescue.wayfindEmpty`) — the gold ribbon now points at the nearest squirrel when
    your talons are empty. It was gated on carrying ≥1, i.e. **dark at every moment anyone is lost.**
    *Ask: from spawn, does it tell you where to go within a frame? Does it ever strobe between groves?*
@@ -89,6 +96,16 @@ live and unverified by his eye; they are the top of the next session's agenda:
 4. **💎 The sky gem** is now LIVE too (below) — *Ask: does it ever occlude a critter up close? The spec
    says it geometrically cannot; if it does, that is a real bug.*
 5. NaN score guard · FireVisuals smolder-pool teardown leak — no player-facing test needed.
+6. **🌲 B4.2 tree style scoring** (`Rescue.treeStyleScoring`) — canopy-threading finally pays, without
+   any tree becoming solid. *Ask: does SKIMMING the crowns out-score flying THROUGH them? And does the
+   catch beat still ESCALATE, or does every catch now look like your biggest one?*
+7. **🛠️ S46 cylinder axis fix** (`Rescue.cylinderAxisFix`) — trunks were 7-stud pancakes and the safe
+   pad was a wall; both are now the shapes they were meant to be. *Ask: does the deliver run feel like
+   arriving somewhere? Are any saved squirrels standing on the rim pool?*
+   ⚠️ **6 and 7 are entangled by Chad's own choice.** He was offered three sequencings and picked
+   "ship live now", knowing the cylinder fix reshapes the mesa/pad/pool — which are `CanQuery=true` and
+   feed the style meter's ray fan. **So B4.2's original control ("mesa line-riding feels exactly as
+   before") is VOID.** Judge B4.2 on GROVE behaviour (skim vs plow), not on the waterfall.
 
 ### Flag decisions Chad made at the S45c close — both are now settled, don't re-open them
 - ✅ **`Rescue.skyGem = true` — LIVE.** He flew it: *"yes on gems."* The spec that used to assert it
@@ -111,8 +128,9 @@ live and unverified by his eye; they are the top of the next session's agenda:
   each needs a Toolbox asset id pasted (both print a 30-second how-to in Output at boot).
 
 ### Queue, in order
-0. **Get Chad's verdict on the five LIVE-but-unjudged changes above.** They shipped and the render
-   saga consumed the session before he could judge any of them. Cheapest value in the queue.
+0. **Get Chad's verdict on the SEVEN live-but-unjudged changes above.** Two sessions of autonomous
+   work is now stacked up behind one flight. Cheapest value in the queue by a wide margin, and
+   everything below risks building on unjudged ground.
 1. **PHASE C — progression/levels.** ⭐ **Chad's standing #1 directive since S42** ("Definately need to
    have levels unlock"). *He was offered a start at the S45c close and chose to wrap up instead — so
    this is NOT yet explicitly green-lit; confirm before building.* Nothing persists today (no DataStore
@@ -120,7 +138,13 @@ live and unverified by his eye; they are the top of the next session's agenda:
    first unlock inside 5 minutes (~400 acorns) so round 2 has a reason to exist** — the 2,500-acorn
    valley gate is a 4th-session reward and fatal as the first rung. Increment 1 = pure `Progression`
    module + DataStore wrapper + total-acorns HUD line + that one unlock, `Rescue.persistence` gated.
-2. ✅ **DONE (S46) — tree scoring decoupled from tree collision.** Needs Chad's eye; see the S46 block.
+2. **🌊 REVIVE THE WATERFALL UPDRAFT** — ⭐ *strongest technical candidate, and newly urgent.*
+   `Rescue.updraftStrength = 210` is read by **NOTHING** in `src/` (grep-confirmed): the column is pure
+   decor and applies zero force. That was always true, but S46's geometry fix makes it matter — the
+   deliver run now clears the pad rim (~y 258) instead of slipping through the old thin mesa blades at
+   ~230, and the updraft is precisely the mechanic meant to carry you up there. **It is the causal
+   partner of the change just shipped**, it is self-contained, and it restores a designed payoff beat
+   rather than inventing a new one. Client-side force (the column position is already built).
 3. **Event-driven spawn-on-join** — READY, was held back so it couldn't muddy the render probe. That
    probe is done, so this is unblocked. The 1.906s to the Birds folder is purely GameServer's 2s poll
    cadence; `onPlayerAdded` does not spawn. Worth ≤2s of dead air.
@@ -210,6 +234,17 @@ that 4-vs-4 split inside one codebase is what proved it a typo pattern, not a st
   as a pointer: the class is now closed by `uprightCylinder`, and `compile.spec` asserts
   `Enum.PartType.Cylinder` appears **exactly once** in `RescueServer` so no hand-rolled cylinder can
   reintroduce it.
+- 🆕 **Two S46 placement follow-ups, exposed (not caused) by the cylinder fix — logged, not bundled.**
+  Both were invisible while those parts were walls, and both are cosmetic:
+  - **The rim pool is now a pond on the pad centre.** `RimPool` is radius 60 centred on `deliverPos`,
+    2 studs proud of the pad. Crowd seats live in the annulus `crowdRadiusMin=45`…`crowdRadiusMax=85`,
+    so seats between r=45 and r=60 (~30% of the annulus area) now land on **water**. Surgical fix:
+    move the pool to the waterfall lip, or raise `crowdRadiusMin` to 60.
+  - **~3% of under-canopy perches now sit inside a trunk.** `plantPerchTree` offsets them uniformly by
+    ±20 in XZ at y = 22–38; with a real trunk (radius 3.5 spanning y 0→h) any offset with |dx|,|dz|
+    both < 3.5 is inside wood. Trunks are `CanQuery=false`, so this is **visual occlusion only** — but
+    "I can't see the squirrels" is the S44 complaint class, and the sky gem descends into the trunk
+    with the critter. Surgical fix: a polar offset with `r = 8 + rng*12`.
 - 🆕 **`updraftStrength = 210` IS AN ORPHAN — the waterfall updraft applies NO FORCE.** Confirmed by
   grep: nothing in `src/` reads it. This was always true, but the S46 geometry fix makes it matter —
   the deliver run now clears the pad rim (~y 258) instead of passing through the old thin mesa blades
