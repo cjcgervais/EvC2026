@@ -945,3 +945,49 @@ H.test("beatActive: ALL THREE sacred beats suppress, not just the slow-mo catch"
 	H.eq(RescueRules.beatActive(false, 0, false), false, "explicit false flags are not beats")
 	H.eq(RescueRules.beatActive(nil, nil, nil), false, "a nil crew count is zero, not a permanent beat")
 end)
+
+--------------------------------------------------------------------------------
+-- S44 — THE FIRST INTERMISSION. Chad: "it just takes a while at the start for everything
+-- to render." The BootDiag answered it on the first flight: world built in 4ms, bird in
+-- hand at 1.906s, valley EMPTY until squirrels populated in one frame at 6.228s. Nothing
+-- rendered slowly — the valley was empty on purpose for the whole boot intermission.
+--------------------------------------------------------------------------------
+H.test("first intermission: round #1 is SHORT (boot dead air), every later round keeps the breather", function()
+	local R = GameConfig.Rescue
+	local first = RescueRules.phaseDuration(R, "intermission", 1)
+	local later = RescueRules.phaseDuration(R, "intermission", 2)
+	H.ok(first < later,
+		("round #1 intermission (%.1fs) must be shorter than the between-rounds breather (%.1fs) — that gap"
+			.. " IS the empty valley Chad flew into"):format(first, later))
+	H.ok(first <= 2.0, ("boot dead air is %.1fs — the world builds in 0.004s, so this is all wait"):format(first))
+	for i = 2, 6 do
+		H.eq(RescueRules.phaseDuration(R, "intermission", i), R.intermission or 6,
+			("round #%d must keep the full between-rounds intermission — the post-results breather is WANTED"):format(i))
+	end
+end)
+
+H.test("first intermission: omitting roundIndex is byte-identical to the old signature", function()
+	local R = GameConfig.Rescue
+	-- every pre-S44 caller passes two args; none of them may change behaviour.
+	for _, ph in ipairs({ "intermission", "active", "grace", "results", "nonsense" }) do
+		H.eq(RescueRules.phaseDuration(R, ph), RescueRules.phaseDuration(R, ph, nil),
+			ph .. ": the 2-arg call must be identical to passing a nil roundIndex")
+	end
+	H.eq(RescueRules.phaseDuration(R, "intermission"), R.intermission or 6,
+		"a caller that never heard of roundIndex still gets the full intermission")
+	-- and with the knob absent entirely, round #1 falls back to the flat value (config-only revert)
+	local noKnob = table.clone(R)
+	noKnob.firstIntermission = nil
+	H.eq(RescueRules.phaseDuration(noKnob, "intermission", 1), R.intermission or 6,
+		"clearing firstIntermission must restore the flat 6s everywhere — a config-only revert")
+end)
+
+H.test("first intermission: the OTHER phases are untouched (no collateral retiming)", function()
+	local R = GameConfig.Rescue
+	for _, ph in ipairs({ "active", "grace", "results" }) do
+		H.eq(RescueRules.phaseDuration(R, ph, 1), RescueRules.phaseDuration(R, ph, 9),
+			ph .. " must not depend on the round index — only the boot intermission changes")
+	end
+	H.eq(RescueRules.phaseDuration(R, "active", 1), R.roundLength or 120,
+		"the round itself must still be the full length on round #1")
+end)

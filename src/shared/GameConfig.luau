@@ -839,6 +839,14 @@ GameConfig.Rescue = {
 	-- milestones on BOTH sides, and the answer is in the Output. Zero behaviour when false.
 	bootDiag         = true,   -- prints [BootDiag/server] and [BootDiag/client] milestone timings.
 	                           -- Turn OFF once the startup cause is named.
+	-- …and it WAS named, first flight. The server builds the whole world in 4 MILLISECONDS; then the
+	-- valley sits deliberately EMPTY for the whole 6s intermission while the player already has a bird
+	-- (Birds folder at 1.906s) and nothing to fly at. All 15 squirrels then appear in ONE frame at
+	-- 6.228s — which is exactly what "it takes a while at the start for everything to render" looks
+	-- like from the cockpit. Nothing was rendering slowly; the world was empty ON PURPOSE.
+	-- Between rounds that pause is right (it is the breather after the results screen). At BOOT there
+	-- is no previous round to break from, so it is dead air. Set nil to restore the flat 6s everywhere.
+	firstIntermission = 1.0,   -- s; the FIRST intermission after a server boot only (round #1).
 	sfxDiag          = false,  -- true → every one-shot prints "[SFXDiag] event class vol pitch carry/cap" to
 	                           -- Output. The audio channel is the one subsystem that never had a diagnostic,
 	                           -- which is how six guess-cycles happened; ONE flight now NAMES the sound.

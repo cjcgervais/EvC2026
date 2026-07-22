@@ -351,9 +351,20 @@ end
 -- active=R.roundLength(120), grace=R.buzzerGrace(4), results=R.resultsHold(8).
 RescueRules.PHASES = { "intermission", "active", "grace", "results" }
 
-function RescueRules.phaseDuration(cfg, phase)
+-- `roundIndex` (optional, 1-based) exists for ONE reason: the FIRST intermission after a server boot.
+-- S44 BootDiag, Chad "it just takes a while at the start for everything to render" — the timestamps
+-- named it exactly: the world builds in 4 MILLISECONDS, then the valley sits DELIBERATELY EMPTY for
+-- the full 6s intermission while the player already has a bird (~1.9s in) and nothing to fly at.
+-- Squirrels then all appear in one frame at 6.2s, which reads as "everything rendered in late".
+-- Between rounds that pause is right — it is the breather after the results screen. At BOOT there is
+-- no previous round to break from, so it is pure dead air. Callers that don't pass roundIndex get
+-- the old behaviour exactly.
+function RescueRules.phaseDuration(cfg, phase, roundIndex)
 	cfg = cfg or {}
 	if phase == "intermission" then
+		if roundIndex == 1 and cfg.firstIntermission then
+			return cfg.firstIntermission
+		end
 		return cfg.intermission or 6
 	elseif phase == "active" then
 		return cfg.roundLength or 120

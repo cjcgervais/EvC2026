@@ -1236,7 +1236,7 @@ local triageBucket = 0
 local function RescueRoundLoop()
 	bootStamp("round loop entered")
 	resolveMission()
-	bootStamp("mission resolved: " .. tostring(mission.id or mission.name or "?"))
+	bootStamp("mission resolved: " .. tostring(R.activeMission or "?"))
 	buildWorld()
 	bootStamp("world built (trees + waterfall)")
 	squirrelsFolder = Instance.new("Folder")
@@ -1252,15 +1252,22 @@ local function RescueRoundLoop()
 		RunService.Heartbeat:Connect(stepFox)
 	end
 
+	local roundIndex = 0
 	while true do
 		-- INTERMISSION
+		roundIndex += 1
 		phase = "intermission"
-		timeLeft = RescueRules.phaseDuration(R, "intermission")
+		-- roundIndex is passed for ONE reason: the FIRST intermission after boot is dead air (the world
+		-- builds in 4ms, the player has a bird by ~1.9s, and the valley stays EMPTY until 6.2s — the
+		-- S44 BootDiag named this as Chad's "takes a while at the start for everything to render").
+		-- Between rounds the pause is correct; at boot there is no previous round to break from.
+		timeLeft = RescueRules.phaseDuration(R, "intermission", roundIndex)
 		clearSquirrels()
-		bootStamp(("INTERMISSION begins (%.0fs) — the valley is now EMPTY of squirrels"):format(timeLeft))
+		bootStamp(("INTERMISSION #%d begins (%.1fs) — the valley is now EMPTY of squirrels")
+			:format(roundIndex, timeLeft))
 		pushAll()
 		while timeLeft > 0 do
-			task.wait(0.5)
+			task.wait(math.min(0.5, timeLeft))
 			timeLeft -= 0.5
 			pushAll()
 		end

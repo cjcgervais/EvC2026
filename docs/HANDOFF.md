@@ -108,7 +108,29 @@ names the cause.** Turn `bootDiag` off once it is named.
 Also fixed while in there: the two **silent** one-shot `WaitForChild(…,30)` timeouts (audit finding)
 now `warn()` loudly instead of leaving the rescue layer dead with zero console evidence.
 
-### ⑥ Ladder: **Tier-4 166/166 · rojo PASS · luau-lsp 0 NEW (17 pre-existing) · selene UNAVAILABLE(404)**
+### ⑥ ✅ THE STARTUP, NAMED ON THE FIRST FLIGHT (BootDiag output, 2026-07-21)
+```
+0.000s  round loop entered            0.004s  world built (trees + waterfall)
+0.004s  INTERMISSION begins (6s) — the valley is now EMPTY of squirrels
+0.001s  [client] Squirrels folder found (0 already in it)
+1.906s  [client] Birds folder found — bird acquisition can begin
+6.228s  ROUND ACTIVE — all squirrels populated in ONE frame
+```
+**Nothing renders slowly. The server builds the entire world in 4 MILLISECONDS.** The player has a
+bird at **1.9s** and then flies an **empty forest for four more seconds** because the boot intermission
+clears the valley by design; all 15 squirrels then appear in ONE frame at **6.2s**. From the cockpit
+that is precisely *"it takes a while at the start for everything to render."* Cause (c), confirmed —
+and (a) and (b) are both **ruled out by the timestamps**, not by argument.
+
+**Fix:** `Rescue.firstIntermission = 1.0` — the boot intermission ONLY (round #1). Between rounds the
+6s breather is correct and **untouched**: it is the pause after the results screen. Implemented as an
+optional 3rd arg to the pure `RescueRules.phaseDuration(cfg, phase, roundIndex)`, so it is headless-
+gated and every pre-S44 2-arg caller is byte-identical. Set the knob to nil = flat 6s everywhere
+(config-only revert). Gates: round #1 short / rounds #2-6 keep the full breather / the 2-arg call is
+identical to a nil roundIndex / active+grace+results do NOT depend on the round index (no collateral
+retiming). Also fixed the intermission's `task.wait(0.5)` overshoot so a sub-0.5s value is honoured.
+
+### ⑦ Ladder: **Tier-4 169/169 · rojo PASS · luau-lsp 0 NEW (17 pre-existing) · selene UNAVAILABLE(404)**
 
 **▶ CHAD'S PLAY (only he can judge these):**
 ① **The ear:** carry 6+ and keep catching — every catch should land as a *snap/thump*, the crew as
@@ -125,10 +147,10 @@ watch the fire START instead of finding it already burning. Knobs: `maxVisualSmo
 `Fire.smolderTell=false`. ⚠️ If it still feels late, the honest next dial is `Fire.igniteAt` (when the
 burn SEEDS) — NOT `smolderMin/Max`, which would speed the whole front and change the balance.
 
-**▶ NEXT (in order):** **read the [BootDiag] output from Chad's next Play** and fix the named cause of
-"everything takes a while to render at the start" (if it is (c), the fix is to populate the valley
-during intermission / stagger the burst — do NOT reach for a perf fix the lane already ruled out) →
-his Play verdict on the sky gem + the fire timing → **B7-P2** touch proof-of-feel (Chad answered nothing on DRAG vs TAP yet) → **B4** canopy trails
+**▶ NEXT (in order):** **Chad re-flies the startup** — squirrels should now be there by ~1-2s instead of
+6.2s. If it STILL reads slow, the next honest suspect is the **1.906s to the Birds folder** (GameServer's
+solo-spawn loop waits on a 2s cadence) — NOT a render/perf fix, which the timestamps already exclude.
+Then turn `Rescue.bootDiag` OFF. → his verdict on the sky gem + the fire timing → **B7-P2** touch proof-of-feel (Chad answered nothing on DRAG vs TAP yet) → **B4** canopy trails
 → **B5** leap variety → Stage **3b** only if pressure still missing → **PHASE C** persistence/levels.
 
 **▶ DRIFT the audit found (not yet fixed):** `GameConfig:1178` claims ember_valley is "INERT-by-default"
