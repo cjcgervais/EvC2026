@@ -29,9 +29,14 @@ an engine; first look is M2. Gate-V checklist items accrued (see ledger S49 tail
 spawn-core closure cue (the S45 GroundDetail scatter is NOT in worldV2 — uniform disc risks the old
 featureless plane), a Studio smoke should confirm the applier builds terrain, and Gate V flies the P3
 edge. →
-**M2 (NEXT)** the eyes (screenshot harness, old V2 spec verbatim, pointed at the new world — `worldV2`
-already ON). Note M2's gate ("produce a sheet Fable can audit") realistically needs Chad's Studio to
-run the run-in-roblox capture, so M2 is a Chad-adjacent boundary, not a pure-autonomous packet. → **M3**
+**M2 ✅ HARNESS BUILT S49 (committed; capture pending Chad's run).** `tools/Capture-World.ps1` +
+`tests/capture/world.capture.luau` build the worldV2 valley in EDIT mode and screenshot 8 fixed vantages
+(stdout `M2READY` + 2.5s dwell, since run-in-roblox is one-way; TERRAIN+LIGHTING only — set-dressing is
+edit-mode-dormant). Tier-4 223/223. **▶ CHAD, to advance:** run
+`powershell -NoProfile -ExecutionPolicy Bypass -File tools\Capture-World.ps1` (lands PNGs in
+`captures\S49\`), OR just boot Studio to eyeball M1. **Open Q the run resolves:** does the EDIT-mode
+Studio viewport follow the scripted `workspace.CurrentCamera`? If the shots are the editor default view,
+the fallback is one recorded flythrough. Once a sheet exists → **M3** Fable image-iterates it. → **M3**
 Fable image-iterates the look → **Gate V-LOOK** (Chad ratifies from screenshots in chat; the mesh-source
 question is asked THERE with a recommendation) → **M4** mesh props (blocked on that answer) → **M5**
 polish → **M6** audio → **Gate V** (the ONE flight).

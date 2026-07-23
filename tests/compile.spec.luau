@@ -310,6 +310,39 @@ H.test("S46: the four fixed sites pass AXIAL FIRST — this is the bug, pinned b
 	H.ok(fox and not fox:find("legacyAxis"), "FoxFlare was always correct — it must not pass legacyAxis()")
 end)
 
+--------------------------------------------------------------------------------
+-- M2 (Phase V) CAPTURE HARNESS WIRING — source gates in the S45c tradition. The screenshot
+-- harness itself needs Studio + a display, so it is NOT machine-gated here; what IS gated is that
+-- the two pieces are actually WIRED — the injected edit-mode script builds the real WorldGen world
+-- and signals capture, and the PowerShell orchestrator reads that signal and screenshots. A future
+-- edit that guts either half (so the sheet is empty or of the wrong world) fails a red test instead
+-- of a session. compile.spec already reads source via @lune/fs, which reaches tools/ + tests/capture/.
+--------------------------------------------------------------------------------
+
+H.test("M2 wiring: the edit-mode capture script builds the WorldGen world and signals each shot", function()
+	local src = fs.readFile("tests/capture/world.capture.luau")
+	H.ok(src:find("WorldGen%.build") ~= nil,
+		"world.capture.luau no longer calls WorldGen.build — the sheet would capture no world (or the " ..
+		"wrong one). M2 look-devs the WorldGen valley specifically; build() must run in edit mode.")
+	H.ok(src:find("M2READY") ~= nil,
+		"world.capture.luau no longer prints the M2READY sentinel — Capture-World.ps1 tails stdout for it, " ..
+		"so with no sentinel the orchestrator captures nothing (the stdout channel is the ONLY sync path).")
+	H.ok(src:find("VANTAGES") ~= nil,
+		"world.capture.luau no longer has a VANTAGES table — the 8 committed vantage poses (hardening ③, " ..
+		"a reviewable diff) are gone, so no session can be held to a fixed frame set.")
+end)
+
+H.test("M2 wiring: Capture-World.ps1 tails the sentinel, launches run-in-roblox, and screenshots", function()
+	local ok, ps = pcall(fs.readFile, "tools/Capture-World.ps1")
+	H.ok(ok and ps ~= nil, "tools/Capture-World.ps1 is missing — the M2 orchestrator does not exist.")
+	H.ok(ps:find("M2READY") ~= nil,
+		"Capture-World.ps1 no longer tails the M2READY sentinel — it would never know when to capture.")
+	H.ok(ps:find("run%-in%-roblox") ~= nil or ps:find("Bootstrap%-RunInRoblox") ~= nil,
+		"Capture-World.ps1 no longer bootstraps/launches run-in-roblox — it can't drive Studio headlessly.")
+	H.ok(ps:find("CopyFromScreen") ~= nil,
+		"Capture-World.ps1 no longer calls CopyFromScreen — nothing actually grabs the Studio window pixels.")
+end)
+
 H.test("B4.2 glue: the index waits for the server's published canopy count", function()
 	local src = codeOnly(fs.readFile("src/client/BirdController.client.luau"))
 	H.ok(src:find("CanopyCount") ~= nil,

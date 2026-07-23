@@ -421,7 +421,15 @@ cap unchanged; tree part count reviewed at C3 (art pass) with an explicit instan
   perches, discs) — Terrain itself cannot z-fight. Measured for the record: terrain fill
   wall-clock; client join/replication delta with `StreamingEnabled=false`; memory.
   `[model: opus | gate: tests (datum + water-P3 + canopy + drift + Part-coplanarity + contract)]`
-- **M2 — THE EYES (screenshot harness).** `tools/Capture-World.ps1`: build place → launch
+- **M2 — THE EYES (screenshot harness). ✅ HARNESS BUILT S49 (commit-ready; capture pending Chad's run).**
+  Built `tools/Capture-World.ps1` + `tests/capture/world.capture.luau` (edit-mode WorldGen.build + 8
+  committed vantages + stdout `M2READY`/dwell capture). Design deviation (documented): run-in-roblox is
+  one-way stdout only, so a stdout signal + 2.5s dwell replaces the impossible bidirectional sentinel-file
+  ack. Scope = TERRAIN+LIGHTING only (edit-mode .server dormant → no groves/waterfall/critters; correct for
+  M1/M3). Tier-4 223/223, rojo PASS. **Open empirical Q (Chad's run): does the EDIT-mode viewport follow
+  `workspace.CurrentCamera`?** If not → the flythrough fallback (⑤). Command: `powershell -NoProfile
+  -ExecutionPolicy Bypass -File tools\Capture-World.ps1`. Original spec below.
+  `tools/Capture-World.ps1`: build place → launch
   Studio via run-in-roblox → script builds the world via WorldGen in EDIT mode, steps
   `workspace.CurrentCamera` through 8 standard vantage points (spawn, 600-stud overview,
   grove interior, waterfall approach, dive line, fire line, delivery run, horizon) →
