@@ -56,6 +56,36 @@ end
 -- build() — ENGINE ONLY. Template cache keyed per mesh id so a dead id costs one pcall for the whole
 -- session (module-scope upvalue: persists across every MeshFactory.build call, i.e. the whole boot).
 --------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+-- uniqueMeshIds(manifestProps) -> array of unique meshId strings. PURE — no Instances, no services,
+-- just walks an AssetManifest.props-shaped table ({ role = { variant, ... }, ... }) collecting every
+-- part.meshId exactly once. Sorted so the return is deterministic (lune-testable).
+--------------------------------------------------------------------------------
+function MeshFactory.uniqueMeshIds(manifestProps)
+	local seen = {}
+	local ids = {}
+	if type(manifestProps) ~= "table" then
+		return ids
+	end
+	for _, variants in pairs(manifestProps) do
+		if type(variants) == "table" then
+			for _, variant in ipairs(variants) do
+				if type(variant) == "table" and type(variant.parts) == "table" then
+					for _, part in ipairs(variant.parts) do
+						local id = part.meshId
+						if type(id) == "string" and id ~= "" and not seen[id] then
+							seen[id] = true
+							ids[#ids + 1] = id
+						end
+					end
+				end
+			end
+		end
+	end
+	table.sort(ids)
+	return ids
+end
+
 local templateCache = {} -- meshId -> { kind = "mesh"|"part", template = Instance }
 
 local function getTemplate(meshId)
@@ -82,6 +112,44 @@ local function getTemplate(meshId)
 	end
 	templateCache[meshId] = rec
 	return rec
+end
+
+--------------------------------------------------------------------------------
+-- prewarm(meshIds) — ENGINE ONLY. Fires one task.spawn per unique meshId, each calling the same
+-- getTemplate() path above (pcall'd, cached per mesh id in the shared templateCache) so the ~N CDN
+-- round-trips overlap in parallel instead of serializing one-by-one behind every MeshFactory.build call
+-- (S50 audit FIX 2: boot speed). Waits until every spawn reports done or a 15s deadline, whichever
+-- first. Returns (successCount, total) so a caller can log how many templates actually resolved. The
+-- per-call getTemplate() path (inside build()) stays as the cache-hit/fallback for anything prewarm
+-- missed (a late-added meshId, a timeout, or a caller that never prewarmed).
+--------------------------------------------------------------------------------
+local PREWARM_DEADLINE_S = 15
+
+function MeshFactory.prewarm(meshIds)
+	if type(meshIds) ~= "table" or #meshIds == 0 then
+		return 0, 0
+	end
+
+	local total = #meshIds
+	local completed = 0
+	local successCount = 0
+
+	for _, meshId in ipairs(meshIds) do
+		task.spawn(function()
+			local ok, rec = pcall(getTemplate, meshId)
+			if ok and rec and rec.kind == "mesh" then
+				successCount += 1
+			end
+			completed += 1
+		end)
+	end
+
+	local start = os.clock()
+	while completed < total and (os.clock() - start) < PREWARM_DEADLINE_S do
+		task.wait()
+	end
+
+	return successCount, total
 end
 
 -- build(variant, cf, targetHeight, parent, anchorBase) -> the Model it built, or nil if unusable.

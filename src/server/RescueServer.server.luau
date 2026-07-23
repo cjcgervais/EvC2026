@@ -1414,6 +1414,20 @@ local function RescueRoundLoop()
 	bootStamp("round loop entered")
 	resolveMission()
 	bootStamp("mission resolved: " .. tostring(R.activeMission or "?"))
+	-- S50 audit FIX 2: fire every unique mesh template's CDN fetch in ONE parallel batch before buildWorld
+	-- mints ~68 trees + scatter props one-by-one — each of those calls to MeshFactory.build would otherwise
+	-- serialize its own getTemplate() round-trip behind the last. This is the single earliest point that
+	-- covers the full AssetManifest.props set (trees AND scatter roles), so it's the one prewarm call.
+	do
+		local ok, successCount, total = pcall(function()
+			return MeshFactory.prewarm(MeshFactory.uniqueMeshIds(AssetManifest.props))
+		end)
+		if ok then
+			bootStamp(("mesh templates prewarmed: %s/%s"):format(tostring(successCount), tostring(total)))
+		else
+			warn("[Boot] MeshFactory.prewarm failed: " .. tostring(successCount))
+		end
+	end
 	buildWorld()
 	bootStamp(("world built (trees + waterfall) — RescueWorld has %d descendants SERVER-side")
 		:format(#worldFolder:GetDescendants()))
