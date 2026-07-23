@@ -161,7 +161,7 @@ local function buildRim()
 		-- M3 rim restyle (a): the inner face reads consistently Rock (no Slate stripe alternation —
 		-- that alternation was the "vertical striping" the audit flagged).
 		local mat = "Rock"
-		blocks[#blocks + 1] = { x = px, z = pz, y = h / 2 - 40, sx = w, sy = h + 80, sz = w, yaw = -a, mat = mat, crest = h, ad = ad }
+		blocks[#blocks + 1] = { x = px, z = pz, y = h / 2 - 20, sx = w, sy = h + 40, sz = w, yaw = -a, mat = mat, crest = h, ad = ad }
 	end
 
 	local OUTER_R, OUTER_N = 4900, 40
@@ -173,7 +173,7 @@ local function buildRim()
 		local px, pz = math.cos(a) * OUTER_R, math.sin(a) * OUTER_R
 		local w = (2 * math.pi * OUTER_R) / OUTER_N * 1.6
 		local mat = "Rock"
-		blocks[#blocks + 1] = { x = px, z = pz, y = h / 2 - 40, sx = w, sy = h + 80, sz = w, yaw = -a, mat = mat, crest = h, ad = ad }
+		blocks[#blocks + 1] = { x = px, z = pz, y = h / 2 - 20, sx = w, sy = h + 40, sz = w, yaw = -a, mat = mat, crest = h, ad = ad }
 	end
 
 	-- M3 rim restyle (b): snow caps only the TOP ~30% of peaks by crest height (a real 70th-percentile
@@ -681,7 +681,7 @@ local function assembleOps(rimBlocks, rimSnow, rimTalus, rimFoot, paintCells, wa
 	-- Part, built in plan.parts and applied by WorldGen.build's cheap Part loop instead of sculpt(). See
 	-- buildCatchFloorPart() / the `parts` local below in plan().
 	-- 2) FLOOR — the flat grass slab, top at datum Y=0, across the playable bowl.
-	B(0, -40, 0, FLAT_R * 2, 80, FLAT_R * 2, "Grass")
+	B(0, -25, 0, FLAT_R * 2, 50, FLAT_R * 2, "Grass")
 	-- 3) PAINT PATCHWORK (M3) — organic FillCylinder patches, 4 thick, top 0 (replaces both the
 	-- deleted uniform LeafyGrass disc AND the checkerboard FillBlock grid).
 	for _, c in ipairs(paintCells) do
@@ -693,11 +693,11 @@ local function assembleOps(rimBlocks, rimSnow, rimTalus, rimFoot, paintCells, wa
 		local rr = 300
 		B(1150 + math.cos(a) * rr, -2, 0 + math.sin(a) * rr, 130, 4, 130, (i % 2 == 0) and "Mud" or "Ground", -a)
 	end
-	-- 5) APRON — four Ground slabs (Y -40..28) framing r≈4600→±8000 so no void reads past the rim.
-	B(6300, -6, 0, 3400, 68, 16000, "Ground")
-	B(-6300, -6, 0, 3400, 68, 16000, "Ground")
-	B(0, -6, 6300, 9200, 68, 3400, "Ground")
-	B(0, -6, -6300, 9200, 68, 3400, "Ground")
+	-- 5) APRON — four Ground slabs (Y 4..28) framing r≈4600→±8000 so no void reads past the rim.
+	B(6300, 16, 0, 3400, 24, 16000, "Ground")
+	B(-6300, 16, 0, 3400, 24, 16000, "Ground")
+	B(0, 16, 6300, 9200, 24, 3400, "Ground")
+	B(0, 16, -6300, 9200, 24, 3400, "Ground")
 	-- 6) RIM blocks + snow caps + talus + the M3 grass foot band.
 	for _, b in ipairs(rimBlocks) do B(b.x, b.y, b.z, b.sx, b.sy, b.sz, b.mat, b.yaw) end
 	for _, s in ipairs(rimSnow) do B(s.x, s.y, s.z, s.sx, s.sy, s.sz, "Snow") end
@@ -710,7 +710,7 @@ local function assembleOps(rimBlocks, rimSnow, rimTalus, rimFoot, paintCells, wa
 	-- 8) WATER — LAST, so it carves through the floor/paint. Each carve is Air → Rock floor → Water.
 	local function carveCyl(x, z, radius, surf, floor)
 		local floorBase = floor - 20
-		C(x, (floorBase + (surf + 2)) / 2, z, (surf + 2) - floorBase, radius, "Air")
+		C(x, (floor + (surf + 2)) / 2, z, (surf + 2) - floor, radius, "Air")
 		C(x, (floorBase + floor) / 2, z, floor - floorBase, radius, "Rock")
 		C(x, (floor + surf) / 2, z, surf - floor, radius, "Water")
 	end
@@ -719,7 +719,7 @@ local function assembleOps(rimBlocks, rimSnow, rimTalus, rimFoot, paintCells, wa
 		local len = math.sqrt((x2 - x1) ^ 2 + (z2 - z1) ^ 2) + hw * 2
 		local yaw = math.atan2(z2 - z1, x2 - x1)
 		local floorBase = floor - 30
-		B(mx, (floorBase + (surf + 2)) / 2, mz, len, (surf + 2) - floorBase, hw * 2, "Air", yaw)
+		B(mx, (floor + (surf + 2)) / 2, mz, len, (surf + 2) - floor, hw * 2, "Air", yaw)
 		B(mx, (floorBase + floor) / 2, mz, len, floor - floorBase, hw * 2, "Rock", yaw)
 		B(mx, (floor + surf) / 2, mz, len, surf - floor, hw * 2, "Water", yaw)
 	end
@@ -740,7 +740,7 @@ local function assembleOps(rimBlocks, rimSnow, rimTalus, rimFoot, paintCells, wa
 			local sx, sz = reg.maxX - reg.minX, reg.maxZ - reg.minZ
 			local floorBase = body.floorY - 40
 			local carveTop = body.surfaceY + 2
-			B(cx, (floorBase + carveTop) / 2, cz, sx, carveTop - floorBase, sz, "Air")
+			B(cx, (body.floorY + carveTop) / 2, cz, sx, carveTop - body.floorY, sz, "Air")
 			B(cx, (body.floorY + floorBase) / 2, cz, sx, body.floorY - floorBase, sz, "Rock")
 			B(cx, (body.floorY + body.surfaceY) / 2, cz, sx, body.surfaceY - body.floorY, sz, "Water")
 			-- Coast bluff: a Ground lip (Y -2..28) along the east sea edge (X = maxX).
