@@ -551,8 +551,15 @@ end
 -- APPLIERS — touch Terrain / Lighting / Workspace. Called ONLY by GameServer + the M2 harness.
 --------------------------------------------------------------------------------
 -- sculpt(terrain, plan) → a dumb interpreter over plan.sculptOps.
+-- YIELDS every YIELD_EVERY ops: the ~554 Terrain fills run too long in one synchronous stretch and
+-- Roblox kills the script for "exhausted allowed execution time" (Chad's S49 boot hit exactly this at
+-- WorldGen:555). task.wait() resets the execution-time budget so no single stretch trips the guard; the
+-- terrain just builds progressively over a handful of frames (invisible at boot; nothing downstream —
+-- CreateThermals/Remotes, RescueWorld — depends on the terrain being finished first). Not called by the
+-- lune tests (they exercise plan() only), so this engine-only yield can't touch Tier-4.
+local YIELD_EVERY = 24
 function WorldGen.sculpt(terrain, plan)
-	for _, o in ipairs(plan.sculptOps) do
+	for i, o in ipairs(plan.sculptOps) do
 		local m = Enum.Material[o.mat]
 		if o.op == "B" then
 			terrain:FillBlock(CFrame.new(o.x, o.y, o.z) * CFrame.Angles(0, o.yaw or 0, 0), Vector3.new(o.sx, o.sy, o.sz), m)
@@ -563,6 +570,7 @@ function WorldGen.sculpt(terrain, plan)
 		elseif o.op == "L" then
 			terrain:FillBall(Vector3.new(o.x, o.y, o.z), o.rad, m)
 		end
+		if i % YIELD_EVERY == 0 then task.wait() end
 	end
 end
 
