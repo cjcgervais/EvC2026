@@ -1312,6 +1312,20 @@ task.spawn(function()
 	end
 end)
 
+-- Red-team FIX 2 (kept from the original probe): origin+200 down 400 studs can't reach the valley
+-- floor (Y=0..-80) from cruise altitude — a false negative during ordinary high flight. Cast from
+-- well above any reachable altitude, deep enough to always cross the floor. Hoisted to a top-level
+-- helper (was a closure-local inside the [BootClock/client] probe below) so the WORLD-DRAWN GATE
+-- (S51, further down) can reuse the exact same DRAWN/queryable proxy instead of re-deriving it.
+local function terrainColliding()
+	local origin = (rootPart and rootPart.Position) or (workspace.CurrentCamera and workspace.CurrentCamera.CFrame.Position) or Vector3.new(0, 0, 0)
+	local rp = RaycastParams.new()
+	rp.FilterType = Enum.RaycastFilterType.Include
+	rp.FilterDescendantsInstances = { workspace.Terrain }
+	local hit = workspace:Raycast(origin + Vector3.new(0, 500, 0), Vector3.new(0, -2500, 0), rp)
+	return hit ~= nil
+end
+
 -- S51 [BootClock/client] — a LIGHTWEIGHT, always-on version of the probe above (not gated behind
 -- RES.bootDiag): the verbose probe only prints for developers who opted in, so a live "map is broken
 -- again" report has nothing to grep. Three compact lines at t=5/15/30s — part counts (exist) PLUS a
@@ -1338,17 +1352,6 @@ task.spawn(function()
 		local okLive, live = pcall(function() return ugs.GraphicsQualityLevel end)
 		local okSaved, saved = pcall(function() return ugs.SavedQualityLevel end)
 		return (okLive and live ~= nil) and live or nil, (okSaved and saved ~= nil) and saved or nil
-	end
-	-- Red-team FIX 2: origin+200 down 400 studs can't reach the valley floor (Y=0..-80) from cruise
-	-- altitude — a false negative during ordinary high flight. Cast from well above any reachable
-	-- altitude, deep enough to always cross the floor.
-	local function terrainColliding()
-		local origin = (rootPart and rootPart.Position) or (workspace.CurrentCamera and workspace.CurrentCamera.CFrame.Position) or Vector3.new(0, 0, 0)
-		local rp = RaycastParams.new()
-		rp.FilterType = Enum.RaycastFilterType.Include
-		rp.FilterDescendantsInstances = { workspace.Terrain }
-		local hit = workspace:Raycast(origin + Vector3.new(0, 500, 0), Vector3.new(0, -2500, 0), rp)
-		return hit ~= nil
 	end
 	for _, mark in ipairs({ 5, 15, 30 }) do
 		while (os.clock() - _G.EvCBootT0) < mark do task.wait(0.25) end
@@ -3788,6 +3791,11 @@ end
 -- can WaitForChild the Body part while the Model is still replicating in.
 local function acquire()
 	if not currentProfile then return end
+	-- S51 WORLD-DRAWN GATE (defined further below, after reacquire()): hold acquisition — and with it
+	-- control enable, since isAlive/flightEngine only ever get set inside this function — until the
+	-- gate has confirmed the world is actually DRAWN, not merely spawned. The gate calls reacquire()
+	-- itself the moment it releases, so this is a pure no-op wait, not a dropped acquisition.
+	if not _G.EvCWorldDrawnGateOpen then return end
 	local target = findMyPossessedBird()
 	if target == birdModel and isAlive then return end
 
@@ -3866,6 +3874,103 @@ local function reacquire()
 		if not ok then warn("[EvC] acquire() error: " .. tostring(err)) end
 	end)
 end
+
+--------------------------------------------------------------------------------
+-- S51 WORLD-DRAWN GATE — Chad's live boot: the client went flyable at 2.09s while Studio was still
+-- rendering terrain for ~30 more seconds, and he flew straight into INVISIBLE terrain at 258 speed.
+-- acquire() (above) already refuses to proceed until _G.EvCWorldDrawnGateOpen is true; this block is
+-- the ONLY thing that ever flips it. Everything below is scoped inside a single task.spawn closure
+-- (not main-chunk locals) — BirdController is already hard against Luau's 200-local cap.
+--
+-- Gate, ALL required, in order:
+--   1. workspace:GetAttribute("WorldReady") == true — GameServer sets this after WorldGen.build.
+--   2. terrainColliding() (the same DRAWN/queryable raycast proxy the [BootClock/client] probe uses)
+--      true across 2 checks 1s apart — a render-settle margin against a single lucky/unlucky frame.
+--   3. A further fixed 2s grace for the async mesher (M2's measured settle window).
+-- Then the loading overlay tweens out and acquire() is allowed to run for real. A 90s client-side
+-- hard cap releases anyway (warn) so a pathological world never strands the player behind black —
+-- the 120s RescueServer clientReadyWait timeout is the outer backstop.
+--------------------------------------------------------------------------------
+_G.EvCWorldDrawnGateOpen = false
+
+task.spawn(function()
+	local TweenService = game:GetService("TweenService")
+
+	-- Full-screen black loading overlay, code-built to match GameUI's conventions (UI.font /
+	-- Color3.fromRGB white text) without coupling to the GameUI module (kept local on purpose).
+	local overlay = Instance.new("ScreenGui")
+	overlay.Name = "WorldDrawnGateOverlay"
+	overlay.IgnoreGuiInset = true
+	overlay.ResetOnSpawn = false
+	overlay.DisplayOrder = 1000
+	overlay.Parent = playerGui
+
+	local backdrop = Instance.new("Frame")
+	backdrop.Name = "Backdrop"
+	backdrop.Size = UDim2.fromScale(1, 1)
+	backdrop.BackgroundColor3 = Color3.new(0, 0, 0)
+	backdrop.BackgroundTransparency = 0
+	backdrop.BorderSizePixel = 0
+	backdrop.ZIndex = 1000
+	backdrop.Parent = overlay
+
+	local label = Instance.new("TextLabel")
+	label.Name = "Label"
+	label.Size = UDim2.fromScale(0.8, 0.15)
+	label.Position = UDim2.fromScale(0.5, 0.5)
+	label.AnchorPoint = Vector2.new(0.5, 0.5)
+	label.BackgroundTransparency = 1
+	label.Font = GameConfig.UI.font
+	label.TextScaled = true
+	label.TextColor3 = Color3.fromRGB(255, 255, 255)
+	label.Text = "Building the forest..."
+	label.ZIndex = 1001
+	label.Parent = overlay
+
+	local t0 = os.clock()
+
+	-- Condition 1: WorldReady.
+	while not workspace:GetAttribute("WorldReady") and (os.clock() - t0) < 90 do
+		task.wait(0.25)
+	end
+	local worldReadyAt = os.clock() - t0
+
+	-- Condition 2: terrainColliding() held true across 2 checks 1s apart.
+	while (os.clock() - t0) < 90 do
+		if terrainColliding() then
+			task.wait(1)
+			if terrainColliding() then break end
+		else
+			task.wait(0.25)
+		end
+	end
+	local drawnAt = os.clock() - t0
+
+	-- Condition 3: a further fixed 2s grace for the async mesher, still respecting the hard cap.
+	local graceEnd = os.clock() + 2
+	while os.clock() < graceEnd and (os.clock() - t0) < 90 do
+		task.wait(0.1)
+	end
+
+	if (os.clock() - t0) >= 90 and not (workspace:GetAttribute("WorldReady") and terrainColliding()) then
+		warn("[WorldDrawnGate] released on timeout")
+	end
+
+	print(string.format("[WorldDrawnGate] released at %.2fs (worldReady=%.2fs drawn=%.2fs)",
+		os.clock() - _G.EvCBootT0, worldReadyAt, drawnAt))
+
+	_G.EvCWorldDrawnGateOpen = true
+
+	-- Tween the overlay out (0.5s), then destroy it, then let control actually start.
+	local tween = TweenService:Create(backdrop, TweenInfo.new(0.5, Enum.EasingStyle.Quad), { BackgroundTransparency = 1 })
+	local labelTween = TweenService:Create(label, TweenInfo.new(0.5, Enum.EasingStyle.Quad), { TextTransparency = 1 })
+	tween:Play()
+	labelTween:Play()
+	tween.Completed:Wait()
+	overlay:Destroy()
+
+	reacquire()
+end)
 
 -- Watch ownership/possession flips on EVERY bird Model (not just ones we already own) so crow-swaps,
 -- auto-repossess, AND the very first possession re-acquire. Attributes replicate SEPARATELY from the
