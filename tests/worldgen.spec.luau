@@ -483,3 +483,32 @@ H.test("source-gate: every MeshFactory.build call site sets Anchored/CanCollide/
 		H.ok(src:find(flag, 1, true) ~= nil, ("MeshFactory.build must set %s on every part it creates"):format(flag))
 	end
 end)
+
+--------------------------------------------------------------------------------
+-- M4-V review fix #1 (rng-stream isolation): the mesh-visual pine/variant picks in buildTree must
+-- draw from a dedicated position-derived meshRng, NEVER the shared round `rng` — a shared-rng draw
+-- there would shift every later rng:Next* call, making trunk/canopy/perch layout and CanopyCount
+-- diverge flag-on vs flag-off for Map.meshTrees. Pin the SHAPE: extract the mesh-swap block and
+-- assert it contains no draw on the shared `rng` (case-sensitive: "meshRng:" does not match "rng:").
+--------------------------------------------------------------------------------
+H.test("source-gate: the meshTrees mesh-pick path never draws from the shared round rng", function()
+	local src = require("@lune/fs").readFile("src/server/RescueServer.server.luau")
+	local startI = src:find("trunk%.Transparency%s*=%s*1")
+	local endI = src:find("MeshFactory%.build%(variant", startI)
+	H.ok(startI ~= nil and endI ~= nil, "expected the meshTrees mesh-swap block (trunk.Transparency=1 .. MeshFactory.build) to be present")
+	local block = src:sub(startI, endI)
+	H.ok(block:find("rng:") == nil, "the mesh-visual pick block must not draw from the shared round `rng` — use a position-derived meshRng instead")
+	H.ok(block:find("meshRng") ~= nil, "the mesh-visual pick block must use a dedicated meshRng derived from the tree position")
+end)
+
+--------------------------------------------------------------------------------
+-- M4-V review fix #2 (boot-yield hardening, S49 crash class): each planted tree can mint up to ~10
+-- mesh parts, so an un-yielded loop across the grove+backdrop tree budget is the same script-timeout
+-- shape that crashed WorldGen's 554-fill terrain sculpt (docs: reference-worldgen-p3-catch-floor).
+-- Pin that the planting loops yield periodically, mirroring WorldGen's every-24-ops rule.
+--------------------------------------------------------------------------------
+H.test("source-gate: the grove/backdrop tree-planting loops yield periodically (S49 boot-crash class)", function()
+	local src = require("@lune/fs").readFile("src/server/RescueServer.server.luau")
+	H.ok(src:find("task%.wait%(%)") ~= nil, "the tree-planting loops must call task.wait() periodically to avoid a script-timeout boot crash")
+	H.ok(src:find("%% 8 == 0") ~= nil, "the yield must trigger on a fixed cadence (every 8 trees, mirroring WorldGen's every-N-ops rule)")
+end)

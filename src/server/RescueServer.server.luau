@@ -197,10 +197,20 @@ local function buildTree(pos, pineBias)
 	-- still sit in the mesh crown.
 	if meshTrees then
 		trunk.Transparency = 1
-		local isPine = rng:NextNumber() < (pineBias or 0.15)
+		-- rng-stream isolation: the mesh-visual picks (pine-vs-leafy, which variant) must NEVER draw from
+		-- the shared round rng object — doing so shifts every later draw taken from it, making the whole
+		-- forest layout (trunk/canopy/perch positions, CanopyCount) diverge flag-on vs flag-off. Derive a
+		-- private deterministic stream from the tree's own position instead: same tree, same pos, same
+		-- mesh pick, every run — and zero draws taken from the shared stream.
+		local hx = math.floor((pos.X % 1000000) * 73856093) % (2 ^ 31)
+		local hz = math.floor((pos.Z % 1000000) * 19349663) % (2 ^ 31)
+		local seed = (hx + hz) % (2 ^ 31)
+		if seed ~= seed or seed == math.huge then seed = 0 end -- guard NaN/inf pos
+		local meshRng = Random.new(seed)
+		local isPine = meshRng:NextNumber() < (pineBias or 0.15)
 		local variants = isPine and AssetManifest.props.treePine or AssetManifest.props.treeLeafy
 		if variants and #variants > 0 then
-			local variant = variants[rng:NextInteger(1, #variants)]
+			local variant = variants[meshRng:NextInteger(1, #variants)]
 			local targetHeight = math.max(4, topY - pos.Y)
 			-- anchorBase=true: pos.Y is the trunk BASE (the trunk is built at pos + h/2), so the mesh
 			-- must ground its lowest extent there — otherwise its trunk-centre origin sits at pos.Y and
@@ -397,6 +407,17 @@ local function buildWorld()
 	-- its grove index (gi) so cut-off can map grove→squirrels; also stash the grove radius for FireGrid.
 	fireGroveRadius = groveRad
 	local groveTrees = 0
+	-- S49-class boot-yield hardening: each planted tree can create up to ~10 mesh parts (trunk + canopy
+	-- blobs + the M4-B mesh Model), so an un-yielded loop across the grove+backdrop tree budget is the
+	-- same script-timeout shape that crashed WorldGen's 554-fill terrain sculpt. Shared counter across
+	-- both planting loops below; yield every 8 trees, mirroring WorldGen's every-24-ops rule.
+	local plantYieldCount = 0
+	local function plantYieldTick()
+		plantYieldCount += 1
+		if plantYieldCount % 8 == 0 then
+			task.wait()
+		end
+	end
 	for gi, c in ipairs(groveCentres) do
 		for _ = 1, perchPerGrove do
 			-- disc-uniform offset within groveRad
@@ -405,6 +426,7 @@ local function buildWorld()
 			local pos = Vector3.new(c.X + math.cos(a) * r, 0, c.Z + math.sin(a) * r)
 			plantPerchTree(pos, gi)
 			groveTrees += 1
+			plantYieldTick()
 		end
 	end
 
@@ -420,6 +442,7 @@ local function buildWorld()
 		if mesaTooClose(pos) then continue end
 		buildTree(pos, 0.45)   -- no perch: pure backdrop; mixes in more pines than groves (mesh visual only)
 		placed += 1
+		plantYieldTick()
 	end
 
 	-- B4.2 — publish the authoritative canopy count so the CLIENT's style index can tell "fully
