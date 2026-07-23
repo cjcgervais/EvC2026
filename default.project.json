@@ -55,6 +55,9 @@
       },
       "WorldGen": {
         "$path": "src/shared/WorldGen.luau"
+      },
+      "AssetManifest": {
+        "$path": "src/shared/AssetManifest.luau"
       }
     },
 

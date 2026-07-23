@@ -46,6 +46,7 @@ local MODULES = {
 	CrowdLayout   = "src/shared/CrowdLayout.luau",
 	GroundDetail  = "src/shared/GroundDetail.luau",
 	WorldGen      = "src/shared/WorldGen.luau",
+	AssetManifest = "src/shared/AssetManifest.luau",
 }
 
 -- Preload every source string (before any luau.load; fs yields).
