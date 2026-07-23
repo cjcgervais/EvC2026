@@ -6,6 +6,22 @@ Read this first. It tells the next agent exactly where the project stands, the o
 
 ## ▶▶ S50 COLD START — FABLE-LED BUILD (current; supersedes the S48/S49 box below, kept as history)
 
+**S50b FULL-GAME AUDIT (Chad-requested, 4 parallel Opus auditors + fix batch, all verified):** 6 fixes
+landed `ac2ac8b..c08e8ee` — ① Remotes now created BEFORE the pcall'd `WorldGen.build` (legacy fallback
+on failure; kills the black-screen class BOTH auditors found independently: any build error/slow CDN
+used to hang every client forever on a no-timeout WaitForChild) ② all ~27 unique mesh CDN fetches
+prewarm in ONE parallel batch (`MeshFactory.prewarm`, was 3-6s serialized at boot) ③ the S49
+extent+volume fill gate now covers Cylinder/Wedge/Ball ops (was FillBlock-only — latent boot-killer)
+④ per-prop pcall guards (one bad manifest entry = one missing prop, never a dead boot) ⑤ stale combo
+banner reset at round start ⑥ scene-COMPOSITE particle rail: fire 1384 + waterfall 412 + sparkles 448
++ ambient 148 = **2392 alive vs the spec's old fire-only 1600 mobile ceiling — the likely "renders in
+slow" mechanism**; pinned at 2400 (0.3% headroom BY DESIGN — growth forces a decision; mobile
+knockdown deferred to B7). Verified clean by the audit: asset-ID provenance, RescueRules single-source,
+mesh-layer contracts (CanopyCount/perches/B4.2), anti-cheat, P3 non-lethal, fire pooling. Known-open
+(reported, deliberate): getTemplate check-then-act double-fetch (benign leak), `_ScratchTele` dev
+backdoor (inert in live, delete before publish), empty roar/squeak SFX id lists (features silent by
+design until ids picked), mobile input (B7). Tier-4 **263/263**.
+
 **Chad's directive (S50):** the Opus-led `/master-loop` §8 model wasn't working — **Fable now leads
 the build directly.** Sonnet = writer/builder subagents, Opus = verifier subagents; fully automated,
 no mid-run Chad prompts; free Roblox creator-store assets, swappable; one build, one map level; ping
