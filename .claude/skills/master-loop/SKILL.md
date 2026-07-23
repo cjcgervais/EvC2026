@@ -148,9 +148,12 @@ Adapt to the session's main model; never make Chad `/model`-switch first:
    block: `## ✅ <packet-id> — <title>` with What/why · Change (files:lines) ·
    Design/red-team verdicts · Verify (tiers) · DECIDE · any Tier-5 items pushed
    to the phase-gate checklist.
-7. **CHECKPOINT** — stage a commit-ready state + a 2-line message. **git
-   commit/push stay ASK-gated — never commit unbidden.** One packet = one
-   cohesive checkpoint (A2 may split per its stated commit plan).
+7. **CHECKPOINT** — **COMMIT the packet (Chad S49: commits are NOT ASK-gated —
+   auto-commit each finished/verified packet, do NOT ask; the approval step kept
+   stalling the loop; memory `feedback-git-commits-not-ask-gated`).** Real message
+   (Co-Authored-By line), green on its own, on the working branch (never straight
+   to master). One packet = one cohesive commit (A2 may split per its plan).
+   *Push* stays a surface-at-milestones action, not a per-commit gate.
 8. **DECIDE** — STOP condition fired? If not → next packet (step: re-read
    MASTER-PLAN.md first).
 
@@ -195,8 +198,9 @@ a screenshot could have shown. Checklist ≤ 12 items.
 - **BUDGET** — session FRAME exhausted → stop, report best.
 
 On ANY stop: tree green, ledger + HANDOFF COLD-START refreshed (one `### ▶ S<n>`
-block), commits prepared but un-landed, memory updated per
-`references/memory-and-handoff.md`, and a one-glance "ready for Chad" summary.
+block), each finished packet already COMMITTED (S49 — not left un-landed), memory
+updated per `references/memory-and-handoff.md`, and a one-glance "ready for Chad"
+summary.
 
 ## Failure policy
 
