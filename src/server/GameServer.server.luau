@@ -2185,12 +2185,28 @@ end
 --------------------------------------------------------------------------------
 -- INITIALIZATION  (call order matters; everything below runs once at startup)
 --------------------------------------------------------------------------------
+-- S50 audit FIX 1: Remotes exist BEFORE (and independent of) the world build. WorldGen.build sculpts a
+-- real Terrain valley (~554 fills, yields every 24 ops — S49 boot-crash class) and previously ran
+-- un-pcalled ahead of CreateRemotes/connectRemotes, so a WorldGen exception left every Remote missing
+-- and every client stuck waiting forever. CreateThermals is pure math off GameConfig.Thermals (no
+-- terrain/position sampling — see the per-i loop below), so it moves up with the Remotes.
+CreateThermals()
+CreateRemotes()
+connectRemotes()
+
 -- M1 (Phase V): behind GameConfig.Map.worldV2, WorldGen.build sets the birth contract
 -- (Gravity + StreamingEnabled, matching legacy BuildMap:260/267), sculpts the Terrain valley +
 -- mountain rim + water-with-solid-floors, and applies lighting rig v2. Flag off = the untouched
--- legacy gray-box path. CreateThermals runs unchanged in both branches (its y=0 ring is honoured).
+-- legacy gray-box path (SetupLighting + BuildMap — the exact pair the flag-off branch always ran).
+-- pcall'd: a WorldGen failure now falls back to the legacy world instead of leaving Workspace half-built
+-- with Remotes already up (the client can still join/see a world, even if not the intended one).
 if GameConfig.Map and GameConfig.Map.worldV2 then
-	WorldGen.build(Workspace, GameConfig)
+	local okBuild, errBuild = pcall(WorldGen.build, Workspace, GameConfig)
+	if not okBuild then
+		warn("[Boot] WorldGen.build FAILED: " .. tostring(errBuild) .. " — falling back to legacy world")
+		pcall(SetupLighting)
+		pcall(BuildMap)
+	end
 else
 	-- Kill-switch honesty: the flag-off path clears the worldV2 Terrain (harmless on a legacy boot —
 	-- terrain is already empty and BuildMap rebuilds its own Map folder) so the comment is literally true.
@@ -2198,9 +2214,6 @@ else
 	SetupLighting()
 	BuildMap()
 end
-CreateThermals()
-CreateRemotes()
-connectRemotes()
 
 -- Players already present (Studio play-solo edge case) + future joiners.
 for _, player in ipairs(Players:GetPlayers()) do
