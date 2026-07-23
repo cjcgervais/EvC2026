@@ -2002,9 +2002,11 @@ GameConfig.UI = {
 GameConfig.Perf = {
 	-- scene-wide alive-particle rail; the 1600 mobile ceiling (PARTICLE_BUDGET in perf.spec.luau) is a
 	-- KNOWN gap tracked for the B7 mobile pass — this rail pins today's desktop reality so growth is
-	-- caught. Derivation (S50): fire ~1160 (measured) + waterfall ~412 (RescueServer.server.luau:256-324)
-	-- + squirrel sparkles ~448 (20 concurrent × 22.4, RescueServer.server.luau:547-557) + ambient ~148
-	-- (AmbientFX.client.luau:87-164) ≈ 2168 live; ceiling sits ~10% above.
+	-- caught. Derivation (S50, verifier-corrected): fire 1384 (in-situ measurement, perf.spec test 1)
+	-- + waterfall ~412 (RescueServer.server.luau:256-324) + squirrel sparkles ~448 (20 concurrent ×
+	-- 22.4, RescueServer.server.luau:547-557) + ambient ~148 (AmbientFX.client.luau:87-164) = 2392
+	-- live. The ceiling sits a deliberate 8 particles (0.3%) above: ANY particle growth trips the
+	-- rail and forces an explicit decision — that is the rail's job, not an accident of margin.
 	compositeParticleCeiling = 2400,
 }
 
