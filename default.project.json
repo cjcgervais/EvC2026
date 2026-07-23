@@ -80,6 +80,9 @@
         },
         "GameUI": {
           "$path": "src/client/GameUI.client.luau"
+        },
+        "AmbientFX": {
+          "$path": "src/client/AmbientFX.client.luau"
         }
       }
     },

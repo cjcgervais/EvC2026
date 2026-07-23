@@ -1501,6 +1501,27 @@ GameConfig.Map = {
 	worldV2        = true,
 }
 
+-- AMBIENT ATMOSPHERE — the drifting "burning valley" field (drifting embers, ash, warm motes).
+-- Consumed ONLY by src/client/AmbientFX.client.luau (an isolated client LocalScript; does NOT
+-- touch BirdController / the LOCKED controls, nor GameUI). Purely cosmetic, client-side particles.
+--
+-- LEGIBILITY CONSTRAINT (subordinate to kid-legibility, which is SIGNED OFF and must NOT regress):
+-- these particles are subtle, sparse, peripheral MOOD — never a screen-filling storm. A kid must
+-- still instantly spot a squirrel/beacon through them. Rates/sizes are deliberately low; err toward
+-- too-subtle. Tune DOWN, not up.
+--
+-- KILL SWITCH: enabled=false → AmbientFX early-returns and creates ZERO instances (one-flag revert).
+GameConfig.Ambient = {
+	enabled     = true,   -- master kill switch. false = AmbientFX does nothing, no host part, no emitters.
+	emberRate   = 10,     -- embers/sec (warm orange→amber glowing motes). Keep single digits-ish.
+	ashRate     = 8,      -- ash specks/sec (tiny gray, drifting down).
+	hazeEnabled = true,   -- the very-faint golden haze motes. false = skip that emitter entirely.
+	hazeRate    = 4,      -- haze motes/sec. Larger + extremely transparent (0.85→1). Barely-there.
+	volume      = 320,    -- host-part XZ extent (studs). Emitters emit from this VOLUME around the
+	                      -- camera, NOT a point at the lens, so particles spawn at varied depths and
+	                      -- near-lens/dead-center density stays low. Bigger = sparser/deeper field.
+}
+
 GameConfig.Debug = {
 	soloFlight = true,
 	-- aiCrowOpponents: when a lone HUMAN Eagle is present with no human Crow, spawn a fully
