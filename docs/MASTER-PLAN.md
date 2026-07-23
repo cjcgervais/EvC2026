@@ -384,7 +384,13 @@ cap unchanged; tree part count reviewed at C3 (art pass) with an explicit instan
   the B4.2 race), folder identities clients `WaitForChild` on ("Map", "RescueWorld"), live
   handles (`worldFolder` parents fox flares/squirrels; FireGrid consumes groves+deliverPos),
   Thermals' y=0 ring, injected RNG seed — is M1's birth contract, gated from day one.
-- **M1 — TERRAIN VALLEY + LIGHTING RIG v1 (the heading packet — the map Chad asked for).**
+- **M1 — TERRAIN VALLEY + LIGHTING RIG v1 (the heading packet — the map Chad asked for). ✅ DONE S49 (commit-ready).**
+  Built `src/shared/WorldGen.luau` as a PURE `plan(cfg)` (data — heightAt bowl, water+floors, catch floor,
+  lighting, datumSamples, birth contract) + THIN `build(target,cfg)` applier, behind `Map.worldV2` (default
+  ON). Red-team caught + FIXED a P3 void-death regression (hidden ±8000 catch slab at −120 restores the
+  legacy "solid everywhere" guarantee) + a lake grass-lid + flag-off honesty; Finding 5 (dropped GroundDetail
+  closure cue) deferred to M3. Tier-4 221/221 · rojo PASS · luau-lsp 0 NEW. APPEARANCE unverified (Terrain
+  never engine-built — that's M2's job). Original scope below.
   New pure shared module `src/shared/WorldGen.luau` — a FRESH build, not an extraction —
   behind `GameConfig.Map.worldV2` (kill-switch honesty: `false` restores the untouched legacy
   gray-box path exactly, `Terrain:Clear()` on flag-off; legacy path retained until Gate V

@@ -52,6 +52,9 @@
       },
       "GroundDetail": {
         "$path": "src/shared/GroundDetail.luau"
+      },
+      "WorldGen": {
+        "$path": "src/shared/WorldGen.luau"
       }
     },
 

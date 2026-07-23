@@ -43,6 +43,7 @@ local Boids          = require(ReplicatedStorage:WaitForChild("Boids"))
 local BirdCollision  = require(ReplicatedStorage:WaitForChild("BirdCollision"))
 local SpatialHash    = require(ReplicatedStorage:WaitForChild("SpatialHash"))
 local GroundDetail   = require(ReplicatedStorage:WaitForChild("GroundDetail"))
+local WorldGen       = require(ReplicatedStorage:WaitForChild("WorldGen"))
 
 --------------------------------------------------------------------------------
 -- TUNING CONSTANTS local to the server (combat/collision feel knobs)
@@ -2184,8 +2185,19 @@ end
 --------------------------------------------------------------------------------
 -- INITIALIZATION  (call order matters; everything below runs once at startup)
 --------------------------------------------------------------------------------
-SetupLighting()
-BuildMap()
+-- M1 (Phase V): behind GameConfig.Map.worldV2, WorldGen.build sets the birth contract
+-- (Gravity + StreamingEnabled, matching legacy BuildMap:260/267), sculpts the Terrain valley +
+-- mountain rim + water-with-solid-floors, and applies lighting rig v2. Flag off = the untouched
+-- legacy gray-box path. CreateThermals runs unchanged in both branches (its y=0 ring is honoured).
+if GameConfig.Map and GameConfig.Map.worldV2 then
+	WorldGen.build(Workspace, GameConfig)
+else
+	-- Kill-switch honesty: the flag-off path clears the worldV2 Terrain (harmless on a legacy boot —
+	-- terrain is already empty and BuildMap rebuilds its own Map folder) so the comment is literally true.
+	WorldGen.clear(Workspace)
+	SetupLighting()
+	BuildMap()
+end
 CreateThermals()
 CreateRemotes()
 connectRemotes()

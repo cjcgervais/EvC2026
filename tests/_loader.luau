@@ -45,6 +45,7 @@ local MODULES = {
 	TouchAimAdapter = "src/shared/TouchAimAdapter.luau",
 	CrowdLayout   = "src/shared/CrowdLayout.luau",
 	GroundDetail  = "src/shared/GroundDetail.luau",
+	WorldGen      = "src/shared/WorldGen.luau",
 }
 
 -- Preload every source string (before any luau.load; fs yields).

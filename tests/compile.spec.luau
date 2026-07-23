@@ -181,6 +181,49 @@ H.test("scenery cost: the Sea is not unconditionally Glass-with-Reflectance", fu
 end)
 
 --------------------------------------------------------------------------------
+-- M1 (Phase V) WORLDGEN WIRING — source gates in the S45c tradition. The pure world data is gated
+-- in worldgen.spec, but that suite cannot see the GameServer BRANCH or the build() APPLIER: a
+-- WorldGen that plans a perfect valley but is never wired, or whose applier silently drops the
+-- birth contract (Gravity / StreamingEnabled), leaves every pure gate green while the game boots
+-- broken. codeOnly() strips `--` lines first (the comments below name every symbol these match).
+--------------------------------------------------------------------------------
+
+H.test("M1 wiring: GameServer branches on worldV2 and calls WorldGen.build", function()
+	local src = codeOnly(fs.readFile("src/server/GameServer.server.luau"))
+	H.ok(src:find("GameConfig%.Map.-worldV2") ~= nil or src:find("worldV2") ~= nil,
+		"GameServer no longer branches on GameConfig.Map.worldV2 — the kill switch is inert and the " ..
+		"new world can never boot (or the legacy path can never be restored).")
+	H.ok(src:find("WorldGen%.build") ~= nil,
+		"GameServer no longer calls WorldGen.build — the worldV2 branch would build no world at all.")
+	-- The legacy branch must survive intact until Gate V (the flag-off path).
+	H.ok(src:find("SetupLighting%(%)") ~= nil and src:find("BuildMap%(%)") ~= nil,
+		"the legacy SetupLighting()/BuildMap() branch is gone — flag-off would restore nothing.")
+end)
+
+H.test("M1 wiring: WorldGen.build reproduces the birth contract and sculpts terrain", function()
+	local src = codeOnly(fs.readFile("src/shared/WorldGen.luau"))
+	H.ok(src:find("%.Gravity%s*=") ~= nil,
+		"WorldGen.build no longer sets Gravity — the flight model's gravity contract (BuildMap:260) is dropped.")
+	H.ok(src:find("StreamingEnabled") ~= nil,
+		"WorldGen no longer touches StreamingEnabled — the replication contract (BuildMap:267) is dropped.")
+	H.ok(src:find("Terrain") ~= nil and src:find(":Clear%(%)") ~= nil,
+		"WorldGen.build no longer clears the Terrain — a re-build would stack voxels on the old world.")
+	H.ok(src:find(":FillBlock%(") ~= nil,
+		"WorldGen.build no longer calls Terrain:FillBlock — the valley/rim/water are never sculpted.")
+	H.ok(src:find("Enum%.Material%.Water") ~= nil,
+		"WorldGen no longer fills Material.Water — invariant ② (water bodies) is not built.")
+	-- P3 void-death guard: the catch slab is the only thing standing between a graze off a solid
+	-- edge and the -200 failsafe, and the applier isn't lune-testable — so this source-gate is the
+	-- ONLY machine check that the slab exists, spans ±REACHABLE_RADIUS, and sits at CATCH_FLOOR_Y.
+	H.ok(src:find("CATCH_FLOOR_Y") ~= nil,
+		"WorldGen.sculpt no longer fills a catch slab at CATCH_FLOOR_Y — a graze into a void gap falls " ..
+		"past the -200 failsafe and dies unearned (P3 violation).")
+	H.ok(src:find("REACHABLE_RADIUS") ~= nil,
+		"WorldGen.sculpt's catch slab no longer spans REACHABLE_RADIUS — void gaps outside the grass " ..
+		"square/rim are uncovered again.")
+end)
+
+--------------------------------------------------------------------------------
 -- B4.2 — TREE STYLE SCORING. The pure math is gated in rescuerules.spec, but the pure module cannot
 -- see the CLIENT GLUE: deleting the whole feature from BirdController leaves that suite fully green.
 -- These are source gates on the glue. They read CODE only (codeOnly strips `--` lines) per the S45c

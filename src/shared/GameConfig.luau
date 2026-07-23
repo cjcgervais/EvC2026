@@ -1492,6 +1492,13 @@ GameConfig.Map = {
 	--     SmoothPlastic and costs a fraction.
 	-- false = the pre-S45c look, byte-identical (shadows back on, glass sea back).
 	cheapScenery   = true,
+
+	-- M1 (Phase V) — KILL SWITCH for the Terrain valley + lighting rig v2 (src/shared/WorldGen.luau).
+	-- Defaults ON: the new sculpted Terrain bowl + golden-hour lighting IS the map now (the heading
+	-- requires the published look to visibly change; machine gates protect correctness; Chad flies
+	-- only at gates). false = the untouched legacy gray-box path (SetupLighting + BuildMap) exactly,
+	-- Terrain cleared. One-word revert. Legacy retained until Gate V passes, then deleted.
+	worldV2        = true,
 }
 
 GameConfig.Debug = {

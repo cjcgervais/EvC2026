@@ -18,12 +18,23 @@ sourced; every packet leaves the published look visibly closer.*
 — answer its 3 questions (heading / landfill / plumbing-ratio) in the ledger at every packet pick.
 
 **The queue is MASTER-PLAN §5.5, re-cut S48 (map-first M-series):**
-**M1** Terrain valley + lighting rig v1 — new pure `src/shared/WorldGen.luau` (FRESH build, not an
-extraction), flag `Map.worldV2`, gates: datum + water-P3 + canopy + drift + Part-coplanarity +
-side-effect contract → **M2** the eyes (screenshot harness, old V2 spec verbatim, pointed at the
-new world) → **M3** Fable image-iterates the look → **Gate V-LOOK** (Chad ratifies from
-screenshots in chat; the mesh-source question is asked THERE with a recommendation) → **M4** mesh
-props (blocked on that answer) → **M5** polish → **M6** audio → **Gate V** (the ONE flight).
+**M1 ✅ DONE S49 (commit-ready, uncommitted — ASK).** `src/shared/WorldGen.luau` built: PURE `plan`
+(data) + THIN `build` applier, behind `Map.worldV2` (default ON — new valley is the map now; false =
+untouched legacy path, one-word revert). Terrain valley bowl (flat Y≈0 floor to r=3400, rock rim to
+1800), golden lighting rig, ValleyLake+WestSea with solid floors, and a hidden ±8000 catch slab at
+Y=−120 (red-team caught a P3 void-death regression past the rim — the legacy ±8000 baseplate had
+guaranteed solid-everywhere; the catch slab restores it 80 studs above the −200 failsafe). Tier-4
+**221/221** · rojo PASS · luau-lsp 0 NEW. **APPEARANCE UNVERIFIED** — the Terrain has never rendered in
+an engine; first look is M2. Gate-V checklist items accrued (see ledger S49 tail): M3 must restore a
+spawn-core closure cue (the S45 GroundDetail scatter is NOT in worldV2 — uniform disc risks the old
+featureless plane), a Studio smoke should confirm the applier builds terrain, and Gate V flies the P3
+edge. →
+**M2 (NEXT)** the eyes (screenshot harness, old V2 spec verbatim, pointed at the new world — `worldV2`
+already ON). Note M2's gate ("produce a sheet Fable can audit") realistically needs Chad's Studio to
+run the run-in-roblox capture, so M2 is a Chad-adjacent boundary, not a pure-autonomous packet. → **M3**
+Fable image-iterates the look → **Gate V-LOOK** (Chad ratifies from screenshots in chat; the mesh-source
+question is asked THERE with a recommendation) → **M4** mesh props (blocked on that answer) → **M5**
+polish → **M6** audio → **Gate V** (the ONE flight).
 Read M1's invariants in the plan before building — the water-P3 landmine (①–④) is real.
 
 **Decisions taken by Fable at the S48 consult (`docs/CONSULT-QUALITY-BUILD-STRATEGY.md` — don't
