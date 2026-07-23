@@ -1231,8 +1231,8 @@ GameConfig.Rescue = {
 	catchGateLatency = 0.25,   -- + eagleSpeed × this (studs of fly-past slack; scales with boom-and-zoom speed).
 
 	-- MISSION SELECTOR (Packet-03 §4, queue #15). The active mission from GameConfig.Missions below.
-	-- "waterfall_meadow" = the shipped behavior. Flip this ONE string to switch missions (e.g. to
-	-- "fox_on_the_hill" once THE FOX lands). Every mission field falls back to the current literal, so an
+	-- "ember_valley" = the shipped behavior (S50: the fire round is what Chad flies). Flip this ONE
+	-- string to switch missions (e.g. to "fox_on_the_hill" once THE FOX lands). Every mission field falls back to the current literal, so an
 	-- absent/malformed mission reproduces today's round exactly — the selector is inert by construction.
 	activeMission    = "ember_valley",       -- GATE B (S41, Chad "fire is gone?"): flipped ON the FIRE mission — a
 	                                         -- wind-driven burn sweeps the valley (FireGrid clock + FireVisuals).
@@ -1289,7 +1289,8 @@ GameConfig.Missions = {
 	-- still-stranded squirrels on the SAME Ranger Balloon (P3 non-lethal — no damage path, ever). The fire
 	-- wind is FICTIONAL (shapes the burn only); it NEVER touches FlightPhysics/WIND_BASE/the kernel. This
 	-- mission WAS documented as INERT-by-default ("activeMission STAYS waterfall_meadow"). ⚠️ That has been
-	-- FALSE since the fire shipped: `activeMission = "ember_valley"` above makes THIS the mission you fly.
+	-- FALSE since the fire shipped: `activeMission = "ember_valley"` above makes THIS the mission you fly —
+	-- ember_valley IS the shipped mission now, not an opt-in.
 	-- The same file contradicting itself 100 lines apart is how a next agent mis-attributes a live bug. Same FLY/CATCH/deliver as waterfall_meadow
 	-- (P8: missions change how you FLY, never how you CATCH); only the hazard differs. All dials → GameConfig.Fire.
 	ember_valley = {
@@ -1989,6 +1990,22 @@ GameConfig.UI = {
 	crowAccent = Color3.fromRGB(150, 120, 220),
 	healthBarColor = Color3.fromRGB(90, 200, 110),
 	staminaBarColor = Color3.fromRGB(90, 170, 230),
+}
+
+--------------------------------------------------------------------------------
+-- PERF — S50 audit FIX 6: the composite particle rail. tests/perf.spec.luau's original §3.4 budget
+-- (PARTICLE_BUDGET=1600) only measured the FIRE's own worst-case alive-particle count in isolation.
+-- On a live round the fire never plays alone — the waterfall FX, every squirrel's beacon sparkle, and
+-- AmbientFX's embers/ash/haze all run concurrently, and nothing pinned their SUM. This is a growth stop,
+-- not a knockdown: no emitter rate changes here, the FX are Chad-approved as shipped.
+--------------------------------------------------------------------------------
+GameConfig.Perf = {
+	-- scene-wide alive-particle rail; the 1600 mobile ceiling (PARTICLE_BUDGET in perf.spec.luau) is a
+	-- KNOWN gap tracked for the B7 mobile pass — this rail pins today's desktop reality so growth is
+	-- caught. Derivation (S50): fire ~1160 (measured) + waterfall ~412 (RescueServer.server.luau:256-324)
+	-- + squirrel sparkles ~448 (20 concurrent × 22.4, RescueServer.server.luau:547-557) + ambient ~148
+	-- (AmbientFX.client.luau:87-164) ≈ 2168 live; ceiling sits ~10% above.
+	compositeParticleCeiling = 2400,
 }
 
 return GameConfig

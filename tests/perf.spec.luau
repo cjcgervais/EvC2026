@@ -270,3 +270,58 @@ H.test("§3.4 saved crowd: crowdMax × a real squirrel stays inside the instance
 	end
 	H.eq(lights, 0, "a crowd squirrel must carry no dynamic lights — 24 of them park in one place")
 end)
+
+--------------------------------------------------------------------------------
+-- 6) SCENE-COMPOSITE (S50 audit FIX 6) — the fire never plays alone. A live round also runs the
+-- waterfall FX, one beacon sparkle per un-rescued squirrel, and AmbientFX's embers/ash/haze —
+-- concurrently. Test 1 above pins the fire ALONE; this sums the fire's own in-situ measurement with
+-- the other three systems' worst-case alive counts (hardcoded from their live emitter Rate/Lifetime,
+-- file:line-cited below) and gates the SCENE TOTAL against GameConfig.Perf.compositeParticleCeiling.
+-- Measurement + growth-stop only — no emitter rate here is touched; the FX are Chad-approved as shipped.
+--------------------------------------------------------------------------------
+H.test("§3.4 scene-composite: fire + waterfall + squirrel sparkles + ambient stays under GameConfig.Perf.compositeParticleCeiling", function()
+	local ceiling = GameConfig.Perf and GameConfig.Perf.compositeParticleCeiling
+	H.ok(ceiling and ceiling > 0, "GameConfig.Perf.compositeParticleCeiling must exist and be positive")
+
+	-- (a) FIRE — same in-situ measurement as test 1 (the live worst-case fire alive count).
+	local container = Instance.new("Folder")
+	local grid = saturatedFire()
+	local vis = FireVisuals.new(FireGrid, GameConfig.Fire, GameConfig.Fire.cellSize, container)
+	vis:sync(grid, {}, 60)
+	local fireAlive = 0
+	for _, e in ipairs(collect(container, "ParticleEmitter")) do
+		if e.Enabled then
+			fireAlive += (e.Rate or 0) * (e.Lifetime and e.Lifetime.Max or 0)
+		end
+	end
+
+	-- (b) WATERFALL — RescueServer.server.luau:256-324, 4 always-on emitters (buildWaterfall, asset-free
+	-- motion FX): FallWaterFX rate=55 life<=4.0 (:262/:261) -> 220; WaterfallSpray rate=50 life<=1.1
+	-- (:281/:280) -> 55; WaterfallBaseMist rate=12 life<=5.0 (:296/:295) -> 60; UpdraftColumn mist rate=22
+	-- life<=3.5 (:319/:318) -> 77. One waterfall per round (singleton).
+	local waterfallAlive = 55 * 4.0 + 50 * 1.1 + 12 * 5.0 + 22 * 3.5
+
+	-- (c) SQUIRREL SPARKLES — RescueServer.server.luau:547-557, buildBeacon's per-squirrel "sparkle"
+	-- emitter: rate=14 (:553), life<=1.6 (:552) -> 22.4 alive per squirrel. Worst case is every perch
+	-- occupied at once: groveCount x perchPerGrove from the shipped ember_valley placement (:1299).
+	local placement = GameConfig.Missions.ember_valley.placement
+	local maxSquirrels = (placement.groveCount or 4) * (placement.perchPerGrove or 5)
+	local sparklesAlive = maxSquirrels * (14 * 1.6)
+
+	-- (d) AMBIENT — AmbientFX.client.luau:87-164, three always-on-by-default emitters (GameConfig.Ambient
+	-- rates): embers rate=10 (GameConfig.luau:1529) life<=6 (:104) -> 60; ash rate=8 (:1530) life<=7
+	-- (:129) -> 56; haze rate=4 (:1532) life<=8 (:156) -> 32 (hazeEnabled defaults true, :1531).
+	local ambCfg = GameConfig.Ambient or {}
+	local emberAlive = (ambCfg.emberRate or 10) * 6
+	local ashAlive = (ambCfg.ashRate or 8) * 7
+	local hazeAlive = ((ambCfg.hazeEnabled ~= false) and ((ambCfg.hazeRate or 4) * 8)) or 0
+	local ambientAlive = emberAlive + ashAlive + hazeAlive
+
+	local total = fireAlive + waterfallAlive + sparklesAlive + ambientAlive
+	print(("      [perf] scene-composite: fire %.0f + waterfall %.0f + sparkles %.0f (%d squirrels) + ambient %.0f = %.0f (ceiling %d)")
+		:format(fireAlive, waterfallAlive, sparklesAlive, maxSquirrels, ambientAlive, total, ceiling))
+
+	H.ok(total <= ceiling,
+		("scene-composite alive particles %.0f exceeds GameConfig.Perf.compositeParticleCeiling=%d — a system's rate/lifetime grew; re-derive the rail before shipping")
+			:format(total, ceiling))
+end)
