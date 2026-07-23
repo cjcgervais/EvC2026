@@ -765,7 +765,12 @@ local function buildCatchFloorPart()
 		size = Vector3.new(REACHABLE_RADIUS * 2, CATCH_THICKNESS, REACHABLE_RADIUS * 2),
 		pos = Vector3.new(0, CATCH_FLOOR_Y - CATCH_THICKNESS / 2, 0), -- top face lands exactly at CATCH_FLOOR_Y
 		canQuery = true, -- invariant ④ exception (documented above) — must be seen by the Spherecast
-		transparency = 1, -- never seen; the whole point is it's cheaper than terrain, not that it's visible
+		-- S51: opaque, not invisible — a Transparency=1 floor showed bare skybox through any terrain gap
+		-- above it (the old rock slab this replaces was solid). Dark slate rock so a graze/gap reads as
+		-- ground, not a hole in the world.
+		transparency = 0,
+		color = Color3.fromRGB(91, 93, 105),
+		material = Enum.Material.Slate,
 	}
 end
 

@@ -20,6 +20,7 @@
 
 local H = require("./_harness")
 local Loader = require("./_loader")
+local Enum = Loader.Enum
 
 local WorldGen = Loader.load("WorldGen")
 local GameConfig = Loader.load("GameConfig")
@@ -160,7 +161,7 @@ end)
 -- margin (asserted separately by the water-P3 catch-floor test above). Better than the old source-grep:
 -- this is real geometry the lune harness can check.
 --------------------------------------------------------------------------------
-H.test("catch floor: the CatchFloor part is a solid, queryable, invisible slab spanning the reachable world", function()
+H.test("catch floor: the CatchFloor part is a solid, queryable, opaque slab spanning the reachable world", function()
 	local plan = WorldGen.plan(GameConfig)
 	local catchFloor
 	for _, p in ipairs(plan.parts) do
@@ -168,7 +169,9 @@ H.test("catch floor: the CatchFloor part is a solid, queryable, invisible slab s
 	end
 	H.ok(catchFloor ~= nil, "expected a CatchFloor part in plan.parts")
 	H.eq(catchFloor.canQuery, true, "CatchFloor must be CanQuery=true so BirdCollision's Spherecast sees it")
-	H.ok(catchFloor.transparency == 1, "CatchFloor must be fully invisible (Transparency=1) — it's never meant to be seen")
+	H.ok(catchFloor.transparency == 0, "CatchFloor must be opaque (Transparency=0) — a gap above it must read as ground, not skybox")
+	H.ok(catchFloor.color ~= nil, "CatchFloor must set a color (dark rock, not the default gray)")
+	H.eq(catchFloor.material, Enum.Material.Slate, "CatchFloor must be Slate to read as rock")
 	H.ok(catchFloor.size.X >= plan.reachableRadius * 2 and catchFloor.size.Z >= plan.reachableRadius * 2,
 		("CatchFloor is %.0f×%.0f — must span at least ±reachableRadius (%.0f) on X/Z")
 			:format(catchFloor.size.X, catchFloor.size.Z, plan.reachableRadius))
