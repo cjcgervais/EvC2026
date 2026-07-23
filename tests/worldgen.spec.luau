@@ -11,7 +11,8 @@
 	  2. water-P3       — every water body has a solid floor far above the -200 failsafe, so
 	                       BirdCollision's IgnoreWater blindness can't drop a bird past it.
 	  3. canopy         — this module builds no "Canopy" part and re-seats the groves at datum.
-	  4. drift          — every decorative Part is CanQuery=false, so the style meter can't drift.
+	  4. drift          — every decorative Part is CanQuery=false, except the documented CatchFloor
+	                       exception (S51: the P3 catch floor moved off terrain onto a Part — see 4b).
 	  5. coplanarity    — no two overlapping Parts share a top-face Y (V0's z-fight test idea).
 	  6. contract       — the birth contract (gravity + streamingEnabled + lighting keys) and
 	                       determinism, plus kill-switch honesty.
@@ -130,21 +131,55 @@ H.test("canopy: the grove annulus stays flat so re-seated groves sit at datum", 
 end)
 
 --------------------------------------------------------------------------------
--- 4. DRIFT (style-economy) — the style meter only sees CanQuery=true parts. Every decorative part
--- MUST be CanQuery=false or styleProxDist can drift.
+-- 4. DRIFT (style-economy) — the style meter only sees CanQuery=true parts. Every DECORATIVE part
+-- MUST be CanQuery=false or styleProxDist can drift. S51: the P3 catch floor is now a Part (moved off
+-- terrain to cut sculpt cost) and is the ONE documented invariant-④ exception — it MUST be
+-- CanQuery=true or BirdCollision's Spherecast can't see it — so this gate carves it out by name
+-- instead of going vacuous or false-failing.
 --------------------------------------------------------------------------------
-H.test("drift: every decorative part is CanQuery=false", function()
+H.test("drift: every decorative part is CanQuery=false (except the documented CatchFloor exception)", function()
 	local plan = WorldGen.plan(GameConfig)
+	local sawCatchFloor = false
 	for _, p in ipairs(plan.parts) do
-		H.eq(p.canQuery, false,
-			("part %q is queryable — the style meter would see it and styleProxDist(40) could drift")
-				:format(tostring(p.name)))
+		if p.name == "CatchFloor" then
+			sawCatchFloor = true
+			H.eq(p.canQuery, true, "CatchFloor must be CanQuery=true or BirdCollision's Spherecast can't see it")
+		else
+			H.eq(p.canQuery, false,
+				("part %q is queryable — the style meter would see it and styleProxDist(40) could drift")
+					:format(tostring(p.name)))
+		end
 	end
+	H.ok(sawCatchFloor, "expected a CatchFloor part in plan.parts (the P3 catch floor)")
+end)
+
+--------------------------------------------------------------------------------
+-- 4b. CATCH FLOOR PART (S51) — the P3 catch floor invariant re-encoded on plan.parts data now that it's
+-- a Part instead of a terrain fill: a solid, queryable slab spans at least ±reachableRadius, with its
+-- top face exactly at CATCH_FLOOR_Y (plan.catchFloorY), which in turn clears GROUND_FAILSAFE_Y with
+-- margin (asserted separately by the water-P3 catch-floor test above). Better than the old source-grep:
+-- this is real geometry the lune harness can check.
+--------------------------------------------------------------------------------
+H.test("catch floor: the CatchFloor part is a solid, queryable, invisible slab spanning the reachable world", function()
+	local plan = WorldGen.plan(GameConfig)
+	local catchFloor
+	for _, p in ipairs(plan.parts) do
+		if p.name == "CatchFloor" then catchFloor = p end
+	end
+	H.ok(catchFloor ~= nil, "expected a CatchFloor part in plan.parts")
+	H.eq(catchFloor.canQuery, true, "CatchFloor must be CanQuery=true so BirdCollision's Spherecast sees it")
+	H.ok(catchFloor.transparency == 1, "CatchFloor must be fully invisible (Transparency=1) — it's never meant to be seen")
+	H.ok(catchFloor.size.X >= plan.reachableRadius * 2 and catchFloor.size.Z >= plan.reachableRadius * 2,
+		("CatchFloor is %.0f×%.0f — must span at least ±reachableRadius (%.0f) on X/Z")
+			:format(catchFloor.size.X, catchFloor.size.Z, plan.reachableRadius))
+	local top = catchFloor.pos.Y + catchFloor.size.Y / 2
+	H.approx(top, plan.catchFloorY, 0.01, ("CatchFloor's top face is at Y=%.2f, must equal plan.catchFloorY=%.2f"):format(top, plan.catchFloorY))
 end)
 
 --------------------------------------------------------------------------------
 -- 5. COPLANARITY — V0's surviving idea: no two overlapping Parts may share a top-face Y (terrain
--- itself cannot z-fight, but any Part can). Trivially true while parts is empty; asserted anyway.
+-- itself cannot z-fight, but any Part can). With only the CatchFloor part today there is no overlapping
+-- pair to check, but the loop stays live for whenever a second Part is added.
 --------------------------------------------------------------------------------
 H.test("coplanarity: no overlapping pair of parts shares a top-face Y", function()
 	local plan = WorldGen.plan(GameConfig)

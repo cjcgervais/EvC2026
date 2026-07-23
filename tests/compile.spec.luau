@@ -219,15 +219,18 @@ H.test("M1 wiring: WorldGen.build reproduces the birth contract and sculpts terr
 		"WorldGen no longer emits a Water fill op — invariant ② (water bodies) is not built.")
 	H.ok(src:find(":FillCylinder%(") ~= nil,
 		"WorldGen.sculpt no longer calls Terrain:FillCylinder — the de-boxed lake / plunge pool are never carved.")
-	-- P3 void-death guard: the catch slab is the only thing standing between a graze off a solid
-	-- edge and the -200 failsafe, and the applier isn't lune-testable — so this source-gate is the
-	-- ONLY machine check that the slab exists, spans ±REACHABLE_RADIUS, and sits at CATCH_FLOOR_Y.
+	-- P3 void-death guard: the catch floor is the only thing standing between a graze off a solid
+	-- edge and the -200 failsafe. S51: it moved OFF terrain onto a Part (buildCatchFloorPart, applied
+	-- by the cheap Part loop, not sculpt()) to cut sculpt cost — worldgen.spec's "catch floor" test now
+	-- gates its real geometry (plan.parts) directly, which this source-gate can't see (codeOnly strips
+	-- comments, not the applier split); this stays as a coarse belt-and-suspenders check that the
+	-- constants driving it still exist in the module at all.
 	H.ok(src:find("CATCH_FLOOR_Y") ~= nil,
-		"WorldGen.sculpt no longer fills a catch slab at CATCH_FLOOR_Y — a graze into a void gap falls " ..
-		"past the -200 failsafe and dies unearned (P3 violation).")
+		"WorldGen no longer defines CATCH_FLOOR_Y — the P3 catch floor's Y position is gone " ..
+		"(a graze into a void gap would fall past the -200 failsafe and die unearned).")
 	H.ok(src:find("REACHABLE_RADIUS") ~= nil,
-		"WorldGen.sculpt's catch slab no longer spans REACHABLE_RADIUS — void gaps outside the grass " ..
-		"square/rim are uncovered again.")
+		"WorldGen no longer defines REACHABLE_RADIUS — the P3 catch floor's span is gone " ..
+		"(void gaps outside the grass square/rim would be uncovered again).")
 end)
 
 --------------------------------------------------------------------------------

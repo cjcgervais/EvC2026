@@ -36,7 +36,9 @@
 	  ③ CANOPY — the procedural groves (RescueServer) are KEPT and re-seated on the datum. This module
 	    builds NO "Canopy" parts and does not touch CanopyCount.
 	  ④ STYLE-ECONOMY DRIFT — the style meter only sees CanQuery=true PARTS; terrain is not a Part, and
-	    plan.parts stays EMPTY, so styleProxDist cannot drift.
+	    every decorative plan.parts entry is CanQuery=false, so styleProxDist cannot drift. The lone
+	    exception is the P3 catch floor (below): CanQuery=true (BirdCollision's Spherecast must see it),
+	    but it's invisible (Transparency=1) and off the reachable ground plane (Y=-130).
 
 	KILL SWITCH — GameConfig.Map.worldV2. Default TRUE; false restores the untouched legacy
 	SetupLighting()/BuildMap() path exactly, with Terrain cleared.
@@ -61,10 +63,13 @@ local RIM_HEIGHT   = 1800   -- rim crest height (studs above datum); shared by h
 local OUTER_Y      = 30     -- the outer coastal plain the distant sea is carved into
 local FLOOR_RELIEF = 4      -- max |dip| of the shallow playable bowl (kept < the datum gate's 8-stud band)
 
--- P3 CATCH FLOOR — a single hidden global rock slab under the whole reachable world so a graze-slide
--- off any solid edge into a void gap falls at most to CATCH_FLOOR_Y (not past the -200 failsafe).
+-- P3 CATCH FLOOR — a single hidden global slab under the whole reachable world so a graze-slide off
+-- any solid edge into a void gap falls at most to CATCH_FLOOR_Y (not past the -200 failsafe). S51
+-- BootClock fix: this used to be a terrain FillBlock (the single biggest sculpt-time cost for geometry
+-- that's NEVER SEEN); it's now a single invisible queryable Part (see buildCatchFloorPart below) —
+-- CATCH_THICKNESS is that Part's Size.Y.
 local CATCH_FLOOR_Y     = -120
-local CATCH_THICKNESS    = 40
+local CATCH_THICKNESS    = 20
 local REACHABLE_RADIUS   = 8000
 
 -- Roblox Terrain fill has a ~4096-stud PER-AXIS extent limit ("Extents are too large" on FillBlock);
@@ -670,8 +675,11 @@ local function assembleOps(rimBlocks, rimSnow, rimTalus, rimFoot, paintCells, wa
 		ops[#ops + 1] = { op = "L", x = x, y = y, z = z, rad = rad, mat = mat }
 	end
 
-	-- 1) CATCH SLAB (P3) — first, under everything.
-	B(0, CATCH_FLOOR_Y - CATCH_THICKNESS / 2, 0, REACHABLE_RADIUS * 2, CATCH_THICKNESS, REACHABLE_RADIUS * 2, "Rock")
+	-- 1) CATCH SLAB (P3) — this used to be a terrain FillBlock here (tiled into ~36 sub-fills of ~4000²
+	-- studs each, the single biggest chunk of sculpt cost, for a slab that is NEVER SEEN). S51 BootClock
+	-- fix: it's never rendered, so it doesn't need to be terrain — it's now a single invisible queryable
+	-- Part, built in plan.parts and applied by WorldGen.build's cheap Part loop instead of sculpt(). See
+	-- buildCatchFloorPart() / the `parts` local below in plan().
 	-- 2) FLOOR — the flat grass slab, top at datum Y=0, across the playable bowl.
 	B(0, -40, 0, FLAT_R * 2, 80, FLAT_R * 2, "Grass")
 	-- 3) PAINT PATCHWORK (M3) — organic FillCylinder patches, 4 thick, top 0 (replaces both the
@@ -745,6 +753,22 @@ local function assembleOps(rimBlocks, rimSnow, rimTalus, rimFoot, paintCells, wa
 	return ops
 end
 
+-- buildCatchFloorPart() → the P3 catch floor as a decorative-Part record (S51 BootClock fix — see
+-- CATCH_FLOOR_Y's comment). Pure: only Vector3/Color3 value construction, no Instances, matching every
+-- other plan.parts producer's contract (build()'s Part-minting loop reads p.size/p.pos/p.canQuery/
+-- p.transparency). CanQuery=true is the ONE documented exception to invariant ④ — BirdCollision's
+-- Spherecast (workspace:Spherecast with an Exclude filter on the Birds folder only) must see it or a
+-- graze-slide off any solid edge falls straight through to the -200 failsafe.
+local function buildCatchFloorPart()
+	return {
+		name = "CatchFloor",
+		size = Vector3.new(REACHABLE_RADIUS * 2, CATCH_THICKNESS, REACHABLE_RADIUS * 2),
+		pos = Vector3.new(0, CATCH_FLOOR_Y - CATCH_THICKNESS / 2, 0), -- top face lands exactly at CATCH_FLOOR_Y
+		canQuery = true, -- invariant ④ exception (documented above) — must be seen by the Spherecast
+		transparency = 1, -- never seen; the whole point is it's cheaper than terrain, not that it's visible
+	}
+end
+
 --------------------------------------------------------------------------------
 -- plan(cfg) → the PURE world data table. Deterministic. This is what the specs exercise.
 --------------------------------------------------------------------------------
@@ -756,6 +780,7 @@ function WorldGen.plan(cfg)
 	local paintCells = buildPaint()
 	local water = buildWater()
 	local sculptOps = assembleOps(rimBlocks, rimSnow, rimTalus, rimFoot, paintCells, water)
+	local parts = { buildCatchFloorPart() }
 
 	return {
 		-- Birth contract (must match legacy BuildMap: GameServer:260 Gravity, :267 StreamingEnabled).
@@ -772,9 +797,10 @@ function WorldGen.plan(cfg)
 		catchFloorY = CATCH_FLOOR_Y,
 		reachableRadius = REACHABLE_RADIUS,
 
-		-- Decorative Parts. Terrain does the work, so EMPTY — but the field exists and the drift/
-		-- coplanarity gates assert over it. Any future Part MUST be canQuery=false.
-		parts = {},
+		-- Decorative Parts. Terrain does the work for everything visible, so this holds exactly ONE entry
+		-- today: the invisible P3 catch floor (buildCatchFloorPart above, canQuery=true — the documented
+		-- invariant-④ exception). Any FUTURE decorative Part added here MUST be canQuery=false.
+		parts = parts,
 
 		-- M1.5 CONTENT — DATA consumed by sculpt/build, and read by the new gates.
 		rimPeaks = { peaks = PEAKS, westPass = WEST_PASS, blocks = rimBlocks, snowCaps = rimSnow, talus = rimTalus, foot = rimFoot },
@@ -945,9 +971,10 @@ function WorldGen.build(target, cfg)
 		part.Size = p.size
 		part.Position = p.pos
 		part.CanCollide = false
-		part.CanQuery = false -- invariant ④: never queryable, so the style meter can't drift
+		part.CanQuery = p.canQuery == true -- default false; the P3 catch floor is the sole documented exception
 		part.CanTouch = false
 		part.CastShadow = false
+		if p.transparency then part.Transparency = p.transparency end
 		if p.color then part.Color = p.color end
 		if p.material then part.Material = p.material end
 		part.Parent = map
