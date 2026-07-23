@@ -1042,8 +1042,20 @@ function WorldGen.build(target, cfg)
 	-- SCATTER (M4-B) — decorative mesh Models (rocks/bushes/logs) behind Map.meshScatter. plan.scatter
 	-- is always computed (pure); this loop is the only place Instances get minted, so flag-off is
 	-- honestly zero new Instances. Respects the same time-budget yield rule as sculpt() (S49 landmine).
+	local tPrewarmScatter = 0
 	if cfg and cfg.Map and cfg.Map.meshScatter then
 		local ROLE_TO_PROPS = { rock = AssetManifest.props.rock, bush = AssetManifest.props.bush, log = AssetManifest.props.log }
+		-- S51 FIX: scatter used to cold-fetch every mesh it needed one-by-one inside the loop below via
+		-- MeshFactory.build -> getTemplate -> InsertService:CreateMeshPartAsync, serialized behind the
+		-- per-prop yield cadence — measured at 8.999s. RescueServer.MeshFactory.prewarm (run LATER, for
+		-- 27/27 ids) proved warm fetches cost 0.20s total: the CDN round-trips just weren't parallelized
+		-- yet. Prewarm the exact rock/bush/log mesh ids scatter is about to use, in parallel, BEFORE the
+		-- loop runs — prewarm is idempotent/cached per mesh id (templateCache), so RescueServer's later
+		-- call for the same ids becomes a free cache-hit no-op, same as it already is for a second call.
+		local tPrewarmStart = os.clock()
+		local scatterMeshIds = MeshFactory.uniqueMeshIds(ROLE_TO_PROPS)
+		MeshFactory.prewarm(scatterMeshIds)
+		tPrewarmScatter = os.clock() - tPrewarmStart
 		-- M3 scatter-readability pass: rocks/bushes/logs read as specks from flight altitude. Scale
 		-- each role's target height up; rim-ring rocks (pt.sizeMul > 1) go bigger still.
 		local ROLE_SIZE_MUL = { rock = 1.8, bush = 1.5, log = 1.5 }
@@ -1079,8 +1091,8 @@ function WorldGen.build(target, cfg)
 	local tLighting = os.clock()
 
 	print(string.format(
-		"[BootClock] plan=%.3fs sculpt=%.3fs parts=%.3fs scatter=%.3fs lighting=%.3fs total=%.3fs",
-		tPlan - tStart, tSculpt - tPlan, tParts - tSculpt, tScatter - tParts, tLighting - tScatter,
+		"[BootClock] plan=%.3fs sculpt=%.3fs parts=%.3fs prewarmScatter=%.3fs scatter=%.3fs lighting=%.3fs total=%.3fs",
+		tPlan - tStart, tSculpt - tPlan, tParts - tSculpt, tPrewarmScatter, tScatter - tParts, tLighting - tScatter,
 		tLighting - tStart))
 end
 
