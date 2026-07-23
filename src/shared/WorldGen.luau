@@ -807,15 +807,22 @@ end
 -- APPLIERS — touch Terrain / Lighting / Workspace. Called ONLY by GameServer + the M2 harness.
 --------------------------------------------------------------------------------
 -- sculpt(terrain, plan) → a dumb interpreter over plan.sculptOps.
--- YIELDS every YIELD_EVERY ops: the ~554 Terrain fills run too long in one synchronous stretch and
--- Roblox kills the script for "exhausted allowed execution time" (Chad's S49 boot hit exactly this at
--- WorldGen:555). task.wait() resets the execution-time budget so no single stretch trips the guard; the
--- terrain just builds progressively over a handful of frames (invisible at boot; nothing downstream —
--- CreateThermals/Remotes, RescueWorld — depends on the terrain being finished first). Not called by the
--- lune tests (they exercise plan() only), so this engine-only yield can't touch Tier-4.
-local YIELD_EVERY = 24
+-- YIELDS on a TIME budget, not an op-count cadence: the ~554 Terrain fills run too long in one
+-- synchronous stretch and Roblox kills the script for "exhausted allowed execution time" (Chad's S49
+-- boot hit exactly this at WorldGen:555). The original fix yielded every YIELD_EVERY=24 ops, but Chad's
+-- live [BootClock] showed that op-count cadence firing 58 times — each task.wait() lands on a churny
+-- frame, so 58 yields cost ~most of a 66s sculpt phase. Ops vary wildly in real engine cost (a tiny
+-- FillBall vs. a tiled 4000-stud FillBlock), so a FIXED op count either yields far more than the ~10s
+-- script-exhaustion guard needs (slow) or not enough (unsafe) — a WALL-CLOCK budget is what the guard
+-- itself is measuring, so budget against it directly: yield only once continuous work has run for
+-- YIELD_BUDGET_S, comfortably under the ~10s guard (S49 landmine — see reference-worldgen-p3-catch-floor
+-- memory). The yield PURPOSE is unchanged (reset the execution-time budget so no stretch trips the
+-- guard); only the cadence that decides WHEN to pay for it changes. Not called by the lune tests (they
+-- exercise plan() only), so this engine-only yield can't touch Tier-4.
+local YIELD_BUDGET_S = 1.5
 function WorldGen.sculpt(terrain, plan)
-	for i, o in ipairs(plan.sculptOps) do
+	local lastYield = os.clock()
+	for _, o in ipairs(plan.sculptOps) do
 		local m = Enum.Material[o.mat]
 		if o.op == "B" then
 			terrain:FillBlock(CFrame.new(o.x, o.y, o.z) * CFrame.Angles(0, o.yaw or 0, 0), Vector3.new(o.sx, o.sy, o.sz), m)
@@ -826,7 +833,10 @@ function WorldGen.sculpt(terrain, plan)
 		elseif o.op == "L" then
 			terrain:FillBall(Vector3.new(o.x, o.y, o.z), o.rad, m)
 		end
-		if i % YIELD_EVERY == 0 then task.wait() end
+		if os.clock() - lastYield > YIELD_BUDGET_S then
+			task.wait()
+			lastYield = os.clock()
+		end
 	end
 end
 
@@ -946,7 +956,7 @@ function WorldGen.build(target, cfg)
 
 	-- SCATTER (M4-B) — decorative mesh Models (rocks/bushes/logs) behind Map.meshScatter. plan.scatter
 	-- is always computed (pure); this loop is the only place Instances get minted, so flag-off is
-	-- honestly zero new Instances. Respects the every-24-ops yield rule (S49 landmine).
+	-- honestly zero new Instances. Respects the same time-budget yield rule as sculpt() (S49 landmine).
 	if cfg and cfg.Map and cfg.Map.meshScatter then
 		local ROLE_TO_PROPS = { rock = AssetManifest.props.rock, bush = AssetManifest.props.bush, log = AssetManifest.props.log }
 		-- M3 scatter-readability pass: rocks/bushes/logs read as specks from flight altitude. Scale
@@ -955,7 +965,8 @@ function WorldGen.build(target, cfg)
 		local scatterFolder = Instance.new("Folder")
 		scatterFolder.Name = "Scatter"
 		scatterFolder.Parent = map
-		for i, pt in ipairs(plan.scatter) do
+		local scatterLastYield = os.clock()
+		for _, pt in ipairs(plan.scatter) do
 			local variants = ROLE_TO_PROPS[pt.role]
 			if variants and #variants > 0 then
 				local variant = variants[math.max(1, math.min(#variants, math.floor(pt.vseed * #variants) + 1))]
@@ -969,7 +980,11 @@ function WorldGen.build(target, cfg)
 					warn("[MeshProp] skipped " .. tostring(variant and variant.rootName) .. ": " .. tostring(errMesh))
 				end
 			end
-			if i % YIELD_EVERY == 0 then task.wait() end
+			-- Same time-budget cadence as sculpt() above (S51 BootClock fix) rather than a fixed op count.
+			if os.clock() - scatterLastYield > YIELD_BUDGET_S then
+				task.wait()
+				scatterLastYield = os.clock()
+			end
 		end
 	end
 	local tScatter = os.clock()
