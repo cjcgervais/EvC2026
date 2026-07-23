@@ -1312,6 +1312,45 @@ task.spawn(function()
 	end
 end)
 
+-- S51 [BootClock/client] — a LIGHTWEIGHT, always-on version of the probe above (not gated behind
+-- RES.bootDiag): the verbose probe only prints for developers who opted in, so a live "map is broken
+-- again" report has nothing to grep. Three compact lines at t=5/15/30s — part counts (exist) PLUS a
+-- terrain Raycast (DRAWN/queryable proxy, the exist-vs-DRAWN gap S45's SOP calls out).
+task.spawn(function()
+	if not (RES and RES.enabled) then return end
+	local function count(name)
+		local f = workspace:FindFirstChild(name)
+		return f and #f:GetDescendants() or -1
+	end
+	-- Red-team FIX 1: SavedQualityLevel reads 0 forever on the common "Automatic" setting — that's the
+	-- USER'S PREFERENCE, not what the engine is actually rendering at. GraphicsQualityLevel is the LIVE
+	-- value Automatic ramps at runtime (same property the verbose probe above reads). Print both.
+	local function qualityLevels()
+		local ok, ugs = pcall(function() return UserSettings():GetService("UserGameSettings") end)
+		if not ok or not ugs then return -1, -1 end
+		local okLive, live = pcall(function() return ugs.GraphicsQualityLevel.Value end)
+		local okSaved, saved = pcall(function() return ugs.SavedQualityLevel.Value end)
+		return (okLive and live) or -1, (okSaved and saved) or -1
+	end
+	-- Red-team FIX 2: origin+200 down 400 studs can't reach the valley floor (Y=0..-80) from cruise
+	-- altitude — a false negative during ordinary high flight. Cast from well above any reachable
+	-- altitude, deep enough to always cross the floor.
+	local function terrainColliding()
+		local origin = (rootPart and rootPart.Position) or (workspace.CurrentCamera and workspace.CurrentCamera.CFrame.Position) or Vector3.new(0, 0, 0)
+		local rp = RaycastParams.new()
+		rp.FilterType = Enum.RaycastFilterType.Include
+		rp.FilterDescendantsInstances = { workspace.Terrain }
+		local hit = workspace:Raycast(origin + Vector3.new(0, 500, 0), Vector3.new(0, -2500, 0), rp)
+		return hit ~= nil
+	end
+	for _, mark in ipairs({ 5, 15, 30 }) do
+		while (os.clock() - _G.EvCBootT0) < mark do task.wait(0.25) end
+		local liveQ, savedQ = qualityLevels()
+		print(("[BootClock/client] t=%ds quality=%d/%d map=%d rescue=%d terrainColliding=%s")
+			:format(mark, liveQ, savedQ, count("Map"), count("RescueWorld"), tostring(terrainColliding())))
+	end
+end)
+
 -- Presentation models (leaping squirrel + back-riders) live here — client-only, never queried.
 local catchFxFolder
 local function ensureCatchFx()

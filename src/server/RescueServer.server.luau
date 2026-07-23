@@ -1485,24 +1485,34 @@ end
 local triageBucket = 0
 local function RescueRoundLoop()
 	bootStamp("round loop entered")
+	-- S51 [BootClock/rescue] — always-on (NOT bootDiag-gated), mirroring WorldGen's [BootClock] pattern:
+	-- one loud line timing the four dark boot phases so a slow join is attributed without re-instrumenting.
+	local tWorldReady0 = os.clock()
 	waitForWorldReady()
+	local worldReadyWaitS = os.clock() - tWorldReady0
 	resolveMission()
 	bootStamp("mission resolved: " .. tostring(R.activeMission or "?"))
 	-- S50 audit FIX 2: fire every unique mesh template's CDN fetch in ONE parallel batch before buildWorld
 	-- mints ~68 trees + scatter props one-by-one — each of those calls to MeshFactory.build would otherwise
 	-- serialize its own getTemplate() round-trip behind the last. This is the single earliest point that
 	-- covers the full AssetManifest.props set (trees AND scatter roles), so it's the one prewarm call.
+	local prewarmS, prewarmOk, prewarmTotal = 0, 0, 0
 	do
+		local tPrewarm0 = os.clock()
 		local ok, successCount, total = pcall(function()
 			return MeshFactory.prewarm(MeshFactory.uniqueMeshIds(AssetManifest.props))
 		end)
+		prewarmS = os.clock() - tPrewarm0
 		if ok then
+			prewarmOk, prewarmTotal = tonumber(successCount) or 0, tonumber(total) or 0
 			bootStamp(("mesh templates prewarmed: %s/%s"):format(tostring(successCount), tostring(total)))
 		else
 			warn("[Boot] MeshFactory.prewarm failed: " .. tostring(successCount))
 		end
 	end
+	local tBuildWorld0 = os.clock()
 	buildWorld()
+	local buildWorldS = os.clock() - tBuildWorld0
 	bootStamp(("world built (trees + waterfall) — RescueWorld has %d descendants SERVER-side")
 		:format(#worldFolder:GetDescendants()))
 	squirrelsFolder = Instance.new("Folder")
@@ -1541,7 +1551,13 @@ local function RescueRoundLoop()
 		-- ROUND
 		if roundIndex == 1 then
 			-- S51: never let round 1 go ACTIVE (and burn its clock) before a client can actually fly.
+			local tClientReady0 = os.clock()
 			waitForFirstReadyClient()
+			local clientReadyWaitS = os.clock() - tClientReady0
+			print(string.format(
+				"[BootClock/rescue] worldReadyWait=%.2fs prewarm=%.2fs(%d/%d) buildWorld=%.2fs clientReadyWait=%.2fs",
+				worldReadyWaitS, prewarmS, prewarmOk, prewarmTotal, buildWorldS, clientReadyWaitS
+			))
 		end
 		startRound()
 		bootStamp("ROUND ACTIVE — all squirrels populated in ONE frame")

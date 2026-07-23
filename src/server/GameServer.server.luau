@@ -2234,9 +2234,16 @@ local worldT0 = os.clock()
 if GameConfig.Map and GameConfig.Map.worldV2 then
 	local okBuild, errBuild = pcall(WorldGen.build, Workspace, GameConfig)
 	if not okBuild then
-		warn("[Boot] WorldGen.build FAILED: " .. tostring(errBuild) .. " — falling back to legacy world")
+		-- S51: loud + greppable, and flagged on Workspace, so a "map is broken again" report can be
+		-- attributed instantly -- this fallback lands on the rejected legacy gray-box look.
+		warn("[MapFallback] WorldGen.build FAILED - legacy BuildMap in use: " .. tostring(errBuild))
+		Workspace:SetAttribute("MapFallback", true)
 		pcall(SetupLighting)
 		pcall(BuildMap)
+	else
+		-- Red-team FIX 3: flag the success path too, so the attribute is unambiguous (present-and-false,
+		-- not merely absent) for any client/test/diagnostic checking "did the real map load."
+		Workspace:SetAttribute("MapFallback", false)
 	end
 else
 	-- Kill-switch honesty: the flag-off path clears the worldV2 Terrain (harmless on a legacy boot —

@@ -848,8 +848,14 @@ end
 local YIELD_BUDGET_S = 1.5
 function WorldGen.sculpt(terrain, plan)
 	local lastYield = os.clock()
-	for _, o in ipairs(plan.sculptOps) do
+	-- S51 [SculptProf] — always-on per-op-class timing so a slow boot can be attributed to a specific
+	-- fill type (or to yields) without re-instrumenting. Dead cheap: a few locals, no per-op tables.
+	local bTime, bCount, wTime, wCount, cTime, cCount, lTime, lCount = 0, 0, 0, 0, 0, 0, 0, 0
+	local yieldTime, yieldCount = 0, 0
+	local slowestOp, slowestIdx, slowestTime = nil, 0, 0
+	for i, o in ipairs(plan.sculptOps) do
 		local m = Enum.Material[o.mat]
+		local t0 = os.clock()
 		if o.op == "B" then
 			terrain:FillBlock(CFrame.new(o.x, o.y, o.z) * CFrame.Angles(0, o.yaw or 0, 0), Vector3.new(o.sx, o.sy, o.sz), m)
 		elseif o.op == "W" then
@@ -859,11 +865,26 @@ function WorldGen.sculpt(terrain, plan)
 		elseif o.op == "L" then
 			terrain:FillBall(Vector3.new(o.x, o.y, o.z), o.rad, m)
 		end
+		local opTime = os.clock() - t0
+		if o.op == "B" then bTime, bCount = bTime + opTime, bCount + 1
+		elseif o.op == "W" then wTime, wCount = wTime + opTime, wCount + 1
+		elseif o.op == "C" then cTime, cCount = cTime + opTime, cCount + 1
+		elseif o.op == "L" then lTime, lCount = lTime + opTime, lCount + 1 end
+		if opTime > slowestTime then
+			slowestOp, slowestIdx, slowestTime = o.op, i, opTime
+		end
 		if os.clock() - lastYield > YIELD_BUDGET_S then
+			local ty0 = os.clock()
 			task.wait()
+			yieldTime, yieldCount = yieldTime + (os.clock() - ty0), yieldCount + 1
 			lastYield = os.clock()
 		end
 	end
+	print(string.format(
+		"[SculptProf] B=%.2fs/%d W=%.2fs/%d C=%.2fs/%d L=%.2fs/%d yield=%.2fs/%d slowest=%s#%d %.2fs",
+		bTime, bCount, wTime, wCount, cTime, cCount, lTime, lCount, yieldTime, yieldCount,
+		slowestOp or "-", slowestIdx, slowestTime
+	))
 end
 
 -- applyStyle(terrain, style) → per-material colours + water properties.
