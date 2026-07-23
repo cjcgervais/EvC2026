@@ -86,13 +86,19 @@ local VANTAGES = {
 -- the pose moves AND before this script returns (which closes Studio). See the header constraint.
 local DWELL = 2.5
 
+-- S50 FINDING: in EDIT mode the Studio viewport IGNORES CameraType.Scriptable (the S49 run captured
+-- 8 identical default views). Plugins move the edit camera by writing CFrame/Focus directly on the
+-- DEFAULT camera type — so no Scriptable here. The read-back print instruments whether the write
+-- actually stuck (SOP: never fly the same failed fix twice without an instrument).
 local cam = workspace.CurrentCamera
-cam.CameraType = Enum.CameraType.Scriptable
 cam.FieldOfView = 70
 
 for i, v in ipairs(VANTAGES) do
 	cam.CFrame = v.cf
-	print(("M2READY %d %s"):format(i, v.name))
+	cam.Focus = CFrame.new(v.cf.Position + v.cf.LookVector * 100)
+	task.wait(0.1) -- let Studio process the property write before we read it back
+	local stuck = (cam.CFrame.Position - v.cf.Position).Magnitude < 1
+	print(("M2READY %d %s stuck=%s"):format(i, v.name, tostring(stuck)))
 	task.wait(DWELL)
 end
 
