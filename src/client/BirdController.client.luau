@@ -3786,6 +3786,16 @@ local function acquire()
 	flightEngine.verticalSpeed = body.AssemblyLinearVelocity.Y
 
 	isAlive = true
+
+	-- S51 BOOT-CLOCK (Chad: round 1 was over before the map ever rendered). One always-on print the
+	-- FIRST time this client actually has a flyable bird — pairs with GameServer/WorldGen's
+	-- [BootClock] lines to show how much of the ~63s boot Chad was actually staring at nothing.
+	-- On _G (not a module-local): BirdController sits hard against Luau's 200-local cap (see the
+	-- S44 BOOT DIAG note above _G.EvCBootT0).
+	if not _G.EvCFirstPlayablePrinted then
+		_G.EvCFirstPlayablePrinted = true
+		print(string.format("[BootClock] client first-playable at %.2fs since join", os.clock() - _G.EvCBootT0))
+	end
 end
 
 local acquiring = false
