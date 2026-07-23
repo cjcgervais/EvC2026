@@ -920,6 +920,12 @@ local function startRound()
 		ps.loadCombo = nil
 		ps.deliverCombo = nil
 		ps.deliverN = nil
+		-- S50 audit FIX 5: combo/lastCatchAt survived round boundaries (RescueRules.comboOnCatch reads
+		-- lastCatchAt to decide if a new catch is "within comboWindow" of the last) — a catch in the first
+		-- comboWindow seconds of a fresh round could chain off a catch from the PREVIOUS round, showing a
+		-- stale combo banner. -1e9 guarantees the very first catch of a round always starts a fresh chain.
+		ps.combo = 0
+		ps.lastCatchAt = -1e9
 		-- keep `rescued` as the running crowd across rounds
 	end
 	pushAll()
