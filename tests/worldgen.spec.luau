@@ -341,9 +341,36 @@ end)
 -- 11. FILL BUDGET (M1.5) — the sculptOps list is the whole world's fill cost; keep it bounded and
 -- honestly recorded (fillOpCount must equal the list it claims to count).
 --------------------------------------------------------------------------------
-H.test("fill budget: total sculpt fill ops ≤700 (recorded)", function()
+H.test("fill budget: total sculpt fill ops ≤1000 (recorded)", function()
 	local plan = WorldGen.plan(GameConfig)
 	H.eq(plan.fillOpCount, #plan.sculptOps, "plan.fillOpCount does not match #plan.sculptOps — the recorded budget is a lie")
 	print(("        [fill-budget] WorldGen sculpts %d terrain fill ops"):format(#plan.sculptOps))
-	H.ok(#plan.sculptOps <= 700, ("WorldGen sculpts %d fill ops (>700) — the terrain build is over budget"):format(#plan.sculptOps))
+	-- Cap raised 700→1000: Roblox Terrain's ~4096 per-axis fill limit forces the big axis-aligned slabs
+	-- (catch slab, grass floor, apron, WestSea carve) to TILE into ≤MAX_FILL_EXTENT sub-blocks. That is a
+	-- one-time BOOT cost (sculpt runs once), not a per-frame cost, so the higher ceiling is honest.
+	H.ok(#plan.sculptOps <= 1000, ("WorldGen sculpts %d fill ops (>1000) — the terrain build is over budget"):format(#plan.sculptOps))
+end)
+
+--------------------------------------------------------------------------------
+-- 12. FILL EXTENT (M1.5 hotfix) — the bug lune couldn't see. Roblox Terrain fills throw "Extents are
+-- too large" past ~4096 studs/axis; only the real-engine M2 capture caught WorldGen.build on boot.
+-- This gate makes it headless: EVERY op must be ≤ MAX_FILL_EXTENT on X and Z, so an oversized slab
+-- (or a future one) can never regress past the assembler's tiler.
+--------------------------------------------------------------------------------
+H.test("fill extent: no sculpt op exceeds the Terrain per-axis fill limit on X or Z", function()
+	local plan = WorldGen.plan(GameConfig)
+	local MAX = plan.maxFillExtent
+	H.ok(MAX and MAX <= 4096, ("maxFillExtent=%s must exist and stay under Roblox's ~4096 limit"):format(tostring(MAX)))
+	for i, o in ipairs(plan.sculptOps) do
+		local ex, ez
+		if o.op == "B" or o.op == "W" then
+			ex, ez = o.sx, o.sz
+		elseif o.op == "C" or o.op == "L" then
+			ex, ez = o.rad * 2, o.rad * 2
+		end
+		H.ok(ex ~= nil, ("sculptOps[%d] has op %q with no known XZ extents"):format(i, tostring(o.op)))
+		H.ok(ex <= MAX and ez <= MAX,
+			("sculptOps[%d] (op %q, mat %s) is %.0f×%.0f — exceeds the %d per-axis Terrain fill limit ('Extents are too large')")
+				:format(i, tostring(o.op), tostring(o.mat), ex, ez, MAX))
+	end
 end)

@@ -61,6 +61,13 @@ local CATCH_FLOOR_Y     = -120
 local CATCH_THICKNESS    = 40
 local REACHABLE_RADIUS   = 8000
 
+-- Roblox Terrain fill has a ~4096-stud PER-AXIS extent limit ("Extents are too large" on FillBlock);
+-- lune has no Terrain so only a REAL engine (the M2 capture smoke) sees it. The big axis-aligned slabs
+-- (catch slab 16000², grass floor 6800², apron slabs, the WestSea carve 5400×18000) all blow it, so
+-- the B() assembler tiles any oversized AXIS-ALIGNED block into a grid of sub-blocks ≤ this. A one-time
+-- boot cost, not per-frame. The extent gate asserts no op ever exceeds it again.
+local MAX_FILL_EXTENT   = 4000
+
 -- surfaceY(x,z) → the SOLID terrain surface height at world XZ. Pure; no state, no random.
 local function surfaceY(x, z)
 	local r = math.sqrt(x * x + z * z)
@@ -384,7 +391,33 @@ end
 --------------------------------------------------------------------------------
 local function assembleOps(rimBlocks, rimSnow, rimTalus, paintCells, water)
 	local ops = {}
-	local function B(x, y, z, sx, sy, sz, mat, yaw) ops[#ops + 1] = { op = "B", x = x, y = y, z = z, sx = sx, sy = sy, sz = sz, mat = mat, yaw = yaw } end
+	-- B() — a FillBlock op. If the block is bigger than MAX_FILL_EXTENT on X or Z it would throw
+	-- "Extents are too large" in a real engine (lune can't see this), so tile any oversized
+	-- AXIS-ALIGNED block into a grid whose union EXACTLY covers the original extents (the last tile in
+	-- each row/col is the remainder, so non-integer divisions are exact). Rotated blocks are never
+	-- big enough to trigger this, but if one ever were, tiling in world XZ would be wrong — so error
+	-- loudly rather than mis-tile. Pure/deterministic geometry.
+	local function pushB(x, y, z, sx, sy, sz, mat, yaw) ops[#ops + 1] = { op = "B", x = x, y = y, z = z, sx = sx, sy = sy, sz = sz, mat = mat, yaw = yaw } end
+	local function B(x, y, z, sx, sy, sz, mat, yaw)
+		if sx > MAX_FILL_EXTENT or sz > MAX_FILL_EXTENT then
+			if yaw and yaw ~= 0 then
+				error(("WorldGen: rotated block (%.0f×%.0f) exceeds MAX_FILL_EXTENT and cannot be safely tiled in world XZ"):format(sx, sz))
+			end
+			local nx, nz = math.ceil(sx / MAX_FILL_EXTENT), math.ceil(sz / MAX_FILL_EXTENT)
+			local x0, z0 = x - sx / 2, z - sz / 2
+			for ix = 0, nx - 1 do
+				local tx = math.min(MAX_FILL_EXTENT, sx - ix * MAX_FILL_EXTENT)
+				local cx = x0 + ix * MAX_FILL_EXTENT + tx / 2
+				for iz = 0, nz - 1 do
+					local tz = math.min(MAX_FILL_EXTENT, sz - iz * MAX_FILL_EXTENT)
+					local cz = z0 + iz * MAX_FILL_EXTENT + tz / 2
+					pushB(cx, y, cz, tx, sy, tz, mat, yaw)
+				end
+			end
+		else
+			pushB(x, y, z, sx, sy, sz, mat, yaw)
+		end
+	end
 	local function W(x, y, z, sx, sy, sz, mat, yaw) ops[#ops + 1] = { op = "W", x = x, y = y, z = z, sx = sx, sy = sy, sz = sz, mat = mat, yaw = yaw } end
 	local function C(x, y, z, h, rad, mat) ops[#ops + 1] = { op = "C", x = x, y = y, z = z, h = h, rad = rad, mat = mat } end
 	local function L(x, y, z, rad, mat) ops[#ops + 1] = { op = "L", x = x, y = y, z = z, rad = rad, mat = mat } end
@@ -504,6 +537,7 @@ function WorldGen.plan(cfg)
 		-- The single source of truth for the fill-budget gate: the ordered fill primitives sculpt replays.
 		sculptOps = sculptOps,
 		fillOpCount = #sculptOps,
+		maxFillExtent = MAX_FILL_EXTENT, -- the per-axis Terrain fill limit the extent gate enforces
 
 		-- Lighting rig (data only).
 		lighting = buildLighting(),

@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS  M2 "THE EYES": build the worldV2 valley in EDIT mode and screenshot 8 fixed vantages.
 .DESCRIPTION
-    Phase V, packet M2. Produces the contact sheet Fable audits against VISUAL-QUALITY-BAR.md §2:
+    Phase V, packet M2. Produces the contact sheet Fable audits against VISUAL-QUALITY-BAR.md sec 2:
       1. Bootstrap Rojo + build EaglesVsCrows.rbxlx (unless -NoBuild and a place already exists).
       2. Bootstrap run-in-roblox (needs Roblox Studio installed).
       3. Launch Studio headlessly against the place, injecting tests/capture/world.capture.luau,
@@ -9,13 +9,13 @@
       4. Tail the injected script's stdout; on each `M2READY <i> <name>` line, settle briefly then
          screenshot the Studio window into captures/$Session/NN_name.png. Optionally montage them.
 
-    ═══ THE HARD CONSTRAINT (deviation from the MASTER-PLAN M2 "sentinel-FILE handshake") ═══
-    run-in-roblox is a ONE-WAY channel: Studio→here via stdout `print`. Luau at plugin security
+    === THE HARD CONSTRAINT (deviation from the MASTER-PLAN M2 "sentinel-FILE handshake") ===
+    run-in-roblox is a ONE-WAY channel: Studio->here via stdout `print`. Luau at plugin security
     CANNOT read a file or receive stdin, so the plan's ideal bidirectional per-shot ACK is
     impossible. Instead the injected script HOLDS each pose for a fixed DWELL (2.5s) after printing
     M2READY; this script tails stdout and captures within that window. run-in-roblox closes Studio
     the instant the injected script returns, so the script's total dwell exceeds the capture time
-    by construction. The dwell IS the sync budget — there is no blind cross-process timer here; a
+    by construction. The dwell IS the sync budget - there is no blind cross-process timer here; a
     capture is only ever taken in response to a real M2READY line.
 
     SCOPE: edit-mode .server scripts are dormant, so the sheet is the WorldGen TERRAIN + LIGHTING
@@ -55,10 +55,10 @@ if (-not ("EvcNative" -as [type])) {
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         public static extern bool SetForegroundWindow(System.IntPtr hWnd);
         public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
-'@ -Name Native -Namespace Evc | Out-Null
+'@ | Out-Null
 }
 
-# --- DPI / display preflight (hardening ②) ---
+# --- DPI / display preflight (hardening (2)) ---
 try { [Evc.Native]::SetProcessDPIAware() | Out-Null } catch {}
 $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
 Say "`n=== M2 capture (edit-mode WorldGen valley) ===" Cyan
@@ -70,7 +70,7 @@ try {
         Say ("Preflight WARNING: display DPI is {0} (scaling {1}%). Capture coords assume 1:1 (100%); a scaled desktop may crop/offset shots. Set Display scale to 100% for a clean sheet." -f $dpi, [math]::Round($dpi / 96 * 100)) Yellow
     }
 } catch {}
-Say "Preflight: bring Studio to the FOREGROUND and keep occluding dialogs (login/update) closed while this runs — a covered window captures whatever is on top of it." DarkGray
+Say "Preflight: bring Studio to the FOREGROUND and keep occluding dialogs (login/update) closed while this runs - a covered window captures whatever is on top of it." DarkGray
 
 # --- 1. Build the place (the capture builds the REAL built artifact) ---
 try {
@@ -214,5 +214,5 @@ if ($saved.Count -ge 1) {
     exit 0
 }
 Say "`nCAPTURE: UNAVAILABLE - $reason (0 images)." Yellow
-Say "FALLBACK (hardening ⑤): if capture defeats repeated attempts, Chad records ONE flythrough of the worldV2 valley as the look-dev record — the strategy never silently depends on this tool." Yellow
+Say "FALLBACK (hardening (5)): if capture defeats repeated attempts, Chad records ONE flythrough of the worldV2 valley as the look-dev record - the strategy never silently depends on this tool." Yellow
 exit 2
