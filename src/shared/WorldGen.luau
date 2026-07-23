@@ -642,9 +642,33 @@ local function assembleOps(rimBlocks, rimSnow, rimTalus, rimFoot, paintCells, wa
 			end
 		end
 	end
-	local function W(x, y, z, sx, sy, sz, mat, yaw) ops[#ops + 1] = { op = "W", x = x, y = y, z = z, sx = sx, sy = sy, sz = sz, mat = mat, yaw = yaw } end
-	local function C(x, y, z, h, rad, mat) ops[#ops + 1] = { op = "C", x = x, y = y, z = z, h = h, rad = rad, mat = mat } end
-	local function L(x, y, z, rad, mat) ops[#ops + 1] = { op = "L", x = x, y = y, z = z, rad = rad, mat = mat } end
+	-- FIX 3 (S50 audit): B() tiles/gates itself (above), but W()/C()/L() pushed raw — a bypass for the
+	-- exact "Extents are too large" class the rim-PEAK bug proved possible. These three now assert the
+	-- same per-axis-extent + region-volume bounds AT PLAN TIME (pure error(), no Instances touched), so
+	-- an oversized wedge/cylinder/ball is caught by Tier-4 the moment it's authored, never in a live boot.
+	local function W(x, y, z, sx, sy, sz, mat, yaw)
+		if not (sx <= MAX_FILL_EXTENT and sy <= MAX_FILL_EXTENT and sz <= MAX_FILL_EXTENT and sx * sy * sz <= MAX_FILL_VOLUME) then
+			error(("WorldGen W() wedge %.1fx%.1fx%.1f (mat %s) exceeds MAX_FILL_EXTENT=%d or MAX_FILL_VOLUME=%.0f (vol=%.0f)")
+				:format(sx, sy, sz, tostring(mat), MAX_FILL_EXTENT, MAX_FILL_VOLUME, sx * sy * sz))
+		end
+		ops[#ops + 1] = { op = "W", x = x, y = y, z = z, sx = sx, sy = sy, sz = sz, mat = mat, yaw = yaw }
+	end
+	local function C(x, y, z, h, rad, mat)
+		local vol = math.pi * rad * rad * h
+		if not (h <= MAX_FILL_EXTENT and 2 * rad <= MAX_FILL_EXTENT and vol <= MAX_FILL_VOLUME) then
+			error(("WorldGen C() cylinder h=%.1f rad=%.1f (mat %s) exceeds MAX_FILL_EXTENT=%d or MAX_FILL_VOLUME=%.0f (vol=%.0f)")
+				:format(h, rad, tostring(mat), MAX_FILL_EXTENT, MAX_FILL_VOLUME, vol))
+		end
+		ops[#ops + 1] = { op = "C", x = x, y = y, z = z, h = h, rad = rad, mat = mat }
+	end
+	local function L(x, y, z, rad, mat)
+		local vol = (4 / 3) * math.pi * rad ^ 3
+		if not (2 * rad <= MAX_FILL_EXTENT and vol <= MAX_FILL_VOLUME) then
+			error(("WorldGen L() ball rad=%.1f (mat %s) exceeds MAX_FILL_EXTENT=%d or MAX_FILL_VOLUME=%.0f (vol=%.0f)")
+				:format(rad, tostring(mat), MAX_FILL_EXTENT, MAX_FILL_VOLUME, vol))
+		end
+		ops[#ops + 1] = { op = "L", x = x, y = y, z = z, rad = rad, mat = mat }
+	end
 
 	-- 1) CATCH SLAB (P3) — first, under everything.
 	B(0, CATCH_FLOOR_Y - CATCH_THICKNESS / 2, 0, REACHABLE_RADIUS * 2, CATCH_THICKNESS, REACHABLE_RADIUS * 2, "Rock")

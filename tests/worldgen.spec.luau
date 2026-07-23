@@ -450,6 +450,11 @@ end)
 -- studs³). The ORIGINAL version of this gate only checked per-axis extent, which is exactly why it
 -- MISSED the volume bug — it is extended here to also assert volume, so a future oversized fill (rotated
 -- or not) can never regress past the assembler's tiler again.
+--
+-- S50 audit FIX 3: assembleOps' W()/C()/L() builders now error() at PLAN TIME on these same bounds
+-- (B() already self-tiled) — closing the bypass where only B was gated. This loop is the regression
+-- net over every op type, and now also checks the Y-axis extent (ey) for B/W, which the original only
+-- checked on X/Z.
 --------------------------------------------------------------------------------
 H.test("fill extent+volume: no sculpt op exceeds the Terrain per-axis OR region-volume fill limit", function()
 	local plan = WorldGen.plan(GameConfig)
@@ -458,21 +463,21 @@ H.test("fill extent+volume: no sculpt op exceeds the Terrain per-axis OR region-
 	H.ok(MAX and MAX <= 4096, ("maxFillExtent=%s must exist and stay under Roblox's ~4096 limit"):format(tostring(MAX)))
 	H.ok(MAXV and MAXV <= 3.84e8, ("maxFillVolume=%s must exist and stay under the proven-passing 3.84e8 bound"):format(tostring(MAXV)))
 	for i, o in ipairs(plan.sculptOps) do
-		local ex, ez, vol
+		local ex, ey, ez, vol
 		if o.op == "B" or o.op == "W" then
-			ex, ez = o.sx, o.sz
+			ex, ey, ez = o.sx, o.sy, o.sz
 			vol = o.sx * o.sy * o.sz
 		elseif o.op == "C" then
-			ex, ez = o.rad * 2, o.rad * 2
+			ex, ey, ez = o.rad * 2, o.h, o.rad * 2
 			vol = math.pi * o.rad * o.rad * o.h
 		elseif o.op == "L" then
-			ex, ez = o.rad * 2, o.rad * 2
+			ex, ey, ez = o.rad * 2, o.rad * 2, o.rad * 2
 			vol = (4 / 3) * math.pi * o.rad ^ 3
 		end
-		H.ok(ex ~= nil, ("sculptOps[%d] has op %q with no known XZ extents"):format(i, tostring(o.op)))
-		H.ok(ex <= MAX and ez <= MAX,
-			("sculptOps[%d] (op %q, mat %s) is %.0f×%.0f — exceeds the %d per-axis Terrain fill limit ('Extents are too large')")
-				:format(i, tostring(o.op), tostring(o.mat), ex, ez, MAX))
+		H.ok(ex ~= nil, ("sculptOps[%d] has op %q with no known extents"):format(i, tostring(o.op)))
+		H.ok(ex <= MAX and ey <= MAX and ez <= MAX,
+			("sculptOps[%d] (op %q, mat %s) is %.0f×%.0f×%.0f — exceeds the %d per-axis Terrain fill limit ('Extents are too large')")
+				:format(i, tostring(o.op), tostring(o.mat), ex, ey, ez, MAX))
 		H.ok(vol <= MAXV,
 			("sculptOps[%d] (op %q, mat %s) is %.0f studs³ — exceeds the %.0f region-volume Terrain fill limit ('Extents are too large')")
 				:format(i, tostring(o.op), tostring(o.mat), vol, MAXV))
