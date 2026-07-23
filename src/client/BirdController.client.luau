@@ -3795,6 +3795,11 @@ local function acquire()
 	if not _G.EvCFirstPlayablePrinted then
 		_G.EvCFirstPlayablePrinted = true
 		print(string.format("[BootClock] client first-playable at %.2fs since join", os.clock() - _G.EvCBootT0))
+		-- S51 ROUND-1-GATE FIX: tell the server THIS is "flyable", not "a bird Model exists" (which
+		-- GameServer satisfies on PlayerAdded, long before this point — Chad's live boot showed a ~19s
+		-- gap between the two). Fire-once via the same guard as the print above; RescueServer polls the
+		-- resulting player attribute rather than the (unreplicated) local one this print sits next to.
+		Remotes.ClientReady:FireServer()
 	end
 end
 

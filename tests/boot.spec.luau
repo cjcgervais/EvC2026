@@ -92,25 +92,58 @@ H.test("source-gate: waitForWorldReady has a bounded timeout and warns rather th
 end)
 
 --------------------------------------------------------------------------------
--- 4. Round 1 (only) waits for a player's bird before going ACTIVE, same warn-on-timeout pattern.
+-- 4. Round 1 (only) waits for a FLYABLE CLIENT before going ACTIVE, same warn-on-timeout pattern.
+-- S51 fix: the server-side "a bird Model exists" signal fires long before the client's flight engine/
+-- camera/controls are actually live (Chad's [BootClock] data showed a ~19s gap) — the gate now polls a
+-- player attribute the client sets itself, at its own first-playable point, via a dedicated
+-- ClientReady remote.
 --------------------------------------------------------------------------------
-H.test("source-gate: round 1's ACTIVE phase waits for a player bird before starting", function()
-	H.ok(rescueServerSrc:find("waitForFirstPlayerBird") ~= nil, "expected a waitForFirstPlayerBird helper")
+H.test("source-gate: round 1's ACTIVE phase waits for a ready client before starting", function()
+	H.ok(rescueServerSrc:find("waitForFirstReadyClient") ~= nil, "expected a waitForFirstReadyClient helper")
 	local gateI = rescueServerSrc:find("roundIndex == 1")
 	H.ok(gateI ~= nil, "expected a roundIndex == 1 gate")
 	local startRoundI = rescueServerSrc:find("startRound%(%)", gateI)
-	local waitCallI = rescueServerSrc:find("waitForFirstPlayerBird%(%)", gateI)
-	H.ok(waitCallI ~= nil and startRoundI ~= nil, "expected waitForFirstPlayerBird() called ahead of startRound() under the roundIndex==1 gate")
-	H.ok(waitCallI < startRoundI, "waitForFirstPlayerBird() must run BEFORE startRound() for round 1")
+	local waitCallI = rescueServerSrc:find("waitForFirstReadyClient%(%)", gateI)
+	H.ok(waitCallI ~= nil and startRoundI ~= nil, "expected waitForFirstReadyClient() called ahead of startRound() under the roundIndex==1 gate")
+	H.ok(waitCallI < startRoundI, "waitForFirstReadyClient() must run BEFORE startRound() for round 1")
 end)
 
-H.test("source-gate: waitForFirstPlayerBird has a bounded timeout and warns rather than hanging silently", function()
-	local startI = rescueServerSrc:find("local function waitForFirstPlayerBird")
-	H.ok(startI ~= nil, "expected waitForFirstPlayerBird's definition")
+H.test("source-gate: waitForFirstReadyClient has a bounded timeout and warns rather than hanging silently", function()
+	local startI = rescueServerSrc:find("local function waitForFirstReadyClient")
+	H.ok(startI ~= nil, "expected waitForFirstReadyClient's definition")
 	local endI = rescueServerSrc:find("\r?\nend\r?\n", startI)
 	local block = rescueServerSrc:sub(startI, endI)
-	H.ok(block:find("120") ~= nil, "waitForFirstPlayerBird must use a bounded timeout (120s)")
-	H.ok(block:find("warn%(") ~= nil, "waitForFirstPlayerBird must warn loudly if the timeout is exceeded, never hang silently")
+	H.ok(block:find("120") ~= nil, "waitForFirstReadyClient must use a bounded timeout (120s)")
+	H.ok(block:find("warn%(") ~= nil, "waitForFirstReadyClient must warn loudly if the timeout is exceeded, never hang silently")
+end)
+
+H.test("source-gate: waitForFirstReadyClient polls a player's ClientReady attribute, not the Birds folder", function()
+	local startI = rescueServerSrc:find("local function waitForFirstReadyClient")
+	H.ok(startI ~= nil, "expected waitForFirstReadyClient's definition")
+	local endI = rescueServerSrc:find("\r?\nend\r?\n", startI)
+	local block = rescueServerSrc:sub(startI, endI)
+	H.ok(block:find('GetAttribute%("ClientReady"%)') ~= nil or rescueServerSrc:find('GetAttribute%("ClientReady"%)') ~= nil,
+		"waitForFirstReadyClient (or its helper) must poll GetAttribute(\"ClientReady\")")
+end)
+
+H.test("source-gate: GameServer's ClientReady remote sets the player's ClientReady attribute", function()
+	H.ok(gameServerSrc:find('event%("ClientReady"%)') ~= nil, "expected GameServer to create a ClientReady RemoteEvent")
+	local handlerI = gameServerSrc:find("local function onClientReady")
+	H.ok(handlerI ~= nil, "expected an onClientReady handler")
+	local handlerEndI = gameServerSrc:find("\r?\nend\r?\n", handlerI)
+	local block = gameServerSrc:sub(handlerI, handlerEndI)
+	H.ok(block:find('SetAttribute%("ClientReady", true%)') ~= nil,
+		"onClientReady must SetAttribute(\"ClientReady\", true) on the player")
+	H.ok(gameServerSrc:find("Remotes%.ClientReady%.OnServerEvent") ~= nil,
+		"expected Remotes.ClientReady.OnServerEvent wired to a handler in connectRemotes")
+end)
+
+H.test("source-gate: BirdController fires ClientReady once, at the first-playable point", function()
+	local src = fs.readFile("src/client/BirdController.client.luau")
+	local printI = src:find("EvCFirstPlayablePrinted = true")
+	H.ok(printI ~= nil, "expected the first-playable guard flag to be set")
+	local fireI = src:find("Remotes%.ClientReady:FireServer%(%)", printI)
+	H.ok(fireI ~= nil, "expected Remotes.ClientReady:FireServer() to fire right after the first-playable guard is set")
 end)
 
 --------------------------------------------------------------------------------

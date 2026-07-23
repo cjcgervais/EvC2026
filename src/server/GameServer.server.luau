@@ -483,6 +483,8 @@ local function CreateRemotes()
 	event("SwapCrow")         -- C->S: index
 	event("SetFormation")     -- C->S: formationName
 	event("Respawn")          -- C->S: request a fresh bird (manual reset; debounced)
+	event("ClientReady")      -- C->S: fired once by BirdController at its [BootClock] first-playable
+	                          -- point (S51 round-1-gate fix) — server sets player:SetAttribute("ClientReady", true)
 
 	local getThermals = Instance.new("RemoteFunction") -- C->S -> thermal array
 	getThermals.Name = "GetThermals"
@@ -1916,6 +1918,20 @@ local function onRespawn(player)
 	spawnFor(player)
 end
 
+-- S51 ROUND-1-GATE FIX (Chad's live [BootClock] data: round 1's server-side "does a bird model exist"
+-- check passed instantly at 13:54:38 while Chad's client didn't reach first-playable until 13:54:57 —
+-- GameServer spawns the eagle MODEL on PlayerAdded long before FlightPhysics/camera/controls are ready
+-- to fly it). BirdController fires this ONCE, client-side, at the exact print of its
+-- "[BootClock] client first-playable" line — the true "this player can actually fly" signal, not "a
+-- Model exists in Workspace.Birds". Idempotent: re-firing (a late respawn re-acquiring a bird) just
+-- re-sets the same true attribute, harmless. The attribute (not a one-shot event) is read by
+-- RescueServer.waitForFirstReadyClient, which polls players rather than subscribing, so it survives
+-- the client firing before the poll even starts.
+local function onClientReady(player)
+	if not player or not player.Parent then return end
+	player:SetAttribute("ClientReady", true)
+end
+
 -- Store the squad's formation (tight/loose). Validated against config.
 local function onSetFormation(player, formationName)
 	local squad = Squads[player]
@@ -2156,6 +2172,9 @@ local function connectRemotes()
 	end)
 	Remotes.Respawn.OnServerEvent:Connect(function(player)
 		pcall(onRespawn, player)
+	end)
+	Remotes.ClientReady.OnServerEvent:Connect(function(player)
+		pcall(onClientReady, player)
 	end)
 end
 

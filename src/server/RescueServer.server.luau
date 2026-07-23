@@ -1452,25 +1452,33 @@ local function waitForWorldReady()
 	end
 end
 
--- S51: round 1's ACTIVE phase must also wait for at least one player's bird to exist (Birds folder
--- gets a child), so Chad never spawns mid- or post-round-1 again — only into an intermission or a
--- fresh round. Subsequent rounds are untouched (players who leave mid-game shouldn't stall the loop).
--- Same loud-timeout pattern as waitForWorldReady.
-local function waitForFirstPlayerBird()
-	local birds = Workspace:FindFirstChild("Birds") or Workspace:WaitForChild("Birds", 120)
-	if not birds then
-		warn("[Rescue] Birds folder never appeared while waiting for round 1's first player — starting round 1 anyway.")
-		return
+-- S51 ROUND-1-GATE FIX: round 1's ACTIVE phase must wait for a client that can actually FLY, not just
+-- "a bird Model exists in Workspace.Birds" (GameServer spawns that Model on PlayerAdded — Chad's live
+-- [BootClock] data showed Birds populated 15/15 at 13:54:38 while his client's first-playable print
+-- (FlightPhysics engine seeded, camera/controls live) didn't land until 13:54:57: round 1 was gated on
+-- the wrong signal by ~19s). BirdController now fires Remotes.ClientReady once, client-side, at that
+-- exact first-playable point; the handler in GameServer sets player:SetAttribute("ClientReady", true)
+-- server-side (idempotent — a late respawn re-firing is harmless). Poll for any ready player rather than
+-- subscribing to an event, so a client that was ready before this function was even called still counts.
+-- Same loud-timeout pattern as waitForWorldReady; subsequent rounds are untouched (players who leave
+-- mid-game shouldn't stall the loop).
+local function anyPlayerClientReady()
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr:GetAttribute("ClientReady") then return true end
 	end
-	if #birds:GetChildren() > 0 then return end
+	return false
+end
+
+local function waitForFirstReadyClient()
+	if anyPlayerClientReady() then return end
 	local t0 = os.clock()
-	while #birds:GetChildren() == 0 and (os.clock() - t0) < 120 do
+	while not anyPlayerClientReady() and (os.clock() - t0) < 120 do
 		task.wait(0.25)
 	end
-	if #birds:GetChildren() > 0 then
-		bootStamp(("first player bird appeared after %.2fs"):format(os.clock() - t0))
+	if anyPlayerClientReady() then
+		bootStamp(("first ready client appeared after %.2fs"):format(os.clock() - t0))
 	else
-		warn("[Rescue] No player bird appeared within 120s of round 1 waiting to start — starting anyway.")
+		warn("[Rescue] No client signaled ready within 120s of round 1 waiting to start — starting anyway.")
 	end
 end
 
@@ -1532,8 +1540,8 @@ local function RescueRoundLoop()
 
 		-- ROUND
 		if roundIndex == 1 then
-			-- S51: never let round 1 go ACTIVE (and burn its clock) before Chad has even spawned a bird.
-			waitForFirstPlayerBird()
+			-- S51: never let round 1 go ACTIVE (and burn its clock) before a client can actually fly.
+			waitForFirstReadyClient()
 		end
 		startRound()
 		bootStamp("ROUND ACTIVE — all squirrels populated in ONE frame")
