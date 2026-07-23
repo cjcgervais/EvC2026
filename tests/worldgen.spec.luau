@@ -7,7 +7,8 @@
 	invariants so the world's LOOK can be tuned later (M3) without any of them silently regressing:
 
 	  1. datum          — the playable floor is flat at Y=0 across every load-bearing site, and the
-	                       rim actually rises (the bowl is real, not a flat plane).
+	                       surround rises to a broken foothill crest then genuinely falls away (open
+	                       horizon, not an enclosing wall).
 	  2. water-P3       — every water body has a solid floor far above the -200 failsafe, so
 	                       BirdCollision's IgnoreWater blindness can't drop a bird past it.
 	  3. canopy         — this module builds no "Canopy" part and re-seats the groves at datum.
@@ -29,7 +30,7 @@ local GROUND_FAILSAFE_Y = -200 -- GameServer.server.luau:74 — the deep kill li
 local DATUM_BAND = 8           -- studs; the playable floor must read within this of Y=0.
 
 --------------------------------------------------------------------------------
--- 1. DATUM — the playable floor is flat at datum, and the rim genuinely rises.
+-- 1. DATUM — the playable floor is flat at datum, and the surround rises then genuinely falls away.
 --------------------------------------------------------------------------------
 H.test("datum: every load-bearing site sits within the datum band of Y=0", function()
 	local plan = WorldGen.plan(GameConfig)
@@ -42,17 +43,22 @@ H.test("datum: every load-bearing site sits within the datum band of Y=0", funct
 	end
 end)
 
-H.test("datum: the rim actually RISES — the bowl is real, not a flat plane", function()
+H.test("datum: the surround RISES then FALLS AWAY — open horizon, not an enclosing wall", function()
 	local plan = WorldGen.plan(GameConfig)
-	-- Sampled outward on the +X axis: still flat near the playable edge, tall by r≈4000.
+	-- Sampled outward on the +X axis (outside the west arc): still flat near the playable edge, rises to
+	-- a broken foothill crest, then genuinely falls away past it (no wall holding the ground up).
 	H.between(plan.heightAt(3200, 0), -DATUM_BAND, DATUM_BAND, "the thermal-ring radius must still be flat")
-	H.ok(plan.heightAt(4000, 0) > 300,
-		("the rim only reached Y=%.0f at r=4000 — it must climb (>300) or there is no bowl, just a plane")
-			:format(plan.heightAt(4000, 0)))
-	-- And the crest is above the outer plain in every cardinal direction (a ring, not a wall).
-	for _, dir in ipairs({ { 5200, 0 }, { -5200, 0 }, { 0, 5200 }, { 0, -5200 } }) do
-		H.ok(plan.heightAt(dir[1], dir[2]) > 300, "the rim must ring the whole valley")
-	end
+	local crestY = plan.heightAt(4200, 0)
+	H.between(crestY, 80, 400,
+		("the foothill crest at r=4200 reads Y=%.0f — expected 80..400 (a broken hill crest, not a rim wall)"):format(crestY))
+	local farY = plan.heightAt(6500, 0)
+	H.ok(farY < crestY, ("the ground at r=6500 (Y=%.0f) must sit below the foothill crest (Y=%.0f) — it must FALL AWAY"):format(farY, crestY))
+	H.ok(farY < 0, ("the ground at r=6500 reads Y=%.0f — expected <0, visibly dropped toward the haze"):format(farY))
+	-- The declared WEST_ARC (due west) must read low relative to the crest elsewhere — the true open
+	-- sightline to the WestSea, not just a saddle in a wall.
+	local westY = plan.heightAt(math.cos(math.rad(180)) * 4200, math.sin(math.rad(180)) * 4200)
+	H.ok(westY < crestY * 0.5,
+		("west-arc crest at r=4200 reads Y=%.0f, not low relative to the non-west crest (Y=%.0f) — the west opening isn't reading as open"):format(westY, crestY))
 end)
 
 --------------------------------------------------------------------------------
@@ -229,7 +235,7 @@ end)
 H.test("contract: plan is deterministic — identical heightAt + water + parts + M1.5 content across two calls", function()
 	local a = WorldGen.plan(GameConfig)
 	local b = WorldGen.plan(GameConfig)
-	-- heightAt: identical over a spread of samples (incl. the rim).
+	-- heightAt: identical over a spread of samples (incl. the foothill/falloff band).
 	for _, pt in ipairs({ { 0, 0 }, { 1200, 1200 }, { 1150, 0 }, { 3200, 0 }, { 4000, 0 }, { -5200, 0 } }) do
 		H.eq(a.heightAt(pt[1], pt[2]), b.heightAt(pt[1], pt[2]),
 			("heightAt(%.0f,%.0f) drifted between calls — the plan must be pure"):format(pt[1], pt[2]))
@@ -244,13 +250,18 @@ H.test("contract: plan is deterministic — identical heightAt + water + parts +
 	H.eq(#a.sculptOps, #b.sculptOps, "sculptOps count drifted between calls")
 	H.eq(a.fillOpCount, b.fillOpCount, "fillOpCount drifted between calls")
 	H.eq(#a.paintZones, #b.paintZones, "paintZones count drifted between calls")
-	H.eq(#a.rimPeaks.blocks, #b.rimPeaks.blocks, "rim block count drifted between calls")
+	H.eq(#a.foothills, #b.foothills, "foothill count drifted between calls")
 	H.eq(#a.relief.mounds, #b.relief.mounds, "relief mound count drifted between calls")
 	H.eq(#a.relief.outcrops, #b.relief.outcrops, "relief outcrop count drifted between calls")
 	H.eq(#a.river.points, #b.river.points, "river polyline drifted between calls")
-	-- a representative sculpt-op and rim crest are byte-identical.
+	-- a representative sculpt-op, foothill crest, and distant-mountain part are byte-identical.
 	H.eq(a.sculptOps[1].mat, b.sculptOps[1].mat, "sculptOps[1].mat drifted")
-	H.eq(a.rimPeaks.blocks[1].crest, b.rimPeaks.blocks[1].crest, "rim crest drifted between calls")
+	H.eq(a.foothills[1].crest, b.foothills[1].crest, "foothill crest drifted between calls")
+	local aMtn, bMtn
+	for _, p in ipairs(a.parts) do if p.name ~= "CatchFloor" then aMtn = p; break end end
+	for _, p in ipairs(b.parts) do if p.name ~= "CatchFloor" then bMtn = p; break end end
+	H.ok(aMtn ~= nil and bMtn ~= nil, "expected at least one distant-mountain part in plan.parts")
+	H.eq(aMtn.pos.Y, bMtn.pos.Y, "distant-mountain part Y drifted between calls")
 	H.eq(a.paintZones[1].mat, b.paintZones[1].mat, "paintZones[1].mat drifted between calls")
 end)
 
@@ -261,63 +272,84 @@ H.test("contract: the kill switch exists (honest flag)", function()
 end)
 
 --------------------------------------------------------------------------------
--- 7. RIM-VARIATION (M1.5) — the rim is a ring of PEAKS, not a wall. Distinct crest heights, a real
--- tall/short contrast, and (outside the declared west-pass saddle) crests that actually read as peaks.
+-- 7. FOOTHILL-VARIATION (open-horizon packet) — the surround is a BROKEN ring of low hills, not a
+-- wall: distinct crest heights, a real tall/short contrast, every crest well under wall height, and at
+-- least one hill forced near-zero as a sightline gap. Materials fold the old "consistently Rock" check
+-- into a Grass/Ground pin (the foothills' declared material set).
 --------------------------------------------------------------------------------
-H.test("rim-variation: the crest has ≥6 distinct heights, a ≥2.5 tall/short ratio, and peaks outside the west pass", function()
+H.test("foothill-variation: ≥6 distinct crest heights, a ≥2.5 tall/short ratio, every crest <400, ≥1 gap hill", function()
 	local plan = WorldGen.plan(GameConfig)
-	local rp = plan.rimPeaks
-	H.ok(rp and rp.blocks and #rp.blocks > 0, "rimPeaks.blocks is empty — the rim gate would be vacuous")
-	local distinct, lo, hi = {}, math.huge, -math.huge
-	local nDistinct = 0
-	for _, b in ipairs(rp.blocks) do
-		H.finite(b.crest, "a rim block has a non-finite crest height")
-		local bucket = math.floor(b.crest / 25 + 0.5)
+	local hills = plan.foothills
+	H.ok(hills and #hills > 0, "plan.foothills is empty — the foothill gate would be vacuous")
+	local distinct, nDistinct = {}, 0
+	local tallLo, tallHi = math.huge, -math.huge -- tall/short ratio over the NON-gap population only
+	local sawGap = false
+	for _, h in ipairs(hills) do
+		H.finite(h.crest, "a foothill has a non-finite crest height")
+		H.ok(h.crest < 400, ("foothill at az=%.0f crests at Y=%.0f (>=400) — that reads as a wall, not a broken hill ring"):format(h.ad, h.crest))
+		local bucket = math.floor(h.crest / 20 + 0.5)
 		if not distinct[bucket] then distinct[bucket] = true; nDistinct += 1 end
-		lo = math.min(lo, b.crest); hi = math.max(hi, b.crest)
-		-- Every crest reads as a peak (>300) EXCEPT within the declared west-pass arc.
-		local inWestPass = b.ad >= rp.westPass.azMin and b.ad <= rp.westPass.azMax
-		H.ok(b.crest > 300 or inWestPass,
-			("rim block at az=%.0f crests at only Y=%.0f (<300) yet is outside the west pass — that reads as a gap, not a peak")
-				:format(b.ad, b.crest))
+		if h.gap then
+			sawGap = true
+			H.ok(h.crest < 50, ("gap hill at az=%.0f crests at Y=%.0f — expected near-zero (<50)"):format(h.ad, h.crest))
+		else
+			tallLo = math.min(tallLo, h.crest); tallHi = math.max(tallHi, h.crest)
+		end
 	end
-	H.ok(nDistinct >= 6, ("the rim has only %d distinct crest heights (<6) — it reads as a uniform wall"):format(nDistinct))
-	H.ok(hi / lo >= 2.5, ("rim tall/short ratio is %.2f (<2.5) — no silhouette variation"):format(hi / lo))
+	H.ok(nDistinct >= 6, ("the foothill ring has only %d distinct crest heights (<6) — it reads as uniform"):format(nDistinct))
+	H.ok(tallHi / tallLo >= 2.5, ("foothill tall/short ratio is %.2f (<2.5) — no silhouette variation"):format(tallHi / tallLo))
+	H.ok(sawGap, "expected at least one foothill forced near-zero as a sightline gap")
 end)
 
-H.test("rim restyle (M3): the main wall is consistently Rock (no Slate stripe alternation)", function()
+H.test("foothill restyle: hills read Grass/Ground (folds the old 'consistently Rock' rim check)", function()
 	local plan = WorldGen.plan(GameConfig)
-	for _, b in ipairs(plan.rimPeaks.blocks) do
-		H.eq(b.mat, "Rock", ("rim block at az=%.0f is material %q, expected consistently Rock"):format(b.ad, tostring(b.mat)))
+	for _, h in ipairs(plan.foothills) do
+		H.ok(h.mat == "Grass" or h.mat == "Ground",
+			("foothill at az=%.0f is material %q, expected Grass or Ground"):format(h.ad, tostring(h.mat)))
 	end
 end)
 
-H.test("rim restyle (M3): snow caps only the top ~30%% of peaks, each shrunk to 40-70%% of its block", function()
+H.test("distant mountains: non-solid backdrop clusters exist with a sky gap and snow-capped tall far peaks", function()
 	local plan = WorldGen.plan(GameConfig)
-	local blocks, snow = plan.rimPeaks.blocks, plan.rimPeaks.snowCaps
-	H.ok(#snow > 0, "rimPeaks.snowCaps is empty — no peak reads as capped")
-	H.ok(#snow < #blocks, ("snow caps (%d) must be a MINORITY of rim blocks (%d) — every-crest caps read as castle teeth"):format(#snow, #blocks))
-	local crests = {}
-	for _, b in ipairs(blocks) do crests[#crests + 1] = b.crest end
-	table.sort(crests)
-	local p70 = crests[math.max(1, math.ceil(#crests * 0.70))]
-	for _, s in ipairs(snow) do
-		-- Every snow cap's footprint must be smaller than its parent block's declared footprint bound —
-		-- pin the SHAPE fact (caps are shrunk, not full-block) without re-deriving which block owns it.
-		H.ok(s.sx > 0 and s.sz > 0, "a snow cap has a non-positive footprint")
+	local mtns = {}
+	for _, p in ipairs(plan.parts) do
+		if p.name ~= "CatchFloor" then mtns[#mtns + 1] = p end
 	end
-	H.ok(#snow <= #blocks - math.floor(#blocks * 0.60),
-		("%d of %d rim blocks are capped — expected only the top ~30%% (p70=%.0f) to read as dusted peaks"):format(#snow, #blocks, p70))
+	H.ok(#mtns >= 20, ("only %d distant-mountain parts (<20) — the backdrop would read sparse"):format(#mtns))
+	local sawSnow, sawFar = false, false
+	for _, p in ipairs(mtns) do
+		H.eq(p.canQuery, false, ("mountain part %q must be CanQuery=false (invariant ④)"):format(tostring(p.name)))
+		local r = math.sqrt(p.pos.X ^ 2 + p.pos.Z ^ 2)
+		H.between(r, 5500, 9500, ("mountain part %q is at r=%.0f, outside the declared 6000-9000-ish backdrop band"):format(tostring(p.name), r))
+		if p.material == Enum.Material.Snow then sawSnow = true end
+		if r > 7000 then sawFar = true end
+	end
+	H.ok(sawSnow, "expected at least one snow-capped tall far peak")
+	H.ok(sawFar, "expected at least one far-range mountain cluster (r>7000)")
+	-- ≥1 empty azimuth arc ≥30° wide (sky gap): sweep 5° steps and find the longest run with no mountain
+	-- part within a generous 400-stud angular-adjacent window.
+	local azList = {}
+	for _, p in ipairs(mtns) do
+		azList[#azList + 1] = math.deg(math.atan2(p.pos.Z, p.pos.X)) % 360
+	end
+	table.sort(azList)
+	local longestGap = 0
+	for i = 1, #azList do
+		local a, b = azList[i], azList[(i % #azList) + 1]
+		local gap = (i == #azList) and (b + 360 - a) or (b - a)
+		longestGap = math.max(longestGap, gap)
+	end
+	H.ok(longestGap >= 30, ("longest empty azimuth arc between mountain clusters is %.0f° (<30°) — no real sky gap"):format(longestGap))
 end)
 
-H.test("rim restyle (M3): a Grass/LeafyGrass foot band exists so the wall grows out of the meadow", function()
+H.test("foothill toe blend: a Grass/LeafyGrass band exists so the hills grow out of the meadow", function()
 	local plan = WorldGen.plan(GameConfig)
-	local foot = plan.rimPeaks.foot
-	H.ok(foot and #foot > 0, "rimPeaks.foot is empty — no meadow-blend band at the rim base")
-	for _, f in ipairs(foot) do
-		H.ok(f.mat == "Grass" or f.mat == "LeafyGrass",
-			("foot-band fill at (%.0f,%.0f) is material %q, expected Grass/LeafyGrass"):format(f.x, f.z, tostring(f.mat)))
-		H.between(f.sz, 80, 150, ("foot-band radial extent %.0f is outside the declared 80-150 stud rise band"):format(f.sz))
+	local toe = plan.foothillToe
+	H.ok(toe and #toe > 0, "plan.foothillToe is empty — no meadow-blend band at the foothill base")
+	for _, t in ipairs(toe) do
+		H.ok(t.mat == "Grass" or t.mat == "LeafyGrass",
+			("foothill-toe fill at (%.0f,%.0f) is material %q, expected Grass/LeafyGrass"):format(t.x, t.z, tostring(t.mat)))
+		H.between(t.sz, 80, 150, ("foothill-toe radial extent %.0f is outside the declared 80-150 stud rise band"):format(t.sz))
 	end
 end)
 
@@ -471,25 +503,25 @@ H.test("fill budget: total sculpt fill ops ≤1100 (recorded)", function()
 	local plan = WorldGen.plan(GameConfig)
 	H.eq(plan.fillOpCount, #plan.sculptOps, "plan.fillOpCount does not match #plan.sculptOps — the recorded budget is a lie")
 	print(("        [fill-budget] WorldGen sculpts %d terrain fill ops"):format(#plan.sculptOps))
-	-- Cap raised 1000→1400 (M1.5 VOLUME hotfix), then 1400→1800 (M3 look-dev round), then TIGHTENED
-	-- 1800→1100 (rim-shell packet): the rim's per-block solid emission (buried core down to the deep
-	-- catch floor, 84% of ALL sculpt volume) was replaced with a 3-piece shell (inner wall + outer wall +
-	-- full-footprint top skin) per block — same visible geometry, far fewer/cheaper ops. Count dropped
-	-- 1291→911; 1100 keeps meaningful headroom without re-opening the old 1800 ceiling. Still comfortably
-	-- under the HARD GATE ceiling of 2600 ops, and still a one-time BOOT cost (sculpt runs once),
-	-- amortized by YIELD_EVERY, not a per-frame cost.
+	-- Cap raised 1000→1400 (M1.5 VOLUME hotfix), then 1400→1800 (M3 look-dev round), then tightened
+	-- 1800→1100 (rim-shell packet). Open-horizon packet: the rim wall (88 shelled blocks + snow/talus/
+	-- foot bands + a 4-slab apron) is GONE, replaced by a much cheaper broken foothill ring + a thin
+	-- falloff collar + zero-terrain-cost distant mountain Parts — count dropped to roughly ~330 ops.
+	-- 1100 stays the recorded ceiling (comfortable headroom, no need to re-tighten it this packet) and
+	-- is still comfortably under the HARD GATE ceiling of 2600 ops; still a one-time BOOT cost (sculpt
+	-- runs once), amortized by the time-budget yield, not a per-frame cost.
 	H.ok(#plan.sculptOps <= 1100, ("WorldGen sculpts %d fill ops (>1100) — the terrain build is over budget"):format(#plan.sculptOps))
 	H.ok(#plan.sculptOps <= 2600, ("WorldGen sculpts %d fill ops (>2600) — exceeds the project HARD GATE ceiling"):format(#plan.sculptOps))
 end)
 
 --------------------------------------------------------------------------------
--- 11b. RIM SHELL VOLUME (rim-shell packet) — pins the actual cost win directly: each rim block is now
--- emitted as a hollow shell (two thin face walls + a top skin) instead of a solid fill down to the deep
--- catch floor, so the sum of all FillBlock volume should have collapsed by roughly the "84% was buried
--- core" finding. Bracket it rather than pin an exact float — the block set (from buildRim) is allowed to
--- drift slightly without breaking this gate, only a real regression back toward "solid" should trip it.
+-- 11b. SCULPT VOLUME BUDGET (open-horizon packet) — pins the actual cost win directly: the rim wall's
+-- buried-core mass (84% of all sculpt volume) is gone entirely, replaced by the much cheaper floor +
+-- thinned WestSea + foothills + falloff collar + water carves. Predicted total ≈1.06e10 studs³ (down
+-- from ≈5.1e10 with the old rim wall) — bracket it rather than pin an exact float, so tuning can drift
+-- without breaking this gate; only a real regression back toward the old wall-scale mass should trip it.
 --------------------------------------------------------------------------------
-H.test("rim shell: total B-op volume collapsed (shell, not solid, rim blocks)", function()
+H.test("sculpt volume: total B-op volume stays open-horizon-sized (<=1.2e10, >=6e9)", function()
 	local plan = WorldGen.plan(GameConfig)
 	local totalVol = 0
 	for _, o in ipairs(plan.sculptOps) do
@@ -497,9 +529,9 @@ H.test("rim shell: total B-op volume collapsed (shell, not solid, rim blocks)", 
 			totalVol = totalVol + o.sx * o.sy * o.sz
 		end
 	end
-	print(("        [rim-shell] total B-op volume = %.3e studs^3"):format(totalVol))
-	H.ok(totalVol >= 4.0e10, ("total B-op volume %.3e is implausibly low — the rim shell may be missing faces"):format(totalVol))
-	H.ok(totalVol <= 6.0e10, ("total B-op volume %.3e (>6.0e10) — the rim is still (near-)solid, the shell win didn't land"):format(totalVol))
+	print(("        [sculpt-volume] total B-op volume = %.3e studs^3"):format(totalVol))
+	H.ok(totalVol >= 6.0e9, ("total B-op volume %.3e is implausibly low (<6.0e9) — the world may be missing terrain"):format(totalVol))
+	H.ok(totalVol <= 1.2e10, ("total B-op volume %.3e (>1.2e10) — over the open-horizon sculpt-volume budget (rim wall may have regrown)"):format(totalVol))
 end)
 
 --------------------------------------------------------------------------------

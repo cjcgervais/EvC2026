@@ -1,11 +1,15 @@
 --!nonstrict
 --[[
 	WorldGen.luau — the Ember Valley Terrain world + lighting rig (Phase V). M1 built the CORRECT but
-	plain valley (flat datum floor, a coarse rim, boxy lakes). M1.5 (the Content Pass) turns that plain
-	bowl into a FINISHED-looking valley — a peaked mountain rim, a river from the waterfall to the lake,
-	de-boxed water with beaches, deterministic material patchwork, micro relief, and a golden-hour rig —
-	WITHOUT touching any datum number. Every new feature is DATA produced by plan() and applied by
-	sculpt()/build(); plan() stays pure and deterministic (no Instances, no services, NO math.random).
+	plain valley (flat datum floor, a coarse rim, boxy lakes). M1.5 (the Content Pass) turned that plain
+	bowl into a FINISHED-looking valley. The open-horizon packet then REMOVED the enclosing rim wall
+	(Chad: "an arena instead of the outdoors") and replaced it with a BROKEN, OPEN surround: low rolling
+	foothills that crest then fall away, a thin falloff collar dropping into the haze, distant non-solid
+	backdrop mountains in clusters (real sky gaps between them), and a true open west sea horizon — a
+	river from the waterfall to the lake, de-boxed water with beaches, deterministic material patchwork,
+	micro relief, and a golden-hour rig, all WITHOUT touching any datum number. Every new feature is DATA
+	produced by plan() and applied by sculpt()/build(); plan() stays pure and deterministic (no Instances,
+	no services, NO math.random).
 
 	WHY THE SPLIT (this is what makes the world headlessly gated):
 	Lune's @lune/roblox cannot build Terrain or set Lighting, so WorldGen is two halves —
@@ -13,10 +17,10 @@
 	  • WorldGen.plan(cfg) → a PURE data table. No Instances, no services, no workspace, no
 	    math.random; deterministic given cfg. This is the ONLY half the Tier-4 specs exercise.
 	    It carries the whole world as data: the bowl profile heightAt(x,z), the water bodies (each with
-	    a SOLID floor), the peaked rim, the river polyline, the paint patchwork, the micro relief, the
-	    lighting + terrain-style property values, the load-bearing datumSamples, and — the single source
-	    of truth for the fill-budget gate — `sculptOps`, the flat ordered list of terrain fill
-	    primitives that sculpt() literally replays.
+	    a SOLID floor), the broken foothill ring + falloff collar + distant mountain Parts, the river
+	    polyline, the paint patchwork, the micro relief, the lighting + terrain-style property values,
+	    the load-bearing datumSamples, and — the single source of truth for the fill-budget gate —
+	    `sculptOps`, the flat ordered list of terrain fill primitives that sculpt() literally replays.
 
 	  • WorldGen.sculpt/applyStyle/applyLighting/build → APPLY the plan (touch Terrain/Lighting/
 	    Workspace). Called ONLY by GameServer (and the future M2 edit-mode harness), NEVER by a test.
@@ -28,7 +32,8 @@
 	    (1150,0), the perch band and the y=0 thermal ring are ALL tuned to it, so the playable floor
 	    (r < FLAT_R) stays within ±8 of datum. Relief inside r<3400 is MICRO ONLY (mounds ≤6 studs);
 	    outcrops are the exception, restricted to r1700-3000 and ≥120 from every datum sample. All big
-	    relief lives on the mountain RIM (r > FLAT_R).
+	    relief lives on the broken foothill surround (r > FLAT_R), which crests low (≤~320) then falls
+	    away — an open landscape, not an enclosing wall.
 	  ② WATER P3 — BirdCollision.luau:41 sets IgnoreWater=true, so terrain water is INVISIBLE to the
 	    bird's swept sphere: a bird over water falls to whatever SOLID is beneath, and Y<-200 kills it.
 	    Therefore EVERY water body (lake, sea, river, pool) gets a SOLID terrain floor well above the
@@ -53,14 +58,20 @@ local AssetManifest = require(script.Parent.AssetManifest)
 local MeshFactory = require(script.Parent.MeshFactory)
 
 --------------------------------------------------------------------------------
--- BOWL PROFILE — the pure continuous height field. Y=0 is the datum. heightAt backs the datum gate
--- and the "rim rises" gate; the PEAKED rim silhouette is separate discrete block DATA (buildRim).
+-- OPEN-HORIZON PROFILE (open-horizon packet) — the pure continuous height field. Y=0 is the datum.
+-- heightAt backs the datum gate + thermals; the ENCLOSING RIM WALL is gone (Chad: "an arena instead
+-- of the outdoors"). The surround now CRESTS at a low broken foothill height then FALLS AWAY toward a
+-- hazed horizon, so the world reads as open outdoors, not a bowl with a lid. The discrete sculpted
+-- foothills (buildFoothills) and the distant backdrop mountains (buildDistantMountains, Parts) carry
+-- the actual silhouette; this function is DATA for gates/thermals only — never sculpted directly.
 --------------------------------------------------------------------------------
 local FLAT_R       = 3400   -- flat playable radius: spawn box, grove annulus, perch band, thermal ring(3200) all inside
-local RIM_PEAK_R   = 5200   -- radius of the tallest smoothed rim ring (heightAt only)
-local RIM_OUTER_R  = 7200   -- radius where the smoothed rim falls back to the outer coastal plain
-local RIM_HEIGHT   = 1800   -- rim crest height (studs above datum); shared by heightAt AND the peak blocks
-local OUTER_Y      = 30     -- the outer coastal plain the distant sea is carved into
+local FOOTHILL_R   = 4300   -- radius of the foothill crest (heightAt only; buildFoothills sculpts near here)
+local FOOTHILL_CREST = 220  -- foothill crest height (studs above datum) at full, non-west-arc amplitude
+local FALLOFF_R    = 6500   -- radius by which the ground has fallen back down to FALLOFF_Y
+local FALLOFF_Y    = -90    -- Y the ground reaches at FALLOFF_R — visibly dropping, not walling off
+local OUTER_FADE_R = 8500   -- radius by which the ground finishes settling at OUTER_FAR_Y
+local OUTER_FAR_Y  = -120   -- far outer plain Y — meets the haze/catch-floor level
 local FLOOR_RELIEF = 4      -- max |dip| of the shallow playable bowl (kept < the datum gate's 8-stud band)
 
 -- P3 CATCH FLOOR — a single hidden global slab under the whole reachable world so a graze-slide off
@@ -85,28 +96,11 @@ local MAX_FILL_EXTENT   = 4000
 -- 4000×~24×4000 ≈ 3.84e8 studs³, so this budget sits comfortably under that proven-passing bound.
 local MAX_FILL_VOLUME   = 3.0e8
 
--- surfaceY(x,z) → the SOLID terrain surface height at world XZ. Pure; no state, no random.
-local function surfaceY(x, z)
-	local r = math.sqrt(x * x + z * z)
-	if r <= FLAT_R then
-		local t = r / FLAT_R
-		return -FLOOR_RELIEF * (1 - t * t)
-	elseif r <= RIM_PEAK_R then
-		local u = (r - FLAT_R) / (RIM_PEAK_R - FLAT_R)
-		local s = u * u * (3 - 2 * u)
-		return s * RIM_HEIGHT
-	elseif r <= RIM_OUTER_R then
-		local u = (r - RIM_PEAK_R) / (RIM_OUTER_R - RIM_PEAK_R)
-		local s = u * u * (3 - 2 * u)
-		return RIM_HEIGHT + (OUTER_Y - RIM_HEIGHT) * s
-	else
-		return OUTER_Y
-	end
-end
-
 --------------------------------------------------------------------------------
 -- PURE HASH — the one source of "randomness". Deterministic; NOT math.random (the world must be
--- byte-identical on every boot and inside the headless spec). n01(i) ∈ [0,1).
+-- byte-identical on every boot and inside the headless spec). n01(i) ∈ [0,1). Declared BEFORE
+-- surfaceY/foothillAmp because both consume it (Lua locals must exist before an earlier-defined
+-- function body can close over them as locals, not globals).
 --------------------------------------------------------------------------------
 local function n01(i)
 	return (math.sin(i * 127.1) * 43758.5453) % 1
@@ -119,112 +113,241 @@ local function angDiff(a, b)
 	return d
 end
 
---------------------------------------------------------------------------------
--- RIM = PEAKS, not a wall. A committed peak table drives a gaussian height field around the azimuth;
--- an inner ring (48) + a half-step-staggered outer ring (40) give silhouette depth; talus wedges
--- skirt the inner face; snow caps the tall blocks. All r > FLAT_R (invariant ①).
---------------------------------------------------------------------------------
-local PEAKS = {
-	{ az = 0,   mul = 1.00, w = 28 }, -- tallest cluster @ +X = the waterfall-cliff backdrop behind the mesa
-	{ az = 42,  mul = 0.80, w = 22 },
-	{ az = 85,  mul = 0.92, w = 25 },
-	{ az = 128, mul = 0.72, w = 20 },
-	{ az = 155, mul = 0.55, w = 15 },
-	{ az = 180, mul = 0.30, w = 18 }, -- WEST PASS: a low saddle the WestSea glints through
-	{ az = 205, mul = 0.60, w = 16 },
-	{ az = 245, mul = 0.85, w = 24 },
-	{ az = 290, mul = 0.95, w = 26 },
-	{ az = 330, mul = 0.78, w = 21 },
-}
-local WEST_PASS = { azMin = 160, azMax = 200 } -- the declared low-crest arc (the rim-variation gate exempts it)
+-- WEST_ARC — the declared open azimuth arc: the foothill/collar amplitude dips here so the WestSea
+-- reads as a true open-water horizon instead of a peak gap in a wall. Centered due west (az180).
+local WEST_ARC = { azMin = 150, azMax = 210, center = 180, halfWidth = 30 }
 
-local function rimFrac(ad)
-	local s = 0
-	for _, pk in ipairs(PEAKS) do
-		local d = angDiff(ad, pk.az)
-		s = s + math.exp(-(d / pk.w) ^ 2) * (pk.mul - 0.30)
-	end
-	return math.clamp(0.30 + s, 0.30, 1.0)
+-- foothillAmp(ad) → azimuthal amplitude ∈ [WEST_ARC_MIN_AMP, 1.0] for the foothill crest at azimuth ad
+-- (degrees). 1.0 everywhere except a smoothstepped dip centered on WEST_ARC, which bottoms out at
+-- WEST_ARC_MIN_AMP directly west — that's the open sightline to the WestSea. Shared by surfaceY (the
+-- continuous gate/thermal field) and buildFoothills (the discrete sculpted hills), so the two always
+-- agree on WHERE the world opens up.
+local WEST_ARC_MIN_AMP = 0.12
+local function foothillAmp(ad)
+	local d = math.abs(angDiff(ad, WEST_ARC.center))
+	if d >= WEST_ARC.halfWidth then return 1.0 end
+	local u = d / WEST_ARC.halfWidth -- 0 at due west ... 1 at the arc edge
+	local s = u * u * (3 - 2 * u)
+	return WEST_ARC_MIN_AMP + (1.0 - WEST_ARC_MIN_AMP) * s
 end
 
--- buildRim() → blocks (each {x,z,y,sx,sy,sz,yaw,mat,crest,ad}), snowCaps, talus. Pure.
-local function buildRim()
-	local blocks, snow, talus = {}, {}, {}
+-- surfaceY(x,z) → the SOLID terrain surface height at world XZ. Pure; no state, no random. Data for
+-- gates/thermals only — the outer branches are NEVER sculpted directly (buildFoothills/
+-- buildFalloffCollar/buildDistantMountains carry the actual open-horizon geometry).
+local function surfaceY(x, z)
+	local r = math.sqrt(x * x + z * z)
+	if r <= FLAT_R then
+		local t = r / FLAT_R
+		return -FLOOR_RELIEF * (1 - t * t)
+	end
+	local ad = math.deg(math.atan2(z, x)) % 360
+	local crest = FOOTHILL_CREST * foothillAmp(ad)
+	if r <= FOOTHILL_R then
+		local u = (r - FLAT_R) / (FOOTHILL_R - FLAT_R)
+		local s = u * u * (3 - 2 * u)
+		return s * crest
+	elseif r <= FALLOFF_R then
+		local u = (r - FOOTHILL_R) / (FALLOFF_R - FOOTHILL_R)
+		local s = u * u * (3 - 2 * u)
+		return crest + (FALLOFF_Y - crest) * s
+	elseif r <= OUTER_FADE_R then
+		local u = (r - FALLOFF_R) / (OUTER_FADE_R - FALLOFF_R)
+		local s = u * u * (3 - 2 * u)
+		return FALLOFF_Y + (OUTER_FAR_Y - FALLOFF_Y) * s
+	else
+		return OUTER_FAR_Y
+	end
+end
 
-	local INNER_R, INNER_N = 4300, 48
-	for i = 0, INNER_N - 1 do
-		local ad = (i / INNER_N) * 360
+--------------------------------------------------------------------------------
+-- FOOTHILLS — the only new sculpted terrain (open-horizon packet). A BROKEN ring of low rolling
+-- hillforms replaces the enclosing rim wall: an inner band near FOOTHILL_R and a lower, phase-offset
+-- outer band behind it. Deliberately LOW (crest ≤ ~320) so it reads as landscape, not a wall — and the
+-- WEST_ARC dips toward WEST_ARC_MIN_AMP so the WestSea is a genuine open horizon, not a gap in a ring.
+-- A handful of hills are also forced near-zero regardless of azimuth (sightline gaps), so the ring
+-- reads broken everywhere, not just at the west opening. Solid B() fills — low enough that the buried
+-- core is cheap (no rim-shell hollowing needed here).
+--------------------------------------------------------------------------------
+local FOOTHILL_BASE_Y = -30 -- hill bases bury slightly below datum; crest is BASE_Y + crest/2 up
+local FOOTHILL_INNER_R, FOOTHILL_INNER_N = 3950, 30
+local FOOTHILL_OUTER_R, FOOTHILL_OUTER_N = 5100, 24
+
+-- buildFoothills() → a flat array of hill records {x,y,z,sx,sy,sz,yaw,mat,crest,ad,band,gap}. Pure.
+local function buildFoothills()
+	local hills = {}
+
+	-- Inner band: the primary broken ring, crest 60-320 (jittered + west-arc/gap dips).
+	for i = 0, FOOTHILL_INNER_N - 1 do
+		local ad = (i / FOOTHILL_INNER_N) * 360
 		local a = math.rad(ad)
-		local h = RIM_HEIGHT * rimFrac(ad) * (1 + (n01(i + 1) - 0.5) * 0.16) -- ±8% jitter
-		local px, pz = math.cos(a) * INNER_R, math.sin(a) * INNER_R
-		local w = (2 * math.pi * INNER_R) / INNER_N * 1.6
-		-- M3 rim restyle (a): the inner face reads consistently Rock (no Slate stripe alternation —
-		-- that alternation was the "vertical striping" the audit flagged).
-		local mat = "Rock"
-		blocks[#blocks + 1] = { x = px, z = pz, y = h / 2 - 20, sx = w, sy = h + 40, sz = w, yaw = -a, mat = mat, crest = h, ad = ad }
+		local amp = foothillAmp(ad)
+		local isGap = (i % 6 == 0) -- ~5 of 30 forced near-zero: sightline gaps independent of the west arc
+		local crest
+		if isGap then
+			crest = 15 + n01(i * 11 + 5) * 20 -- 15..35, near-zero
+		else
+			local jitter = 0.6 + n01(i * 7 + 3) * 0.8 -- 0.6..1.4
+			crest = math.clamp(60 + n01(i * 13 + 9) * 260 * amp * jitter, 20, 320)
+		end
+		local px, pz = math.cos(a) * FOOTHILL_INNER_R, math.sin(a) * FOOTHILL_INNER_R
+		local w = 850 * (0.85 + n01(i * 17 + 21) * 0.25)     -- footprint width, ≈850
+		local depth = 700 * (0.85 + n01(i * 19 + 27) * 0.25) -- radial depth, ≈700
+		local mat = (n01(i * 23 + 31) < 0.6) and "Grass" or "Ground" -- Grass/Ground blend; the toe gets LeafyGrass below
+		hills[#hills + 1] = {
+			x = px, z = pz, y = FOOTHILL_BASE_Y + crest / 2, sx = w, sy = crest - FOOTHILL_BASE_Y, sz = depth,
+			yaw = -a, mat = mat, crest = crest, ad = ad, band = "inner", gap = isGap,
+		}
 	end
 
-	local OUTER_R, OUTER_N = 4900, 40
-	for i = 0, OUTER_N - 1 do
-		local ad = ((i + 0.5) / OUTER_N) * 360 -- half-step staggered
+	-- Outer band: lower, phase-offset half a step so it layers behind the inner band, trending downward.
+	for i = 0, FOOTHILL_OUTER_N - 1 do
+		local ad = ((i + 0.5) / FOOTHILL_OUTER_N) * 360
 		local a = math.rad(ad)
-		local factor = 0.85 + n01(i * 5 + 11) * 0.25 -- 0.85..1.10× the inner height at that az
-		local h = RIM_HEIGHT * rimFrac(ad) * factor
-		local px, pz = math.cos(a) * OUTER_R, math.sin(a) * OUTER_R
-		local w = (2 * math.pi * OUTER_R) / OUTER_N * 1.6
-		local mat = "Rock"
-		blocks[#blocks + 1] = { x = px, z = pz, y = h / 2 - 20, sx = w, sy = h + 40, sz = w, yaw = -a, mat = mat, crest = h, ad = ad }
+		local amp = foothillAmp(ad)
+		local crest = math.clamp((40 + n01(i * 29 + 41) * 100) * amp, 15, 140)
+		local px, pz = math.cos(a) * FOOTHILL_OUTER_R, math.sin(a) * FOOTHILL_OUTER_R
+		local w = 780 * (0.85 + n01(i * 31 + 43) * 0.25)
+		local depth = 600 * (0.85 + n01(i * 37 + 53) * 0.25)
+		hills[#hills + 1] = {
+			x = px, z = pz, y = FOOTHILL_BASE_Y + crest / 2, sx = w, sy = crest - FOOTHILL_BASE_Y, sz = depth,
+			yaw = -a, mat = "Ground", crest = crest, ad = ad, band = "outer", gap = false,
+		}
 	end
 
-	-- M3 rim restyle (b): snow caps only the TOP ~30% of peaks by crest height (a real 70th-percentile
-	-- cutoff over the whole crest population, not a fixed Y threshold), each capped at an irregular
-	-- extent (40-70% of the block's own footprint) with a per-block jittered offset — a dusting on the
-	-- highest peaks, not a uniform white block on every crest ("castle teeth").
-	do
-		local crests = {}
-		for _, b in ipairs(blocks) do crests[#crests + 1] = b.crest end
-		table.sort(crests)
-		local p70 = crests[math.max(1, math.ceil(#crests * 0.70))]
-		for bi, b in ipairs(blocks) do
-			if b.crest >= p70 then
-				local extent = 0.40 + n01(bi * 13 + 29) * 0.30 -- 40%..70% of the block's footprint
-				local offX = (n01(bi * 17 + 3) - 0.5) * b.sx * 0.25
-				local offZ = (n01(bi * 19 + 41) - 0.5) * b.sz * 0.25
-				snow[#snow + 1] = {
-					x = b.x + offX, z = b.z + offZ, y = b.crest * 0.94,
-					sx = b.sx * extent, sy = b.crest * 0.12 + 20, sz = b.sz * extent,
+	return hills
+end
+
+-- buildFoothillToe() → a thin LeafyGrass blend band right where the inner hills meet the meadow floor,
+-- so the foothills grow OUT of the meadow instead of butting against it as a bare seam (kept from the
+-- old rim's foot-band idea, resized to the foothills' much lower toe radius).
+local function buildFoothillToe()
+	local toe = {}
+	local TOE_N, innerR = 32, FOOTHILL_INNER_R - 480
+	for i = 0, TOE_N - 1 do
+		local ad = (i / TOE_N) * 360
+		local a = math.rad(ad)
+		local band = 80 + n01(i * 41 + 5) * 70 -- 80..150 studs of radial rise, jittered per wedge
+		local mid = innerR + band / 2
+		local w = (2 * math.pi * mid) / TOE_N * 1.3
+		local mat = (n01(i * 31 + 71) < 0.55) and "Grass" or "LeafyGrass"
+		toe[#toe + 1] = { x = math.cos(a) * mid, y = -2, z = math.sin(a) * mid, sx = w, sy = 6, sz = band, yaw = -a, mat = mat }
+	end
+	return toe
+end
+
+--------------------------------------------------------------------------------
+-- FALLOFF COLLAR (open-horizon packet, replaces the old APRON) — a thin Ground skin, r≈5400→6800,
+-- descending ≈-40 → ≈-110 in two radial bands so the ground visibly falls toward the haze. THIN by
+-- design: nothing is ever landed on out here (the P3 catch floor backstops every void), so this only
+-- needs to read right from altitude, not hold weight — keeping it a shallow skin (not a solid ramp)
+-- is what keeps its sculpt-volume cost near the ≈1.0e9 budget instead of the ≈2-4e9 a full solid ramp
+-- would cost. Past r≈6800 the ground is OPEN (no more terrain) — haze + the distant Part mountains
+-- carry the rest of the horizon.
+--------------------------------------------------------------------------------
+local FALLOFF_INNER_R, FALLOFF_OUTER_R = 5400, 6800
+local FALLOFF_INNER_Y, FALLOFF_OUTER_Y = -40, -110
+local FALLOFF_N, FALLOFF_BANDS = 28, 2
+local FALLOFF_THICK = 14
+
+-- buildFalloffCollar() → a flat array of thin skin records {x,y,z,sx,sy,sz,yaw,mat}. Pure.
+local function buildFalloffCollar()
+	local tiles = {}
+	local bandDepth = (FALLOFF_OUTER_R - FALLOFF_INNER_R) / FALLOFF_BANDS
+	for bi = 0, FALLOFF_BANDS - 1 do
+		local rMid = FALLOFF_INNER_R + bandDepth * (bi + 0.5)
+		local u = (bi + 0.5) / FALLOFF_BANDS
+		local y = FALLOFF_INNER_Y + (FALLOFF_OUTER_Y - FALLOFF_INNER_Y) * u
+		for i = 0, FALLOFF_N - 1 do
+			-- stagger each band's tile seams by half a step so the two rings' seams don't line up radially.
+			local ad = ((i + bi * 0.5) / FALLOFF_N) * 360
+			local a = math.rad(ad)
+			local chord = (2 * math.pi * rMid) / FALLOFF_N * 1.15
+			tiles[#tiles + 1] = {
+				x = math.cos(a) * rMid, y = y, z = math.sin(a) * rMid,
+				sx = chord, sy = FALLOFF_THICK, sz = bandDepth * 1.1, yaw = -a, mat = "Ground",
+			}
+		end
+	end
+	return tiles
+end
+
+--------------------------------------------------------------------------------
+-- DISTANT MOUNTAINS (open-horizon packet) — the backdrop silhouette, ported from the legacy layered-
+-- Part precedent (GameServer.server.luau's ringMtns, the flag-off path) but CLUSTERED with real gaps
+-- instead of an even ring, so empty sky reads between them. Parts, not terrain — zero sculpt cost
+-- (invariant ④: every one is CanQuery=false, so the style-economy meter can't drift). A mid ridge
+-- (r≈6200, warm-shifted Rock) and a farther, taller, cooler/bluer snow-capped range (r≈8200) give
+-- aerial-perspective depth; the far range is phase-offset from the mid ridge so the sky gaps layer
+-- instead of stacking. Every crest Y is hash-jittered unique so no two overlapping Parts can share a
+-- top-face Y (the coplanarity gate).
+--------------------------------------------------------------------------------
+local MOUNTAIN_MID_R, MOUNTAIN_FAR_R = 6200, 8200
+-- Explicit, uneven cluster azimuths (not an evenly-spaced ring) — the gaps BETWEEN clusters are the
+-- point. The far range is phase-offset from the mid range so their sky gaps don't stack, and az=0 is
+-- forced on the far range: behind the mesa at (1150,0), the waterfall's backdrop peak.
+local MOUNTAIN_MID_CLUSTERS = { 20, 95, 150, 230, 300, 345 }
+local MOUNTAIN_FAR_CLUSTERS = { 0, 60, 130, 195, 260, 320 }
+local MOUNTAIN_SNOW_COLOR = Color3.fromRGB(232, 238, 246)
+
+-- mountainColor(cool) → warm Rock (cool=0, mid ridge) fading to a cooler, bluer Rock (cool=1, far
+-- peaks) — the aerial-perspective cue the thin haze then finishes with distance fog.
+local function mountainColor(cool)
+	return Color3.fromRGB(
+		math.floor(120 - 22 * cool),
+		math.floor(112 - 14 * cool),
+		math.floor(100 + 46 * cool)
+	)
+end
+
+-- buildDistantMountains() → plan.parts records (Parts, not terrain). Pure: only Vector3/Color3 value
+-- construction, matching buildCatchFloorPart's contract. CanQuery=false (CastShadow/CanCollide=false
+-- come from build()'s Part-minting loop defaults).
+local function buildDistantMountains()
+	local parts = {}
+	local function emitCluster(centerAz, r, hMin, hMax, wMin, wMax, cool, snowCap, seedBase)
+		local n = 2 + math.floor(n01(seedBase) * 2) -- 2..3 overlapping blocks per cluster
+		for k = 1, n do
+			local h1 = seedBase + k * 37
+			local az = centerAz + (n01(h1) - 0.5) * 18 -- spread within ~18° of the cluster center
+			local a = math.rad(az)
+			local rr = r + (n01(h1 + 3) - 0.5) * 500
+			local h = hMin + n01(h1 + 7) * (hMax - hMin)
+			local w = wMin + n01(h1 + 11) * (wMax - wMin)
+			local px, pz = math.cos(a) * rr, math.sin(a) * rr
+			-- Coplanarity gate: jitter every crest Y unique so no overlapping pair shares a top-face Y.
+			local crestY = h / 2 - 20 + (n01(h1 + 13) - 0.5) * 4
+			parts[#parts + 1] = {
+				name = "Peak" .. tostring(#parts + 1),
+				size = Vector3.new(w, h, w),
+				pos = Vector3.new(px, crestY, pz),
+				canQuery = false,
+				transparency = 0,
+				color = mountainColor(cool),
+				material = Enum.Material.Rock,
+			}
+			if snowCap and h > (hMin + hMax) / 2 then
+				local capH = h * 0.16 + 10
+				parts[#parts + 1] = {
+					name = "PeakSnow" .. tostring(#parts + 1),
+					size = Vector3.new(w * 0.62, capH, w * 0.62),
+					pos = Vector3.new(px, h - 20 + (n01(h1 + 17) - 0.5) * 3, pz),
+					canQuery = false,
+					transparency = 0,
+					color = MOUNTAIN_SNOW_COLOR,
+					material = Enum.Material.Snow,
 				}
 			end
 		end
 	end
 
-	-- Talus: scree slopes on the inner face, toe r=3450 (Y≈0) rising to the block bases r≈4150.
-	local TAL_N, toe, baseR = 24, 3450, 4150
-	for i = 0, TAL_N - 1 do
-		local ad = (i / TAL_N) * 360
-		local a = math.rad(ad)
-		local mid = (toe + baseR) / 2
-		local px, pz = math.cos(a) * mid, math.sin(a) * mid
-		local w = (2 * math.pi * mid) / TAL_N * 1.15
-		talus[#talus + 1] = { x = px, y = 70, z = pz, sx = w, sy = 140, sz = baseR - toe, yaw = -a }
+	for ci, az in ipairs(MOUNTAIN_MID_CLUSTERS) do
+		emitCluster(az, MOUNTAIN_MID_R, 700, 1400, 700, 1100, 0.0, false, ci * 500)
+	end
+	for ci, az in ipairs(MOUNTAIN_FAR_CLUSTERS) do
+		emitCluster(az, MOUNTAIN_FAR_R, 1600, 2600, 900, 1500, 1.0, true, 3000 + ci * 500)
 	end
 
-	-- M3 rim restyle (c): a FOOT BAND of Grass/LeafyGrass fills right where the talus toe meets the
-	-- meadow floor (the first ~80-150 studs of the rise), so the rim wall grows OUT of the meadow
-	-- instead of butting against it as a bare seam.
-	local foot = {}
-	local FOOT_N, footInnerR = 32, toe - 90
-	for i = 0, FOOT_N - 1 do
-		local ad = (i / FOOT_N) * 360
-		local a = math.rad(ad)
-		local band = 80 + n01(i * 41 + 5) * 70 -- 80..150 studs of radial rise, jittered per wedge
-		local mid = footInnerR + band / 2
-		local w = (2 * math.pi * mid) / FOOT_N * 1.3
-		local mat = (n01(i * 31 + 71) < 0.55) and "Grass" or "LeafyGrass"
-		foot[#foot + 1] = { x = math.cos(a) * mid, y = -2, z = math.sin(a) * mid, sx = w, sy = 6, sz = band, yaw = -a, mat = mat }
-	end
-
-	return blocks, snow, talus, foot
+	return parts
 end
 
 --------------------------------------------------------------------------------
@@ -240,7 +363,8 @@ local function buildWater()
 			name = "ValleyLake", surfaceY = -2, floorY = -10, deboxed = true,
 			region = { minX = -2600, maxX = -1800, minZ = -2400, maxZ = -1600 },
 		},
-		-- The distant WestSea past the western rim. Still a box carve (a coastline, not a pond).
+		-- The distant WestSea past the open west foothill arc — a true open-water horizon now that the
+		-- rim wall is gone. Still a box carve (a coastline, not a pond).
 		{
 			name = "WestSea", surfaceY = -2, floorY = -12,
 			region = { minX = -13000, maxX = -7600, minZ = -9000, maxZ = 9000 },
@@ -465,8 +589,8 @@ function WorldGen.scatterPlan(cfg, seed)
 		}
 	end
 
-	-- 1) Rocks along the rim base ring (r 3150..3350, safely inside SCATTER_MAX_R). sizeMul 1.3: rim
-	-- rocks read bigger than shore/meadow rocks (both role "rock") at flight altitude.
+	-- 1) Rocks along the foothill base ring (r 3150..3350, safely inside SCATTER_MAX_R). sizeMul 1.3:
+	-- these rocks read bigger than shore/meadow rocks (both role "rock") at flight altitude.
 	local ROCK_RING_N = 44
 	for k = 0, ROCK_RING_N - 1 do
 		local ad = (k / ROCK_RING_N) * 360 + (scatterHash(seed, k) - 0.5) * 6
@@ -525,10 +649,14 @@ local function buildLighting()
 		FogColor = Color3.fromRGB(232, 208, 178),
 		GeographicLatitude = 35,
 		ShadowSoftness = 0.3,
+		-- Open-horizon packet: Density/Haze bumped so the far foothill/mountain backdrop dissolves into
+		-- aerial haze (fades the far ridges, dissolves the falloff-collar edge) instead of reading as a
+		-- hard cutoff — a bluer Decay reinforces the far-fade. Keep ClockTime/Bloom/ColorCorrection
+		-- (locked golden-hour rig) untouched.
 		Atmosphere = {
-			Density = 0.10, Offset = 0.6, Haze = 1.8, Glare = 0.4,
+			Density = 0.20, Offset = 0.6, Haze = 3.2, Glare = 0.4,
 			Color = Color3.fromRGB(255, 205, 165),
-			Decay = Color3.fromRGB(115, 95, 125),
+			Decay = Color3.fromRGB(100, 92, 140),
 		},
 		ColorCorrection = {
 			Brightness = 0.02, Contrast = 0.08, Saturation = 0.18,
@@ -588,12 +716,12 @@ end
 -- ops: B=FillBlock, W=FillWedge, C=FillCylinder(upright), L=FillBall. Materials are STRING keys
 -- (sculpt maps them to Enum.Material) so plan() never constructs an Enum it doesn't need.
 --------------------------------------------------------------------------------
-local function assembleOps(rimBlocks, rimSnow, rimTalus, rimFoot, paintCells, water)
+local function assembleOps(foothills, foothillToe, falloffCollar, paintCells, water)
 	local ops = {}
 	-- B() — a FillBlock op. Roblox Terrain rejects a fill ("Extents are too large") if any axis exceeds
 	-- MAX_FILL_EXTENT OR the region volume exceeds MAX_FILL_VOLUME — the volume check is the one that
-	-- bites blocks whose every axis looks fine (the rotated rim PEAKS: sx=sz≈1231.5, sy 1593-2044, all
-	-- < 4000, but sx*sy*sz ≈ 2.4-3.1e9 studs³). So tile ANY oversized block — axis-aligned or rotated,
+	-- bites blocks whose every axis looks fine (the historical bug: the old rotated rim-PEAK blocks had
+	-- sx=sz≈1231.5, sy 1593-2044, all < 4000, but sx*sy*sz ≈ 2.4-3.1e9 studs³). So tile ANY oversized block — axis-aligned or rotated,
 	-- on X/Y/Z alike — into equal-size sub-blocks split along the block's own LOCAL axes, each satisfying
 	-- both limits. Equal-size children (not "full tile + remainder") means every sub-block is identical
 	-- geometry, so no sliver fills and the union exactly reproduces the original volume.
@@ -693,45 +821,14 @@ local function assembleOps(rimBlocks, rimSnow, rimTalus, rimFoot, paintCells, wa
 		local rr = 300
 		B(1150 + math.cos(a) * rr, -2, 0 + math.sin(a) * rr, 130, 4, 130, (i % 2 == 0) and "Mud" or "Ground", -a)
 	end
-	-- 5) APRON — four Ground slabs (Y 4..28) framing r≈4600→±8000 so no void reads past the rim.
-	B(6300, 16, 0, 3400, 24, 16000, "Ground")
-	B(-6300, 16, 0, 3400, 24, 16000, "Ground")
-	B(0, 16, 6300, 9200, 24, 3400, "Ground")
-	B(0, 16, -6300, 9200, 24, 3400, "Ground")
-	-- 6) RIM blocks + snow caps + talus + the M3 grass foot band.
-	-- RIM SHELL (not solid): a profiler + volume pass showed each rim block's buried core (everything
-	-- below the visible crest, down to the deep catch floor) was 84% of ALL sculpt-op volume in the whole
-	-- map — cost with zero visual return, since nothing is ever below the rim's outer/inner faces. Each
-	-- block becomes 3 fills instead of 1: an inner-face wall and an outer-face wall (both RIM_WALL_T studs
-	-- thick, spanning the full height from RIM_BASE_Y up to the crest), plus a full-footprint top skin
-	-- (RIM_SKIN_T studs thick, spanning the block's whole sx×sz footprint at the crest). Every EXTERIOR
-	-- surface — inner face, outer face, and crest — lands at the exact same world radius/height the solid
-	-- block had; nothing visible changes. The full-footprint skins are the same footprint the solid tops
-	-- were, so the two rings' skins still overlap exactly as before, sealing the inter-ring trench with no
-	-- gap. The hollow interior this creates is sealed on every side: the two walls close it radially down
-	-- to RIM_BASE_Y (-40, at/below the deep catch floor), the skin closes it from above, and neighboring
-	-- blocks around the ring overlap tangentially the same way the solid blocks always did — so there is no
-	-- opening a bird's swept-sphere collision could ever find (P3 stays intact; exterior geometry identical
-	-- to the solid version). Capture-gated via the rim-nadir/west-pass/outside-in poses.
-	local RIM_WALL_T, RIM_SKIN_T, RIM_BASE_Y = 100, 120, -40
-	local function emitRimShell(b)
-		local a  = math.atan2(b.z, b.x)
-		local R  = math.sqrt(b.x * b.x + b.z * b.z)
-		local w, h = b.sx, b.crest
-		local inR, outR = R - w / 2, R + w / 2
-		local wallY, wallSy = (h + RIM_BASE_Y) / 2, h - RIM_BASE_Y
-		local ri, ro = inR + RIM_WALL_T / 2, outR - RIM_WALL_T / 2
-		B(math.cos(a) * ri, wallY, math.sin(a) * ri, RIM_WALL_T, wallSy, b.sz, b.mat, b.yaw) -- inner face
-		B(math.cos(a) * ro, wallY, math.sin(a) * ro, RIM_WALL_T, wallSy, b.sz, b.mat, b.yaw) -- outer face
-		B(b.x, h - RIM_SKIN_T / 2, b.z, w, RIM_SKIN_T, b.sz, b.mat, b.yaw)                    -- full-footprint top skin
-	end
-	-- b.y and b.sy are unused by the emitter above (the shell derives its own Y-extents from b.crest and
-	-- RIM_BASE_Y) — do NOT strip them from the block records: buildRim's snow-cap pass, the talus/foot
-	-- bands, and the worldgen tests all still read fields off these same records.
-	for _, b in ipairs(rimBlocks) do emitRimShell(b) end
-	for _, s in ipairs(rimSnow) do B(s.x, s.y, s.z, s.sx, s.sy, s.sz, "Snow") end
-	for _, t in ipairs(rimTalus) do W(t.x, t.y, t.z, t.sx, t.sy, t.sz, "Ground", t.yaw) end
-	for _, f in ipairs(rimFoot) do B(f.x, f.y, f.z, f.sx, f.sy, f.sz, f.mat, f.yaw) end
+	-- 5) FOOTHILLS + toe blend — the broken low hill ring (replaces the old rim wall + apron). Solid
+	-- B() fills: these are low enough (crest ≤ ~320) that the buried core is cheap, unlike the old
+	-- 1800-tall rim peaks that needed hollowing into a shell.
+	for _, h in ipairs(foothills) do B(h.x, h.y, h.z, h.sx, h.sy, h.sz, h.mat, h.yaw) end
+	for _, t in ipairs(foothillToe) do B(t.x, t.y, t.z, t.sx, t.sy, t.sz, t.mat, t.yaw) end
+	-- 6) FALLOFF COLLAR — thin descending Ground skin past the foothills (r≈5400→6800) so the ground
+	-- visibly falls away into the haze instead of ending at a hard edge.
+	for _, c in ipairs(falloffCollar) do B(c.x, c.y, c.z, c.sx, c.sy, c.sz, c.mat, c.yaw) end
 	-- 7) MICRO RELIEF — grass mounds (≤6 protrusion) then rock outcrops (r1700-3000 arcs).
 	for _, m in ipairs(MOUNDS) do L(m.x, m.protrude - m.r, m.z, m.r, "Grass") end
 	for _, o in ipairs(OUTCROPS) do L(o.x, o.protrude - o.r, o.z, o.r, "Rock") end
@@ -761,20 +858,24 @@ local function assembleOps(rimBlocks, rimSnow, rimTalus, rimFoot, paintCells, wa
 		local a, b = RIVER.points[i], RIVER.points[i + 1]
 		carveSeg(a[1], a[2], b[1], b[2], RIVER.halfWidth, RIVER.surfaceY, RIVER.floorY)
 	end
-	-- 8d) WestSea box carve + coastal bluff + a Sand beach on the east edge near the west-pass sightline.
+	-- 8d) WestSea box carve + coastal bluff + a Sand beach on the east edge, now the open west horizon
+	-- (the foothill west arc + falloff collar are open there — see WEST_ARC). The unseen Rock floor
+	-- beneath the water is never walked on or seen (the P3 catch floor backstops it), so it's thinned
+	-- from 40 studs to 8 (open-horizon packet) — saves ≈3.1e9 studs³ of dead-weight sculpt volume with
+	-- zero visible change (water-P3 invariant still holds: floorY stays -12, well above the failsafe).
 	for _, body in ipairs(water) do
 		if not body.deboxed then
 			local reg = body.region
 			local cx, cz = (reg.minX + reg.maxX) / 2, (reg.minZ + reg.maxZ) / 2
 			local sx, sz = reg.maxX - reg.minX, reg.maxZ - reg.minZ
-			local floorBase = body.floorY - 40
+			local floorBase = body.floorY - 8
 			local carveTop = body.surfaceY + 2
 			B(cx, (body.floorY + carveTop) / 2, cz, sx, carveTop - body.floorY, sz, "Air")
 			B(cx, (body.floorY + floorBase) / 2, cz, sx, body.floorY - floorBase, sz, "Rock")
 			B(cx, (body.floorY + body.surfaceY) / 2, cz, sx, body.surfaceY - body.floorY, sz, "Water")
 			-- Coast bluff: a Ground lip (Y -2..28) along the east sea edge (X = maxX).
 			B(reg.maxX, 13, cz, 60, 30, sz, "Ground")
-			-- Sand beach: an ~800-long wedge on the east edge near the west-pass sightline (Z≈0).
+			-- Sand beach: an ~800-long wedge on the east edge, framing the open-water sightline (Z≈0).
 			W(reg.maxX + 30, 6, 0, 800, 24, 120, "Sand", 0)
 		end
 	end
@@ -810,11 +911,14 @@ function WorldGen.plan(cfg)
 	cfg = cfg or {}
 	local flight = cfg.Flight or {}
 
-	local rimBlocks, rimSnow, rimTalus, rimFoot = buildRim()
+	local foothills = buildFoothills()
+	local foothillToe = buildFoothillToe()
+	local falloffCollar = buildFalloffCollar()
 	local paintCells = buildPaint()
 	local water = buildWater()
-	local sculptOps = assembleOps(rimBlocks, rimSnow, rimTalus, rimFoot, paintCells, water)
+	local sculptOps = assembleOps(foothills, foothillToe, falloffCollar, paintCells, water)
 	local parts = { buildCatchFloorPart() }
+	for _, m in ipairs(buildDistantMountains()) do parts[#parts + 1] = m end
 
 	return {
 		-- Birth contract (must match legacy BuildMap: GameServer:260 Gravity, :267 StreamingEnabled).
@@ -831,13 +935,17 @@ function WorldGen.plan(cfg)
 		catchFloorY = CATCH_FLOOR_Y,
 		reachableRadius = REACHABLE_RADIUS,
 
-		-- Decorative Parts. Terrain does the work for everything visible, so this holds exactly ONE entry
-		-- today: the invisible P3 catch floor (buildCatchFloorPart above, canQuery=true — the documented
-		-- invariant-④ exception). Any FUTURE decorative Part added here MUST be canQuery=false.
+		-- Decorative Parts: the invisible P3 catch floor (buildCatchFloorPart, canQuery=true — the
+		-- documented invariant-④ exception) plus the distant backdrop mountains (buildDistantMountains,
+		-- canQuery=false). Any FUTURE decorative Part added here MUST be canQuery=false.
 		parts = parts,
 
-		-- M1.5 CONTENT — DATA consumed by sculpt/build, and read by the new gates.
-		rimPeaks = { peaks = PEAKS, westPass = WEST_PASS, blocks = rimBlocks, snowCaps = rimSnow, talus = rimTalus, foot = rimFoot },
+		-- OPEN-HORIZON CONTENT — DATA consumed by sculpt/build, and read by the new gates. westArc is
+		-- exposed alongside the hill records so a test/consumer can read the declared open azimuth
+		-- without re-deriving it from foothillAmp.
+		foothills = foothills,
+		foothillToe = foothillToe,
+		westArc = WEST_ARC,
 		river = { halfWidth = RIVER.halfWidth, surfaceY = RIVER.surfaceY, floorY = RIVER.floorY, points = RIVER.points, pool = POOL },
 		lakeCarve = LAKE_CARVE,
 		paintZones = paintCells,

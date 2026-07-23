@@ -6,8 +6,9 @@
 	same proven vector as tests/smoke/boot.smoke.luau). It builds the NEW worldV2 Terrain valley
 	directly via WorldGen.build(workspace, GameConfig) — regardless of the GameConfig.Map.worldV2
 	flag, because M2 look-dev iterates the WorldGen world specifically — then steps
-	workspace.CurrentCamera through a FIXED table of 11 vantage poses, printing a stdout sentinel at
-	each so tools/Capture-World.ps1 can grab the Studio window at the right moment.
+	workspace.CurrentCamera through a FIXED table of 14 vantage poses (open-horizon packet: 11→14),
+	printing a stdout sentinel at each so tools/Capture-World.ps1 can grab the Studio window at the
+	right moment.
 
 	═══ THE HARD CONSTRAINT (deviation from the MASTER-PLAN M2 wording) ═══
 	The plan's hardening ① calls for a "sentinel-FILE handshake". That is IMPOSSIBLE here:
@@ -69,7 +70,8 @@ end
 -- FIXED VANTAGE TABLE (hardening ③): committed config. Changing a pose is a reviewable diff, so
 -- no session can silently reframe flattering shots. Coordinates derive from world FACTS:
 --   valley center (0,0), datum Y=0, spawn box ±1200 @ Y=600, deliverPos (1150,250,0),
---   fire-grove annulus r 300..1400, perch band ≈1500, rim crest r≈5200 height≈1800.
+--   fire-grove annulus r 300..1400, perch band ≈1500, foothill crest r≈4300 height≈220,
+--   mid mountain clusters r≈6200, far mountain clusters r≈8200.
 -- CFrame.lookAt(eye, target) for readability — each looks at what the region is ABOUT.
 --------------------------------------------------------------------------------
 local VANTAGES = {
@@ -87,14 +89,25 @@ local VANTAGES = {
 	{ name = "fire-line",         cf = CFrame.lookAt(Vector3.new(-400, 150, 900), Vector3.new(400, 40, 100)) },
 	-- Behind and above the delivery pad, looking down at it (the delivery run).
 	{ name = "delivery-run",      cf = CFrame.lookAt(Vector3.new(1500, 500, 0),   Vector3.new(1150, 250, 0)) },
-	-- Low near the flat edge, looking OUT at the rim + sky — the aerial-depth / atmosphere read.
+	-- Low near the flat edge, looking OUT at the foothills + falloff collar + sky — the money shot: the
+	-- ground should fall into the haze, with broken mountains against open sky, not a wall.
 	{ name = "horizon",           cf = CFrame.lookAt(Vector3.new(0, 200, -2800),  Vector3.new(0, 900, -6000)) },
-	-- Near-straight-down onto the rim's double-ring overlap band (rim-shell "before", from above the crests).
+	-- Near-straight-down onto the foothill ring from above the crests — verifies the hills read rolling
+	-- and broken (gaps between them), not a continuous ridge.
 	{ name = "rim-nadir",         cf = CFrame.lookAt(Vector3.new(4600, 2800, 0),  Vector3.new(4600, 200, 0)) },
-	-- Through the lowest rim saddle toward the sea (rim-shell "before", through the west-pass gap).
-	{ name = "west-pass",         cf = CFrame.lookAt(Vector3.new(-1500, 250, 0), Vector3.new(-6000, 500, 0)) },
-	-- High orbit outside the rim looking back at the outer face (rim-shell "before", from outside).
+	-- Through the open WEST_ARC toward the WestSea — renamed from "west-pass": with the west foothill
+	-- arc open (not a saddle in a wall), this is a true open-water horizon shot.
+	{ name = "west-sea-horizon",  cf = CFrame.lookAt(Vector3.new(-1500, 250, 0), Vector3.new(-6000, 500, 0)) },
+	-- High orbit outside the foothill ring looking back at the outer face + falloff collar — verifies
+	-- the surround reads as open rolling terrain from outside, not an enclosing wall.
 	{ name = "outside-in",        cf = CFrame.lookAt(Vector3.new(6500, 1500, 0), Vector3.new(4000, 600, 0)) },
+	-- ADDED (open-horizon packet): low, looking north along the mid-ridge mountain clusters — reads the
+	-- broken cluster silhouette + sky gaps between them.
+	{ name = "mountains-north",   cf = CFrame.lookAt(Vector3.new(0, 140, -3200), Vector3.new(0, 700, -7000)) },
+	-- ADDED: level with the mesa, looking at the forced az≈0 far-cluster peak — the waterfall backdrop.
+	{ name = "mountains-backdrop",cf = CFrame.lookAt(Vector3.new(700, 300, 0),   Vector3.new(7000, 900, 0)) },
+	-- ADDED: low, far out over the falloff collar — the eye-level haze read (Atmosphere Density/Haze).
+	{ name = "eye-level-haze",    cf = CFrame.lookAt(Vector3.new(0, 120, 3000),  Vector3.new(0, 180, 7000)) },
 }
 
 -- DWELL: the sync budget. Held long enough that PowerShell's settle+screenshot completes before
