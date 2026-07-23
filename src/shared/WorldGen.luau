@@ -902,7 +902,12 @@ function WorldGen.applyLighting(L, cfg)
 end
 
 function WorldGen.build(target, cfg)
+	-- S51 BOOT-CLOCK (Chad: "round 1 was over before the map ever rendered" — SOP: probe before
+	-- optimizing). One always-on print at the end of build() naming where the ~63s boot actually goes,
+	-- phase by phase, so a future slow-boot complaint has a named culprit instead of a guess.
+	local tStart = os.clock()
 	local plan = WorldGen.plan(cfg)
+	local tPlan = os.clock()
 
 	-- BIRTH CONTRACT — reproduce exactly what legacy BuildMap set (GameServer:260 / :267).
 	target.Gravity = plan.gravity
@@ -915,6 +920,7 @@ function WorldGen.build(target, cfg)
 		WorldGen.sculpt(terrain, plan)
 		WorldGen.applyStyle(terrain, plan.terrainStyle)
 	end
+	local tSculpt = os.clock()
 
 	-- DECORATIVE PARTS — under a fresh Workspace.Map folder so boot-diag still finds "Map".
 	local map = target:FindFirstChild("Map")
@@ -936,6 +942,7 @@ function WorldGen.build(target, cfg)
 		if p.material then part.Material = p.material end
 		part.Parent = map
 	end
+	local tParts = os.clock()
 
 	-- SCATTER (M4-B) — decorative mesh Models (rocks/bushes/logs) behind Map.meshScatter. plan.scatter
 	-- is always computed (pure); this loop is the only place Instances get minted, so flag-off is
@@ -965,9 +972,16 @@ function WorldGen.build(target, cfg)
 			if i % YIELD_EVERY == 0 then task.wait() end
 		end
 	end
+	local tScatter = os.clock()
 
 	-- LIGHTING RIG.
 	WorldGen.applyLighting(plan.lighting, cfg)
+	local tLighting = os.clock()
+
+	print(string.format(
+		"[BootClock] plan=%.3fs sculpt=%.3fs parts=%.3fs scatter=%.3fs lighting=%.3fs total=%.3fs",
+		tPlan - tStart, tSculpt - tPlan, tParts - tSculpt, tScatter - tParts, tLighting - tScatter,
+		tLighting - tStart))
 end
 
 -- clear(target) → honest flag-off: wipe the terrain and destroy the worldV2 "Map" folder.
