@@ -1422,9 +1422,62 @@ local function bootStamp(what)
 	print(string.format("[BootDiag/server] %7.3fs  %s", os.clock() - BOOT_T0, what))
 end
 
+-- S51 BOOT-BARRIER FIX (Chad: round 1 was over before the map ever rendered by ~63s). GameServer and
+-- RescueServer are independent server scripts with no boot barrier between them: this round loop used
+-- to free-run on wall clock while GameServer's WorldGen.build was still sculpting terrain, so round 1
+-- (and its 6s intermission) could burn through entirely before the client ever saw a renderable world.
+-- GameServer now publishes Workspace:SetAttribute("WorldReady", true) once ALL of its boot branches
+-- finish (worldV2 success, worldV2-failed fallback, or legacy) — wait on that here before this loop
+-- does anything else. Generous 120s timeout with a LOUD warn, never a silent hang (S45 SOP: loud > silent).
+local function waitForWorldReady()
+	if Workspace:GetAttribute("WorldReady") then
+		bootStamp("WorldReady already set")
+		return
+	end
+	local t0 = os.clock()
+	local ready = false
+	local conn
+	conn = Workspace:GetAttributeChangedSignal("WorldReady"):Connect(function()
+		if Workspace:GetAttribute("WorldReady") then ready = true end
+	end)
+	while not ready and (os.clock() - t0) < 120 do
+		if Workspace:GetAttribute("WorldReady") then ready = true; break end
+		task.wait(0.1)
+	end
+	conn:Disconnect()
+	if ready then
+		bootStamp(("WorldReady after %.2fs"):format(os.clock() - t0))
+	else
+		warn("[Rescue] WorldReady never arrived within 120s — proceeding anyway; the world may be unbuilt or still mid-sculpt.")
+	end
+end
+
+-- S51: round 1's ACTIVE phase must also wait for at least one player's bird to exist (Birds folder
+-- gets a child), so Chad never spawns mid- or post-round-1 again — only into an intermission or a
+-- fresh round. Subsequent rounds are untouched (players who leave mid-game shouldn't stall the loop).
+-- Same loud-timeout pattern as waitForWorldReady.
+local function waitForFirstPlayerBird()
+	local birds = Workspace:FindFirstChild("Birds") or Workspace:WaitForChild("Birds", 120)
+	if not birds then
+		warn("[Rescue] Birds folder never appeared while waiting for round 1's first player — starting round 1 anyway.")
+		return
+	end
+	if #birds:GetChildren() > 0 then return end
+	local t0 = os.clock()
+	while #birds:GetChildren() == 0 and (os.clock() - t0) < 120 do
+		task.wait(0.25)
+	end
+	if #birds:GetChildren() > 0 then
+		bootStamp(("first player bird appeared after %.2fs"):format(os.clock() - t0))
+	else
+		warn("[Rescue] No player bird appeared within 120s of round 1 waiting to start — starting anyway.")
+	end
+end
+
 local triageBucket = 0
 local function RescueRoundLoop()
 	bootStamp("round loop entered")
+	waitForWorldReady()
 	resolveMission()
 	bootStamp("mission resolved: " .. tostring(R.activeMission or "?"))
 	-- S50 audit FIX 2: fire every unique mesh template's CDN fetch in ONE parallel batch before buildWorld
@@ -1478,6 +1531,10 @@ local function RescueRoundLoop()
 		end
 
 		-- ROUND
+		if roundIndex == 1 then
+			-- S51: never let round 1 go ACTIVE (and burn its clock) before Chad has even spawned a bird.
+			waitForFirstPlayerBird()
+		end
 		startRound()
 		bootStamp("ROUND ACTIVE — all squirrels populated in ONE frame")
 		triageBucket = 0
