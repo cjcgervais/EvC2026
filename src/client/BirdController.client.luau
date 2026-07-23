@@ -1325,12 +1325,19 @@ task.spawn(function()
 	-- Red-team FIX 1: SavedQualityLevel reads 0 forever on the common "Automatic" setting — that's the
 	-- USER'S PREFERENCE, not what the engine is actually rendering at. GraphicsQualityLevel is the LIVE
 	-- value Automatic ramps at runtime (same property the verbose probe above reads). Print both.
+	-- S51 FIX (Chad's live log: this printed "quality=-1/0"): the live read chained `.Value`
+	-- (`ugs.GraphicsQualityLevel.Value`) as if it were an EnumItem/ValueBase, but the property itself
+	-- is the plain value already — indexing `.Value` off it errors inside the pcall, so live/saved
+	-- silently came back nil and the %d format coerced that to -1. The verbose probe above
+	-- (`qualityNow`/`prop`, reported working back in S44) never chains `.Value` — it reads the
+	-- property directly with its own per-property pcall and tostring()s whatever comes back. Read it
+	-- the SAME way here instead of re-deriving a different path.
 	local function qualityLevels()
 		local ok, ugs = pcall(function() return UserSettings():GetService("UserGameSettings") end)
-		if not ok or not ugs then return -1, -1 end
-		local okLive, live = pcall(function() return ugs.GraphicsQualityLevel.Value end)
-		local okSaved, saved = pcall(function() return ugs.SavedQualityLevel.Value end)
-		return (okLive and live) or -1, (okSaved and saved) or -1
+		if not ok or not ugs then return nil, nil end
+		local okLive, live = pcall(function() return ugs.GraphicsQualityLevel end)
+		local okSaved, saved = pcall(function() return ugs.SavedQualityLevel end)
+		return (okLive and live ~= nil) and live or nil, (okSaved and saved ~= nil) and saved or nil
 	end
 	-- Red-team FIX 2: origin+200 down 400 studs can't reach the valley floor (Y=0..-80) from cruise
 	-- altitude — a false negative during ordinary high flight. Cast from well above any reachable
@@ -1346,8 +1353,13 @@ task.spawn(function()
 	for _, mark in ipairs({ 5, 15, 30 }) do
 		while (os.clock() - _G.EvCBootT0) < mark do task.wait(0.25) end
 		local liveQ, savedQ = qualityLevels()
-		print(("[BootClock/client] t=%ds quality=%d/%d map=%d rescue=%d terrainColliding=%s")
-			:format(mark, liveQ, savedQ, count("Map"), count("RescueWorld"), tostring(terrainColliding())))
+		-- A genuinely unavailable level (Studio Play sometimes doesn't populate these until the
+		-- render pipeline has run a frame) prints "auto" instead of a broken "-1" so the line reads
+		-- as an honest "don't know yet", not a failing instrument.
+		local liveStr = liveQ and tostring(liveQ) or "auto"
+		local savedStr = savedQ and tostring(savedQ) or "auto"
+		print(("[BootClock/client] t=%ds quality=%s/%s map=%d rescue=%d terrainColliding=%s")
+			:format(mark, liveStr, savedStr, count("Map"), count("RescueWorld"), tostring(terrainColliding())))
 	end
 end)
 
