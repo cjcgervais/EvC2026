@@ -6,6 +6,14 @@ Read this first. It tells the next agent exactly where the project stands, the o
 
 ## ▶▶ S50 COLD START — FABLE-LED BUILD (current; supersedes the S48/S49 box below, kept as history)
 
+**🏆 S50 VERDICT — CHAD ACCEPTED THE FULL MESH-WORLD BUILD (2026-07-23, flown):** *"it took a while
+to load in but once it did it was amazing. Very nice."* The M4 mesh forest + organic valley + audited
+boot passed the terminal accept gate in one flight. **OPEN residual: "took a while to load in"** —
+boot-to-drawn is still slow to his eye even after the Remotes-first reorder + parallel mesh prewarm;
+next lever candidates: the ~58-frame terrain sculpt (progressive is fine but the player waits for
+spawn), client-side drawn-clock instrumentation (per `feedback-when-a-fix-fails-reinstrument` — probe
+BEFORE fixing), mesh RenderFidelity/LoD. Next in plan: M5 polish / M6 audio ids / B7 mobile.
+
 **S50b FULL-GAME AUDIT (Chad-requested, 4 parallel Opus auditors + fix batch, all verified):** 6 fixes
 landed `ac2ac8b..c08e8ee` — ① Remotes now created BEFORE the pcall'd `WorldGen.build` (legacy fallback
 on failure; kills the black-screen class BOTH auditors found independently: any build error/slow CDN
