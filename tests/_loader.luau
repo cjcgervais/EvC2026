@@ -47,6 +47,7 @@ local MODULES = {
 	GroundDetail  = "src/shared/GroundDetail.luau",
 	WorldGen      = "src/shared/WorldGen.luau",
 	AssetManifest = "src/shared/AssetManifest.luau",
+	MeshFactory   = "src/shared/MeshFactory.luau",
 }
 
 -- Preload every source string (before any luau.load; fs yields).

@@ -374,3 +374,112 @@ H.test("fill extent: no sculpt op exceeds the Terrain per-axis fill limit on X o
 				:format(i, tostring(o.op), tostring(o.mat), ex, ez, MAX))
 	end
 end)
+
+--------------------------------------------------------------------------------
+-- 13. SCATTER (M4-B) — WorldGen.scatterPlan bounds: inside the valley, clear of every exclusion zone,
+-- y sampled from heightAt, within budget, and deterministic for a fixed seed.
+--------------------------------------------------------------------------------
+local SCATTER_VALLEY_R = 3400 -- FLAT_R; every scatter point (rim-base ring included) stays inside it
+local SCATTER_BUDGET = 140
+
+H.test("scatter: every point sits inside the valley radius, with y sampled from heightAt", function()
+	local plan = WorldGen.plan(GameConfig)
+	H.ok(#plan.scatter > 0, "plan.scatter is empty — the scatter gate would be vacuous")
+	for _, p in ipairs(plan.scatter) do
+		local r = math.sqrt(p.x * p.x + p.z * p.z)
+		H.ok(r <= SCATTER_VALLEY_R,
+			("%s at (%.0f,%.0f) is at r=%.0f, outside the %d valley radius"):format(p.role, p.x, p.z, r, SCATTER_VALLEY_R))
+		H.eq(p.y, plan.heightAt(p.x, p.z), ("%s at (%.0f,%.0f): y must equal heightAt(x,z)"):format(p.role, p.x, p.z))
+		H.ok(p.role == "rock" or p.role == "bush" or p.role == "log",
+			("unexpected scatter role %q — MeshFactory role mapping only covers rock/bush/log"):format(tostring(p.role)))
+	end
+end)
+
+H.test("scatter: no point falls inside the spawn core, the pad approach, or any water carve", function()
+	local plan = WorldGen.plan(GameConfig)
+	local coreHalf = GameConfig.Map.coreHalfExtent or 1200
+	local d = GameConfig.Rescue.deliverPos
+	local padR = GameConfig.Rescue.padClearRadius or 400
+	for _, p in ipairs(plan.scatter) do
+		H.ok(not (math.abs(p.x) <= coreHalf and math.abs(p.z) <= coreHalf),
+			("%s at (%.0f,%.0f) sits inside the ±%d spawn core"):format(p.role, p.x, p.z, coreHalf))
+		local pd = math.sqrt((p.x - d.X) ^ 2 + (p.z - d.Z) ^ 2)
+		H.ok(pd >= padR, ("%s at (%.0f,%.0f) is %.0f from the delivery pad (need >= %d)"):format(p.role, p.x, p.z, pd, padR))
+		for _, c in ipairs(plan.lakeCarve.cyls) do
+			local wd = math.sqrt((p.x - c.x) ^ 2 + (p.z - c.z) ^ 2)
+			H.ok(wd >= c.r, ("%s at (%.0f,%.0f) is inside the lake carve at (%.0f,%.0f)"):format(p.role, p.x, p.z, c.x, c.z))
+		end
+		for _, c in ipairs(plan.river.pool.cyls) do
+			local wd = math.sqrt((p.x - c.x) ^ 2 + (p.z - c.z) ^ 2)
+			H.ok(wd >= c.r, ("%s at (%.0f,%.0f) is inside the pool carve at (%.0f,%.0f)"):format(p.role, p.x, p.z, c.x, c.z))
+		end
+		for i = 1, #plan.river.points - 1 do
+			local a, b = plan.river.points[i], plan.river.points[i + 1]
+			local wd = pointSegDist(p.x, p.z, a[1], a[2], b[1], b[2])
+			H.ok(wd >= plan.river.halfWidth,
+				("%s at (%.0f,%.0f) is %.0f from river segment %d — inside the river channel"):format(p.role, p.x, p.z, wd, i))
+		end
+	end
+end)
+
+H.test("scatter: total count stays within the M4-B budget (<= 140)", function()
+	local plan = WorldGen.plan(GameConfig)
+	H.ok(#plan.scatter <= SCATTER_BUDGET, ("scatter has %d points (>%d budget)"):format(#plan.scatter, SCATTER_BUDGET))
+end)
+
+H.test("scatter: deterministic for a fixed seed", function()
+	local a = WorldGen.scatterPlan(GameConfig, 42)
+	local b = WorldGen.scatterPlan(GameConfig, 42)
+	H.eq(#a, #b, "scatter point count drifted between calls with the same seed")
+	for i = 1, #a do
+		H.eq(a[i].role, b[i].role, ("scatter[%d].role drifted"):format(i))
+		H.approx(a[i].x, b[i].x, 1e-9, ("scatter[%d].x drifted"):format(i))
+		H.approx(a[i].z, b[i].z, 1e-9, ("scatter[%d].z drifted"):format(i))
+		H.approx(a[i].rotY, b[i].rotY, 1e-9, ("scatter[%d].rotY drifted"):format(i))
+	end
+	-- a different seed must (almost certainly) produce a different layout — proves seed is load-bearing.
+	local c = WorldGen.scatterPlan(GameConfig, 43)
+	local anyDiff = (#a ~= #c)
+	if not anyDiff then
+		for i = 1, #a do
+			if math.abs(a[i].x - c[i].x) > 1e-6 or math.abs(a[i].z - c[i].z) > 1e-6 then anyDiff = true; break end
+		end
+	end
+	H.ok(anyDiff, "changing the seed produced an identical scatter layout — seed is not load-bearing")
+end)
+
+H.test("scatter: the kill switch exists (honest flag)", function()
+	H.ok(GameConfig.Map.meshScatter ~= nil, "GameConfig.Map.meshScatter is nil — the kill switch must exist")
+	H.ok(GameConfig.Map.meshTrees ~= nil, "GameConfig.Map.meshTrees is nil — the kill switch must exist")
+	H.ok(GameConfig.Map.meshSky ~= nil, "GameConfig.Map.meshSky is nil — the kill switch must exist")
+end)
+
+--------------------------------------------------------------------------------
+-- 14. SOURCE-GATE (M4-B) — plantTree/buildTree still mint parts named "Canopy" and "Trunk", and the
+-- meshTrees path sets Transparency = 1 rather than deleting/renaming the contract parts. Grep-style,
+-- like the P3 catch-floor gate above — this pins RescueServer.server.luau's SHAPE, not its behavior
+-- (Lune cannot run a script that touches Workspace/Players).
+--------------------------------------------------------------------------------
+H.test("source-gate: RescueServer's buildTree still mints \"Trunk\"/\"Canopy\" parts", function()
+	local src = require("@lune/fs").readFile("src/server/RescueServer.server.luau")
+	H.ok(src:find('uprightCylinder%("Trunk"') ~= nil, "buildTree must still mint a part named \"Trunk\"")
+	H.ok(src:find('anchoredPart%("Canopy"') ~= nil, "buildTree must still mint parts named \"Canopy\"")
+end)
+
+H.test("source-gate: the meshTrees path sets Transparency=1 rather than deleting the contract parts", function()
+	local src = require("@lune/fs").readFile("src/server/RescueServer.server.luau")
+	H.ok(src:find("meshTrees") ~= nil, "buildTree must read a meshTrees flag")
+	-- trunk.Transparency = 1 and blob.Transparency = 1 must both appear; neither Trunk nor Canopy may
+	-- ever be :Destroy()'d by the mesh-swap path.
+	H.ok(src:find("trunk%.Transparency%s*=%s*1") ~= nil, "the meshTrees path must set trunk.Transparency = 1")
+	H.ok(src:find("blob%.Transparency%s*=%s*1") ~= nil, "the meshTrees path must set blob.Transparency = 1")
+	H.ok(src:find("trunk:Destroy%(%)") == nil, "the mesh-swap path must NEVER destroy the trunk contract part")
+	H.ok(src:find("blob:Destroy%(%)") == nil, "the mesh-swap path must NEVER destroy a Canopy contract part")
+end)
+
+H.test("source-gate: every MeshFactory.build call site sets Anchored/CanCollide/CanQuery/CanTouch/CastShadow=false", function()
+	local src = require("@lune/fs").readFile("src/shared/MeshFactory.luau")
+	for _, flag in ipairs({ "Anchored = true", "CanCollide = false", "CanQuery = false", "CanTouch = false", "CastShadow = false" }) do
+		H.ok(src:find(flag, 1, true) ~= nil, ("MeshFactory.build must set %s on every part it creates"):format(flag))
+	end
+end)

@@ -30,6 +30,8 @@ local BirdBuilder = require(ReplicatedStorage:WaitForChild("BirdBuilder"))
 local RescueRules = require(ReplicatedStorage:WaitForChild("RescueRules"))
 local FireGrid    = require(ReplicatedStorage:WaitForChild("FireGrid"))  -- THE FIRE (B1): pure fire-cell clock; driven per-round only in fire missions (inert otherwise)
 local FireVisuals = require(ReplicatedStorage:WaitForChild("FireVisuals"))  -- THE FIRE (B2): pooled server-side render layer; built per-round only in fire missions (inert otherwise)
+local AssetManifest = require(ReplicatedStorage:WaitForChild("AssetManifest"))  -- M4-B: curated free-mesh prop data (pure)
+local MeshFactory    = require(ReplicatedStorage:WaitForChild("MeshFactory"))   -- M4-B: variant -> mesh Model applier
 
 local R = GameConfig.Rescue
 if not (R and R.enabled) then
@@ -156,7 +158,10 @@ local function legacyAxis()
 	return R.cylinderAxisFix == false
 end
 
-local function buildTree(pos)
+-- pineBias: probability the mesh swap (Map.meshTrees) picks a treePine variant over treeLeafy. Groves
+-- lean leafy (low bias, the default); backdrop trees mix in more pines for variety (buildWorld passes a
+-- higher bias there). Purely a mesh-visual choice — inert when meshTrees is off.
+local function buildTree(pos, pineBias)
 	-- B4.1 SOLID TREES: the eagle's swept-sphere sees a tree part only when it is queryable. The mode
 	-- knob decides per KIND (RescueRules.treeQueryable); "off" = the pre-B4 ghost forest, byte-identical.
 	-- Nothing lethal changes — Rescue.nonLethalTerrain already makes every impact a graze-slide.
@@ -165,16 +170,40 @@ local function buildTree(pos)
 	local h = 60 + rng:NextNumber() * 55           -- trunk height
 	-- S46: h is the AXIAL extent (the trunk's height), 7 the diameter. Passing (7, h) here is what
 	-- rendered every trunk as a 7-stud-tall, h-wide pancake with its canopy floating at crownY.
-	uprightCylinder("Trunk", h, 7, Color3.fromRGB(96, 66, 40), Enum.Material.Wood, worldFolder, trunkQ,
+	local trunk = uprightCylinder("Trunk", h, 7, Color3.fromRGB(96, 66, 40), Enum.Material.Wood, worldFolder, trunkQ,
 		pos + Vector3.new(0, h * 0.5, 0), legacyAxis())
 	-- Canopy: 2-3 green blobs clustered at the crown.
 	local crownY = pos.Y + h
 	local green = Color3.fromRGB(60 + rng:NextInteger(0, 30), 120 + rng:NextInteger(0, 40), 54 + rng:NextInteger(0, 24))
+	local meshTrees = GameConfig.Map and GameConfig.Map.meshTrees
+	local topY = crownY
 	for _ = 1, rng:NextInteger(2, 3) do
 		local d = 34 + rng:NextNumber() * 22
 		local blob = anchoredPart("Canopy", Vector3.new(d, d * 0.8, d), green, Enum.Material.Grass, worldFolder, canopyQ)
 		blob.Shape = Enum.PartType.Ball
-		blob.CFrame = CFrame.new(pos.X + (rng:NextNumber() - 0.5) * 26, crownY + (rng:NextNumber() - 0.5) * 14, pos.Z + (rng:NextNumber() - 0.5) * 26)
+		local by = crownY + (rng:NextNumber() - 0.5) * 14
+		blob.CFrame = CFrame.new(pos.X + (rng:NextNumber() - 0.5) * 26, by, pos.Z + (rng:NextNumber() - 0.5) * 26)
+		topY = math.max(topY, by + d * 0.5)
+		if meshTrees then
+			blob.Transparency = 1
+		end
+	end
+
+	-- M4-B: swap the visible geometry for a curated mesh (behind Map.meshTrees). THE CONTRACT PARTS
+	-- STAY: Trunk + every Canopy blob keep their exact names/sizes/positions/queryable registration
+	-- (CanopyCount, canopyQ, RescueRules.canopyRadius, B4.2 scoring, perch placement all read them
+	-- unchanged) — flag-on only sets Transparency=1 on them and adds a purely-visual mesh Model rooted
+	-- at the trunk base, scaled to the SAME total visual height (crown top - base) so squirrel perches
+	-- still sit in the mesh crown.
+	if meshTrees then
+		trunk.Transparency = 1
+		local isPine = rng:NextNumber() < (pineBias or 0.15)
+		local variants = isPine and AssetManifest.props.treePine or AssetManifest.props.treeLeafy
+		if variants and #variants > 0 then
+			local variant = variants[rng:NextInteger(1, #variants)]
+			local targetHeight = math.max(4, topY - pos.Y)
+			MeshFactory.build(variant, CFrame.new(pos), targetHeight, worldFolder)
+		end
 	end
 	return crownY
 end
@@ -386,7 +415,7 @@ local function buildWorld()
 		local rad = 140 + rng:NextNumber() * ((R.valleyRadius or 1600) - 140)
 		local pos = Vector3.new(math.cos(ang) * rad, 0, math.sin(ang) * rad)
 		if mesaTooClose(pos) then continue end
-		buildTree(pos)   -- no perch: pure backdrop
+		buildTree(pos, 0.45)   -- no perch: pure backdrop; mixes in more pines than groves (mesh visual only)
 		placed += 1
 	end
 

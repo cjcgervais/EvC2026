@@ -1499,6 +1499,18 @@ GameConfig.Map = {
 	-- only at gates). false = the untouched legacy gray-box path (SetupLighting + BuildMap) exactly,
 	-- Terrain cleared. One-word revert. Legacy retained until Gate V passes, then deleted.
 	worldV2        = true,
+
+	-- M4-B (Phase V mesh pass, S50) — one-word kill switches for the curated free-asset mesh visuals
+	-- layered onto worldV2 (src/shared/MeshFactory.luau + src/shared/AssetManifest.luau). Each defaults
+	-- true; false restores the prior geometry/behavior byte-identically (honesty rule) — flag off means
+	-- ZERO new mesh Instances, not "fewer".
+	meshTrees   = true,  -- procedural tree Trunk/Canopy parts (RescueServer.buildTree) go Transparency=1
+	                      -- and a curated tree mesh (AssetManifest.props.treeLeafy/treePine) is built at
+	                      -- the same base position, scaled to the same total visual height.
+	meshScatter = true,  -- WorldGen.scatterPlan's deterministic rocks/bushes/logs (≤140 total, rim base
+	                      -- ring + shores + meadow annulus) get built as mesh Models.
+	meshSky     = true,  -- Lighting.Sky gets AssetManifest.skybox's six textures + sun; the existing
+	                      -- Atmosphere/ColorCorrection/Bloom golden-hour rig is untouched.
 }
 
 -- AMBIENT ATMOSPHERE — the drifting "burning valley" field (drifting embers, ash, warm motes).

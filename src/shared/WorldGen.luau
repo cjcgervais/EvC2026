@@ -44,6 +44,12 @@
 
 local WorldGen = {}
 
+-- M4-B (Phase V mesh pass): AssetManifest is pure data (safe to require at module load — no Instances
+-- touched); MeshFactory's applier touches `game`/Instance only inside function bodies, so requiring it
+-- here is also safe under the Lune loader (module load never calls those functions).
+local AssetManifest = require(script.Parent.AssetManifest)
+local MeshFactory = require(script.Parent.MeshFactory)
+
 --------------------------------------------------------------------------------
 -- BOWL PROFILE — the pure continuous height field. Y=0 is the datum. heightAt backs the datum gate
 -- and the "rim rises" gate; the PEAKED rim silhouette is separate discrete block DATA (buildRim).
@@ -314,6 +320,115 @@ local function buildPaint()
 end
 
 --------------------------------------------------------------------------------
+-- SCATTER (M4-B) — decorative mesh-prop positions: rocks along the rim base ring + near the lake/pool
+-- shores, bushes+logs sprinkled across the meadow annulus. PURE (no Instances, no game, no
+-- math.random) — MeshFactory.build (engine) and WorldGen.build's scatter applier consume this. Nothing
+-- here specifically avoids grove centres: the spec's "groves handled by trees already" means the
+-- procedural groves (RescueServer) already occupy that space, not that this module knows where they are.
+--------------------------------------------------------------------------------
+local SCATTER_MAX_R = FLAT_R - 50 -- keep every scatter point safely inside the flat playable floor
+local SCATTER_SEED = 20260722     -- S50; fixed so the scatter is identical on every boot (M4-B)
+local SCATTER_BUDGET = 140
+
+local function scatterHash(seed, i)
+	return n01(seed * 977 + i * 131 + 17)
+end
+
+-- Exclusion: the spawn core box, the delivery-pad approach circle, and every water carve (with margin).
+local function scatterExcluded(x, z, coreHalf, deliverPos, padClearR)
+	if math.abs(x) <= coreHalf and math.abs(z) <= coreHalf then return true end
+	if deliverPos then
+		local dx, dz = x - deliverPos.X, z - deliverPos.Z
+		if dx * dx + dz * dz < padClearR * padClearR then return true end
+	end
+	for i = 1, #RIVER.points - 1 do
+		local a, b = RIVER.points[i], RIVER.points[i + 1]
+		if pointSegDist(x, z, a[1], a[2], b[1], b[2]) < RIVER.halfWidth + 60 then return true end
+	end
+	for _, c in ipairs(LAKE_CARVE.cyls) do
+		if math.sqrt((x - c.x) ^ 2 + (z - c.z) ^ 2) < c.r + 60 then return true end
+	end
+	for _, c in ipairs(POOL.cyls) do
+		if math.sqrt((x - c.x) ^ 2 + (z - c.z) ^ 2) < c.r + 60 then return true end
+	end
+	return false
+end
+
+-- scatterPlan(cfg, seed) -> array of { role, x, y, z, rotY, vseed, hseed }. PURE; deterministic for a
+-- fixed (cfg, seed) pair. `vseed`/`hseed` ∈ [0,1) let the applier deterministically pick an
+-- AssetManifest variant + target height without this module knowing AssetManifest's internal shape.
+-- role ∈ "rock" | "bush" | "log" (the roles the curated manifest actually has coverage for — treeLeafy/
+-- treePine are handled by RescueServer's tree swap, not this scatter).
+function WorldGen.scatterPlan(cfg, seed)
+	seed = seed or SCATTER_SEED
+	cfg = cfg or {}
+	local rescue = cfg.Rescue or {}
+	local deliverPos = rescue.deliverPos or Vector3.new(1150, 250, 0)
+	local padClearR = rescue.padClearRadius or 400
+	local coreHalf = (cfg.Map and cfg.Map.coreHalfExtent) or 1200
+
+	local pts = {}
+	local i = 0
+	local function push(role, x, z)
+		-- Shore rocks are offset from a water carve center, which can itself sit close to SCATTER_MAX_R
+		-- (e.g. the ValleyLake), so the offset point must be re-checked against the valley radius too —
+		-- not just the ring/annulus radii the callers below already stayed inside of.
+		if math.sqrt(x * x + z * z) > SCATTER_MAX_R then return end
+		if scatterExcluded(x, z, coreHalf, deliverPos, padClearR) then return end
+		i = i + 1
+		pts[#pts + 1] = {
+			role = role, x = x, z = z, y = surfaceY(x, z),
+			rotY = scatterHash(seed, i * 3 + 1) * 360,
+			vseed = scatterHash(seed, i * 3 + 2),
+			hseed = scatterHash(seed, i * 3 + 3),
+		}
+	end
+
+	-- 1) Rocks along the rim base ring (r 3150..3350, safely inside SCATTER_MAX_R).
+	local ROCK_RING_N = 44
+	for k = 0, ROCK_RING_N - 1 do
+		local ad = (k / ROCK_RING_N) * 360 + (scatterHash(seed, k) - 0.5) * 6
+		local a = math.rad(ad)
+		local r = 3150 + scatterHash(seed, k + 900) * 200
+		push("rock", math.cos(a) * r, math.sin(a) * r)
+	end
+
+	-- 2) Rocks near the lake + pool shores (just outside each carve's radius).
+	local shoreCenters = {}
+	for _, c in ipairs(LAKE_CARVE.cyls) do shoreCenters[#shoreCenters + 1] = c end
+	for _, c in ipairs(POOL.cyls) do shoreCenters[#shoreCenters + 1] = c end
+	local si = 0
+	for _, c in ipairs(shoreCenters) do
+		for _ = 0, 2 do
+			si = si + 1
+			local a = scatterHash(seed, si * 7 + 2000) * math.pi * 2
+			local r = c.r + 90 + scatterHash(seed, si * 11 + 2500) * 70
+			push("rock", c.x + math.cos(a) * r, c.z + math.sin(a) * r)
+		end
+	end
+
+	-- 3) Bushes + logs sprinkled over the meadow annulus (r 300..2600).
+	local MEADOW_BUSH_N, MEADOW_LOG_N = 50, 20
+	for k = 0, MEADOW_BUSH_N - 1 do
+		local a = scatterHash(seed, k + 4000) * math.pi * 2
+		local r = 300 + scatterHash(seed, k + 4500) * 2300
+		push("bush", math.cos(a) * r, math.sin(a) * r)
+	end
+	for k = 0, MEADOW_LOG_N - 1 do
+		local a = scatterHash(seed, k + 6000) * math.pi * 2
+		local r = 300 + scatterHash(seed, k + 6500) * 2300
+		push("log", math.cos(a) * r, math.sin(a) * r)
+	end
+
+	-- Defensive budget cap (today's counts sum to 129, well under 140).
+	while #pts > SCATTER_BUDGET do
+		table.remove(pts)
+	end
+
+	return pts
+end
+
+--------------------------------------------------------------------------------
 -- LIGHTING RIG (M1.5 target — ONE golden-hour starting point; do NOT blind-iterate further). Data
 -- only; applied in applyLighting().
 --------------------------------------------------------------------------------
@@ -544,6 +659,11 @@ function WorldGen.plan(cfg)
 
 		-- The load-bearing sites the datum / clearance gates check.
 		datumSamples = buildDatumSamples(),
+
+		-- M4-B — decorative mesh-prop scatter positions (rocks/bushes/logs). Always computed (pure,
+		-- cheap); WorldGen.build only turns it into Instances when Map.meshScatter is true, so flag-off
+		-- is honestly zero new Instances even though the plan data exists either way.
+		scatter = WorldGen.scatterPlan(cfg, SCATTER_SEED),
 	}
 end
 
@@ -591,7 +711,7 @@ function WorldGen.applyStyle(terrain, style)
 	end)
 end
 
-function WorldGen.applyLighting(L)
+function WorldGen.applyLighting(L, cfg)
 	local Lighting = game:GetService("Lighting")
 	Lighting.ClockTime = L.ClockTime
 	Lighting.Brightness = L.Brightness
@@ -620,7 +740,25 @@ function WorldGen.applyLighting(L)
 	bloom.Intensity, bloom.Size, bloom.Threshold = B.Intensity, B.Size, B.Threshold
 	bloom.Parent = Lighting
 
-	if not Lighting:FindFirstChild("Sky") then
+	-- M4-B: behind Map.meshSky, replace (or create) Lighting.Sky with AssetManifest.skybox's six
+	-- textures + sun — it JOINS the golden-hour rig above (Atmosphere/ColorCorrection/Bloom), it
+	-- doesn't replace it. Flag off (or missing cfg) = the plain default Sky, byte-identical to before.
+	if cfg and cfg.Map and cfg.Map.meshSky then
+		local existing = Lighting:FindFirstChild("Sky")
+		if existing then existing:Destroy() end
+		local sky = Instance.new("Sky")
+		sky.Name = "Sky"
+		local S = AssetManifest.skybox
+		sky.SkyboxBk = S.bk
+		sky.SkyboxDn = S.dn
+		sky.SkyboxFt = S.ft
+		sky.SkyboxLf = S.lf
+		sky.SkyboxRt = S.rt
+		sky.SkyboxUp = S.up
+		sky.SunTextureId = S.sun
+		sky.SunAngularSize = S.sunSize
+		sky.Parent = Lighting
+	elseif not Lighting:FindFirstChild("Sky") then
 		local sky = Instance.new("Sky")
 		sky.Name = "Sky"
 		sky.Parent = Lighting
@@ -663,8 +801,28 @@ function WorldGen.build(target, cfg)
 		part.Parent = map
 	end
 
+	-- SCATTER (M4-B) — decorative mesh Models (rocks/bushes/logs) behind Map.meshScatter. plan.scatter
+	-- is always computed (pure); this loop is the only place Instances get minted, so flag-off is
+	-- honestly zero new Instances. Respects the every-24-ops yield rule (S49 landmine).
+	if cfg and cfg.Map and cfg.Map.meshScatter then
+		local ROLE_TO_PROPS = { rock = AssetManifest.props.rock, bush = AssetManifest.props.bush, log = AssetManifest.props.log }
+		local scatterFolder = Instance.new("Folder")
+		scatterFolder.Name = "Scatter"
+		scatterFolder.Parent = map
+		for i, pt in ipairs(plan.scatter) do
+			local variants = ROLE_TO_PROPS[pt.role]
+			if variants and #variants > 0 then
+				local variant = variants[math.max(1, math.min(#variants, math.floor(pt.vseed * #variants) + 1))]
+				local targetHeight = math.max(2, variant.height * (0.7 + pt.hseed * 0.6))
+				local cf = CFrame.new(pt.x, pt.y, pt.z) * CFrame.Angles(0, math.rad(pt.rotY), 0)
+				MeshFactory.build(variant, cf, targetHeight, scatterFolder)
+			end
+			if i % YIELD_EVERY == 0 then task.wait() end
+		end
+	end
+
 	-- LIGHTING RIG.
-	WorldGen.applyLighting(plan.lighting)
+	WorldGen.applyLighting(plan.lighting, cfg)
 end
 
 -- clear(target) → honest flag-off: wipe the terrain and destroy the worldV2 "Map" folder.

@@ -58,6 +58,9 @@
       },
       "AssetManifest": {
         "$path": "src/shared/AssetManifest.luau"
+      },
+      "MeshFactory": {
+        "$path": "src/shared/MeshFactory.luau"
       }
     },
 
