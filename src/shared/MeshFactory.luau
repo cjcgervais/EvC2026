@@ -84,12 +84,31 @@ local function getTemplate(meshId)
 	return rec
 end
 
--- build(variant, cf, targetHeight, parent) -> the Model it built, or nil if the variant/height is unusable.
+-- build(variant, cf, targetHeight, parent, anchorBase) -> the Model it built, or nil if unusable.
 -- `cf` is the world CFrame of the variant's own local origin (its offset-{0,0,0} part sits there).
-function MeshFactory.build(variant, cf, targetHeight, parent)
+-- The extractor pins that origin at the FIRST part's CENTRE (rootCf:ToObjectSpace), which for a tree
+-- is the trunk centre — roughly mid-model, NOT the base. So by default `cf` places the model centred
+-- on cf. Pass anchorBase=true to instead land the model's LOWEST extent at cf's Y (base-at-ground) —
+-- what the tree swap needs so the mesh crown reaches the same height as the invisible canopy/perches
+-- instead of the trunk half-sinking into the terrain. Scatter leaves it false (origin-at-surface).
+function MeshFactory.build(variant, cf, targetHeight, parent, anchorBase)
 	local specs = MeshFactory.plan(variant, targetHeight)
 	if #specs == 0 then
 		return nil
+	end
+
+	-- Base-anchor lift: raise every part in WORLD-Y so the lowest part bottom sits at cf's Y. cf carries
+	-- at most a yaw (trees: none; scatter: Y-axis only), so its local Y == world Y and a world-vertical
+	-- pre-translation is exact. scaledSize/2 approximates each part's vertical half-extent (the trunk,
+	-- rot=0 and lowest, dominates the min — canopy tilt is a few studs, immaterial to grounding).
+	local baseLift = 0
+	if anchorBase then
+		local minY = math.huge
+		for _, spec in ipairs(specs) do
+			local bottom = spec.scaledOffset[2] - spec.scaledSize[2] * 0.5
+			if bottom < minY then minY = bottom end
+		end
+		if minY ~= math.huge then baseLift = -minY end
 	end
 
 	local model = Instance.new("Model")
@@ -126,7 +145,7 @@ function MeshFactory.build(variant, cf, targetHeight, parent)
 
 		local offsetCF = CFrame.new(spec.scaledOffset[1], spec.scaledOffset[2], spec.scaledOffset[3])
 			* CFrame.Angles(math.rad(spec.rot[1]), math.rad(spec.rot[2]), math.rad(spec.rot[3]))
-		inst.CFrame = cf * offsetCF
+		inst.CFrame = CFrame.new(0, baseLift, 0) * cf * offsetCF
 		inst.Parent = model
 	end
 

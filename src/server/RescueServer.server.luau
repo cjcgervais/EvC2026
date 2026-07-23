@@ -202,7 +202,10 @@ local function buildTree(pos, pineBias)
 		if variants and #variants > 0 then
 			local variant = variants[rng:NextInteger(1, #variants)]
 			local targetHeight = math.max(4, topY - pos.Y)
-			MeshFactory.build(variant, CFrame.new(pos), targetHeight, worldFolder)
+			-- anchorBase=true: pos.Y is the trunk BASE (the trunk is built at pos + h/2), so the mesh
+			-- must ground its lowest extent there — otherwise its trunk-centre origin sits at pos.Y and
+			-- ~40% of the tree sinks below the terrain, dropping the crown below the perch canopies.
+			MeshFactory.build(variant, CFrame.new(pos), targetHeight, worldFolder, true)
 		end
 	end
 	return crownY
