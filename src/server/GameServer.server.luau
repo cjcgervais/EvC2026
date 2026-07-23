@@ -2185,6 +2185,15 @@ end
 --------------------------------------------------------------------------------
 -- INITIALIZATION  (call order matters; everything below runs once at startup)
 --------------------------------------------------------------------------------
+-- S51 BOOT-BARRIER FIX (Chad: round 1 was over before the map ever rendered). RescueServer's round
+-- loop free-runs on wall clock with no idea GameServer is still mid-boot: it 60s-waits on the `Birds`
+-- folder (created lazily on first spawn) and races straight into round 1 while WorldGen.build is still
+-- sculpting terrain. Two independent fixes:
+--   (a) create Birds EAGERLY here (find-or-create — ensureBirdContainer is idempotent with spawnFor's
+--       lazy path) so RescueServer's WaitForChild resolves in ms, not near its 60s timeout.
+--   (b) publish Workspace:SetAttribute("WorldReady", true) once the world build (whichever of the 3
+--       branches below runs) is done, so RescueServer can barrier its own boot on it instead of guessing.
+local bootT0 = os.clock()
 -- S50 audit FIX 1: Remotes exist BEFORE (and independent of) the world build. WorldGen.build sculpts a
 -- real Terrain valley (~554 fills, yields every 24 ops — S49 boot-crash class) and previously ran
 -- un-pcalled ahead of CreateRemotes/connectRemotes, so a WorldGen exception left every Remote missing
@@ -2193,6 +2202,8 @@ end
 CreateThermals()
 CreateRemotes()
 connectRemotes()
+ensureBirdContainer() -- S51: eager Birds folder — see boot-barrier note above.
+local remotesElapsed = os.clock() - bootT0
 
 -- M1 (Phase V): behind GameConfig.Map.worldV2, WorldGen.build sets the birth contract
 -- (Gravity + StreamingEnabled, matching legacy BuildMap:260/267), sculpts the Terrain valley +
@@ -2200,6 +2211,7 @@ connectRemotes()
 -- legacy gray-box path (SetupLighting + BuildMap — the exact pair the flag-off branch always ran).
 -- pcall'd: a WorldGen failure now falls back to the legacy world instead of leaving Workspace half-built
 -- with Remotes already up (the client can still join/see a world, even if not the intended one).
+local worldT0 = os.clock()
 if GameConfig.Map and GameConfig.Map.worldV2 then
 	local okBuild, errBuild = pcall(WorldGen.build, Workspace, GameConfig)
 	if not okBuild then
@@ -2214,6 +2226,11 @@ else
 	SetupLighting()
 	BuildMap()
 end
+-- S51: WorldReady fires after ALL THREE branches above (worldV2 success, worldV2-pcall-failed
+-- fallback, and worldV2=false legacy) — every path leaves Workspace in a playable state by here.
+Workspace:SetAttribute("WorldReady", true)
+local worldElapsed = os.clock() - worldT0
+print(string.format("[BootClock] remotes=%.3fs worldbuild=%.3fs total=%.3fs", remotesElapsed, worldElapsed, os.clock() - bootT0))
 
 -- Players already present (Studio play-solo edge case) + future joiners.
 for _, player in ipairs(Players:GetPlayers()) do
