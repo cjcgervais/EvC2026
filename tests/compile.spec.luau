@@ -210,8 +210,15 @@ H.test("M1 wiring: WorldGen.build reproduces the birth contract and sculpts terr
 		"WorldGen.build no longer clears the Terrain — a re-build would stack voxels on the old world.")
 	H.ok(src:find(":FillBlock%(") ~= nil,
 		"WorldGen.build no longer calls Terrain:FillBlock — the valley/rim/water are never sculpted.")
-	H.ok(src:find("Enum%.Material%.Water") ~= nil,
-		"WorldGen no longer fills Material.Water — invariant ② (water bodies) is not built.")
+	-- M1.5: sculpt() is now a dumb interpreter over plan.sculptOps whose materials are STRING keys
+	-- mapped through Enum.Material[...]; water is filled by emitting `mat = "Water"` ops (the lake
+	-- de-box, the plunge pool, the river). Assert BOTH the interpreter and a Water op survive.
+	H.ok(src:find("Enum%.Material%[") ~= nil,
+		"WorldGen.sculpt no longer maps Enum.Material[...] — the sculptOps interpreter is gone and nothing is filled.")
+	H.ok(src:find('"Water"') ~= nil,
+		"WorldGen no longer emits a Water fill op — invariant ② (water bodies) is not built.")
+	H.ok(src:find(":FillCylinder%(") ~= nil,
+		"WorldGen.sculpt no longer calls Terrain:FillCylinder — the de-boxed lake / plunge pool are never carved.")
 	-- P3 void-death guard: the catch slab is the only thing standing between a graze off a solid
 	-- edge and the -200 failsafe, and the applier isn't lune-testable — so this source-gate is the
 	-- ONLY machine check that the slab exists, spans ±REACHABLE_RADIUS, and sits at CATCH_FLOOR_Y.

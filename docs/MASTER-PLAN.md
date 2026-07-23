@@ -421,6 +421,15 @@ cap unchanged; tree part count reviewed at C3 (art pass) with an explicit instan
   perches, discs) — Terrain itself cannot z-fight. Measured for the record: terrain fill
   wall-clock; client join/replication delta with `StreamingEnabled=false`; memory.
   `[model: opus | gate: tests (datum + water-P3 + canopy + drift + Part-coplanarity + contract)]`
+- **M1.5 — EMBER VALLEY CONTENT PASS. ✅ DONE S49 (commit-ready).** Fable-designed (rescue-gameplay-
+  architect), Opus-built extension of `WorldGen.luau`: peaked double-ring rim + a west pass, a river from
+  the waterfall plunge pool down to a de-boxed lake, lake/sea shorelines, micro-relief (36 mounds ≤6 +
+  16 landmark outcrops), a material-patchwork meadow that kills the S45 uniform-plane bug (red-team M1
+  Finding 5), a warmer golden-hour rig + a zero-asset `SetMaterialColor` palette. Sculpt refactored to a
+  495-op `sculptOps` interpreter. +5 gates (rim-variation, river/pool clearance, relief safety,
+  closure-cue coverage, fill budget). Tier-4 228/228, rojo PASS. APPEARANCE still unseen (needs a capture/
+  Studio boot); trees/waterfall/skybox = M4 meshes (blocked on Chad's asset pick). The valley is now a
+  FINISHED terrain+lighting state for Chad's terminal accept/reject.
 - **M2 — THE EYES (screenshot harness). ✅ HARNESS BUILT S49 (commit-ready; capture pending Chad's run).**
   Built `tools/Capture-World.ps1` + `tests/capture/world.capture.luau` (edit-mode WorldGen.build + 8
   committed vantages + stdout `M2READY`/dwell capture). Design deviation (documented): run-in-roblox is

@@ -188,7 +188,7 @@ H.test("contract: the lighting rig carries the expected effect tables", function
 	H.finite(L.ClockTime, "lighting.ClockTime must be a number (the golden low sun)")
 end)
 
-H.test("contract: plan is deterministic — identical heightAt + water + parts across two calls", function()
+H.test("contract: plan is deterministic — identical heightAt + water + parts + M1.5 content across two calls", function()
 	local a = WorldGen.plan(GameConfig)
 	local b = WorldGen.plan(GameConfig)
 	-- heightAt: identical over a spread of samples (incl. the rim).
@@ -202,10 +202,148 @@ H.test("contract: plan is deterministic — identical heightAt + water + parts a
 		H.eq(a.water[i].name, b.water[i].name, "water name drifted between calls")
 	end
 	H.eq(#a.parts, #b.parts, "parts count drifted between calls")
+	-- M1.5 content is DATA in plan(); the new gates would be meaningless if any of it drifted.
+	H.eq(#a.sculptOps, #b.sculptOps, "sculptOps count drifted between calls")
+	H.eq(a.fillOpCount, b.fillOpCount, "fillOpCount drifted between calls")
+	H.eq(#a.paintZones, #b.paintZones, "paintZones count drifted between calls")
+	H.eq(#a.rimPeaks.blocks, #b.rimPeaks.blocks, "rim block count drifted between calls")
+	H.eq(#a.relief.mounds, #b.relief.mounds, "relief mound count drifted between calls")
+	H.eq(#a.relief.outcrops, #b.relief.outcrops, "relief outcrop count drifted between calls")
+	H.eq(#a.river.points, #b.river.points, "river polyline drifted between calls")
+	-- a representative sculpt-op and rim crest are byte-identical.
+	H.eq(a.sculptOps[1].mat, b.sculptOps[1].mat, "sculptOps[1].mat drifted")
+	H.eq(a.rimPeaks.blocks[1].crest, b.rimPeaks.blocks[1].crest, "rim crest drifted between calls")
+	H.eq(a.paintZones[1].mat, b.paintZones[1].mat, "paintZones[1].mat drifted between calls")
 end)
 
 H.test("contract: the kill switch exists (honest flag)", function()
 	H.ok(GameConfig.Map ~= nil, "GameConfig.Map is missing")
 	H.ok(GameConfig.Map.worldV2 ~= nil,
 		"GameConfig.Map.worldV2 is nil — the kill switch must exist so flag-off restores the legacy path")
+end)
+
+--------------------------------------------------------------------------------
+-- 7. RIM-VARIATION (M1.5) — the rim is a ring of PEAKS, not a wall. Distinct crest heights, a real
+-- tall/short contrast, and (outside the declared west-pass saddle) crests that actually read as peaks.
+--------------------------------------------------------------------------------
+H.test("rim-variation: the crest has ≥6 distinct heights, a ≥2.5 tall/short ratio, and peaks outside the west pass", function()
+	local plan = WorldGen.plan(GameConfig)
+	local rp = plan.rimPeaks
+	H.ok(rp and rp.blocks and #rp.blocks > 0, "rimPeaks.blocks is empty — the rim gate would be vacuous")
+	local distinct, lo, hi = {}, math.huge, -math.huge
+	local nDistinct = 0
+	for _, b in ipairs(rp.blocks) do
+		H.finite(b.crest, "a rim block has a non-finite crest height")
+		local bucket = math.floor(b.crest / 25 + 0.5)
+		if not distinct[bucket] then distinct[bucket] = true; nDistinct += 1 end
+		lo = math.min(lo, b.crest); hi = math.max(hi, b.crest)
+		-- Every crest reads as a peak (>300) EXCEPT within the declared west-pass arc.
+		local inWestPass = b.ad >= rp.westPass.azMin and b.ad <= rp.westPass.azMax
+		H.ok(b.crest > 300 or inWestPass,
+			("rim block at az=%.0f crests at only Y=%.0f (<300) yet is outside the west pass — that reads as a gap, not a peak")
+				:format(b.ad, b.crest))
+	end
+	H.ok(nDistinct >= 6, ("the rim has only %d distinct crest heights (<6) — it reads as a uniform wall"):format(nDistinct))
+	H.ok(hi / lo >= 2.5, ("rim tall/short ratio is %.2f (<2.5) — no silhouette variation"):format(hi / lo))
+end)
+
+--------------------------------------------------------------------------------
+-- 8. RIVER / POOL CLEARANCE (M1.5) — the water threading the datum must never reach a load-bearing
+-- site (a grove/pad/spawn sample in the river or pool is an unearned bath), and every carve floors
+-- above the conservative line with a shallow (≤8) depth.
+--------------------------------------------------------------------------------
+local function pointSegDist(px, pz, ax, az, bx, bz)
+	local dx, dz = bx - ax, bz - az
+	local L2 = dx * dx + dz * dz
+	if L2 < 1e-9 then return math.sqrt((px - ax) ^ 2 + (pz - az) ^ 2) end
+	local t = math.max(0, math.min(1, ((px - ax) * dx + (pz - az) * dz) / L2))
+	return math.sqrt((px - (ax + t * dx)) ^ 2 + (pz - (az + t * dz)) ^ 2)
+end
+
+H.test("river/pool clearance: every datum sample stays clear of every river segment and water carve", function()
+	local plan = WorldGen.plan(GameConfig)
+	local riv, pool, lake = plan.river, plan.river.pool, plan.lakeCarve
+	local segMargin = riv.halfWidth + 40
+	for _, s in ipairs(plan.datumSamples) do
+		-- (a) river segments — point-to-segment ≥ halfWidth+40.
+		for i = 1, #riv.points - 1 do
+			local a, b = riv.points[i], riv.points[i + 1]
+			local d = pointSegDist(s.x, s.z, a[1], a[2], b[1], b[2])
+			H.ok(d >= segMargin,
+				("%s (%.0f,%.0f) is %.0f from river segment %d (need ≥%d) — the river would flood it"):format(s.label, s.x, s.z, d, i, segMargin))
+		end
+		-- (b) circular carves (pool + lake cylinders) — centre distance ≥ radius+40.
+		for _, group in ipairs({ pool.cyls, lake.cyls }) do
+			for _, c in ipairs(group) do
+				local d = math.sqrt((s.x - c.x) ^ 2 + (s.z - c.z) ^ 2)
+				H.ok(d >= c.r + 40,
+					("%s (%.0f,%.0f) is %.0f from a water carve at (%.0f,%.0f) r%d (need ≥%d)"):format(s.label, s.x, s.z, d, c.x, c.z, c.r, c.r + 40))
+			end
+		end
+	end
+	-- (c) floors above -40, depth ≤ 8.
+	for _, w in ipairs({ { n = "river", f = riv.floorY, s = riv.surfaceY }, { n = "pool", f = pool.floorY, s = pool.surfaceY }, { n = "lake", f = lake.floorY, s = lake.surfaceY } }) do
+		H.ok(w.f > -40, ("%s floors at Y=%.0f — must be > -40"):format(w.n, w.f))
+		H.ok(w.s - w.f <= 8, ("%s depth %.0f exceeds 8"):format(w.n, w.s - w.f))
+		H.ok(w.s > w.f, ("%s surface must sit above its floor"):format(w.n))
+	end
+end)
+
+--------------------------------------------------------------------------------
+-- 9. RELIEF SAFETY (M1.5) — the playable floor stays MICRO (invariant ①). Mounds ≤6 studs; outcrops
+-- (the only exception inside the playable band) live in the r1700-3000 arcs and ≥120 from every datum.
+--------------------------------------------------------------------------------
+H.test("relief safety: mounds are micro (≤6) and outcrops sit in the r1700-3000 arc ≥120 from every datum", function()
+	local plan = WorldGen.plan(GameConfig)
+	local rel = plan.relief
+	H.ok(rel and #rel.mounds > 0 and #rel.outcrops > 0, "relief tables are empty — the gate would be vacuous")
+	for _, m in ipairs(rel.mounds) do
+		H.ok(m.protrude <= 6, ("mound at (%.0f,%.0f) protrudes %.2f (>6) — that is macro relief on the datum floor"):format(m.x, m.z, m.protrude))
+	end
+	for _, o in ipairs(rel.outcrops) do
+		local r = math.sqrt(o.x * o.x + o.z * o.z)
+		H.between(r, 1700, 3000, ("outcrop at (%.0f,%.0f) is at r=%.0f, outside the declared r1700-3000 arc"):format(o.x, o.z, r))
+		local nearest = math.huge
+		for _, s in ipairs(plan.datumSamples) do
+			nearest = math.min(nearest, math.sqrt((o.x - s.x) ^ 2 + (o.z - s.z) ^ 2))
+		end
+		H.ok(nearest >= 120, ("outcrop at (%.0f,%.0f) is only %.0f from a datum sample (need ≥120)"):format(o.x, o.z, nearest))
+	end
+end)
+
+--------------------------------------------------------------------------------
+-- 10. CLOSURE-CUE COVERAGE (M1.5) — the deleted uniform LeafyGrass disc is replaced by a patchwork
+-- with genuine material variety at every scale, and no single material dominating.
+--------------------------------------------------------------------------------
+H.test("closure-cue coverage: the paint patchwork is varied (≥3 mats <r1500, ≥4 <r2600) and unclustered", function()
+	local plan = WorldGen.plan(GameConfig)
+	local cells = plan.paintZones
+	H.ok(#cells > 0, "paintZones is empty — the map would be a uniform plane again (the S45 bug)")
+	local function distinct(maxR)
+		local set, n = {}, 0
+		for _, c in ipairs(cells) do
+			if math.sqrt(c.x * c.x + c.z * c.z) < maxR then
+				if not set[c.mat] then set[c.mat] = true; n += 1 end
+			end
+		end
+		return n
+	end
+	H.ok(distinct(1500) >= 3, ("only %d distinct paint materials within r<1500 (need ≥3)"):format(distinct(1500)))
+	H.ok(distinct(2600) >= 4, ("only %d distinct paint materials within r<2600 (need ≥4)"):format(distinct(2600)))
+	local counts = {}
+	for _, c in ipairs(cells) do counts[c.mat] = (counts[c.mat] or 0) + 1 end
+	for mat, n in pairs(counts) do
+		H.ok(n / #cells <= 0.60, ("material %s is %.0f%% of cells (>60%%) — a near-uniform plane"):format(mat, 100 * n / #cells))
+	end
+end)
+
+--------------------------------------------------------------------------------
+-- 11. FILL BUDGET (M1.5) — the sculptOps list is the whole world's fill cost; keep it bounded and
+-- honestly recorded (fillOpCount must equal the list it claims to count).
+--------------------------------------------------------------------------------
+H.test("fill budget: total sculpt fill ops ≤700 (recorded)", function()
+	local plan = WorldGen.plan(GameConfig)
+	H.eq(plan.fillOpCount, #plan.sculptOps, "plan.fillOpCount does not match #plan.sculptOps — the recorded budget is a lie")
+	print(("        [fill-budget] WorldGen sculpts %d terrain fill ops"):format(#plan.sculptOps))
+	H.ok(#plan.sculptOps <= 700, ("WorldGen sculpts %d fill ops (>700) — the terrain build is over budget"):format(#plan.sculptOps))
 end)

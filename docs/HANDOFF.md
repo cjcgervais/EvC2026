@@ -16,6 +16,21 @@ sourced; every packet leaves the published look visibly closer.*
 
 **How to run:** `/model` **Opus** → `"run the master loop"`. The SKILL now has a **HEADING gate**
 — answer its 3 questions (heading / landfill / plumbing-ratio) in the ledger at every packet pick.
+Git commits are NO LONGER ASK-gated (Chad S49) — auto-commit each verified packet.
+
+**▶▶ S49 STATE — the REAL MAP is built (terrain+lighting), UNSEEN, awaiting Chad's look.**
+M1 + M1.5 replaced the gray box with a finished Terrain valley: peaked double-ring rim + west pass,
+river → plunge pool → de-boxed lake, shorelines, micro-relief mounds + landmark outcrops, material-
+patchwork meadow, golden-hour rig + terrain color palette; hidden −120 catch slab keeps P3 (no
+void-death). M2 built the screenshot harness. All committed (`f732f8d` M1, `5edf32b` M2, + M1.5).
+Tier-4 228/228. **APPEARANCE UNVERIFIED — nothing has rendered.** Chad is the TERMINAL accept/reject
+gate (memory `feedback-chad-terminal-accept-reject`): he judges the finished valley whole, no iteration.
+**▶ CHAD, to advance:** (1) SEE it — `powershell -NoProfile -ExecutionPolicy Bypass -File
+tools\Capture-World.ps1` (PNGs → `captures\S49\`), or boot Studio (`Map.worldV2` is ON by default).
+(2) ACCEPT/REJECT the terrain+lighting valley. (3) The named next unblock is **M4 meshes** (trees/
+waterfall/skybox) — needs your ASSET pick (drop a Synty-style pack into `assets/`, or approve verified
+creator-store IDs per bar §1.5). Open Q the capture resolves: does the EDIT-mode Studio viewport follow
+the scripted camera? If shots are the editor default view → the one-flythrough fallback.
 
 **The queue is MASTER-PLAN §5.5, re-cut S48 (map-first M-series):**
 **M1 ✅ DONE S49 (commit-ready, uncommitted — ASK).** `src/shared/WorldGen.luau` built: PURE `plan`
