@@ -18,7 +18,14 @@ sourced; every packet leaves the published look visibly closer.*
 — answer its 3 questions (heading / landfill / plumbing-ratio) in the ledger at every packet pick.
 Git commits are NO LONGER ASK-gated (Chad S49) — auto-commit each verified packet.
 
-**▶▶ S49 STATE — the REAL MAP is built (terrain+lighting), UNSEEN, awaiting Chad's look.**
+**▶▶ S49 STATE — the REAL MAP is built AND CHAD ACCEPTED IT ("it looks really good I saw it").**
+The map-first pivot landed: gray box → an accepted terrain+lighting valley in one session. APPEARANCE
+now VERIFIED (Chad booted it in Studio — the integrated scene, groves/waterfall re-seat on the new
+terrain). Next lever = **M4 meshes** (his asset pick). M2 auto-capture is unreliable (run-in-roblox
+script-timeout on the dwell sequence — it builds+caught the extents bug but emits 0 images); use Studio
+boot / a flythrough for future look-checks. Details in the S49 box below + the ledger.
+
+**(historical) ▶▶ S49 STATE — the REAL MAP is built (terrain+lighting), UNSEEN, awaiting Chad's look.**
 M1 + M1.5 replaced the gray box with a finished Terrain valley: peaked double-ring rim + west pass,
 river → plunge pool → de-boxed lake, shorelines, micro-relief mounds + landmark outcrops, material-
 patchwork meadow, golden-hour rig + terrain color palette; hidden −120 catch slab keeps P3 (no
