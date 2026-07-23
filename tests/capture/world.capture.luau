@@ -6,7 +6,7 @@
 	same proven vector as tests/smoke/boot.smoke.luau). It builds the NEW worldV2 Terrain valley
 	directly via WorldGen.build(workspace, GameConfig) — regardless of the GameConfig.Map.worldV2
 	flag, because M2 look-dev iterates the WorldGen world specifically — then steps
-	workspace.CurrentCamera through a FIXED table of 8 vantage poses, printing a stdout sentinel at
+	workspace.CurrentCamera through a FIXED table of 11 vantage poses, printing a stdout sentinel at
 	each so tools/Capture-World.ps1 can grab the Studio window at the right moment.
 
 	═══ THE HARD CONSTRAINT (deviation from the MASTER-PLAN M2 wording) ═══
@@ -89,6 +89,12 @@ local VANTAGES = {
 	{ name = "delivery-run",      cf = CFrame.lookAt(Vector3.new(1500, 500, 0),   Vector3.new(1150, 250, 0)) },
 	-- Low near the flat edge, looking OUT at the rim + sky — the aerial-depth / atmosphere read.
 	{ name = "horizon",           cf = CFrame.lookAt(Vector3.new(0, 200, -2800),  Vector3.new(0, 900, -6000)) },
+	-- Near-straight-down onto the rim's double-ring overlap band (rim-shell "before", from above the crests).
+	{ name = "rim-nadir",         cf = CFrame.lookAt(Vector3.new(4600, 2800, 0),  Vector3.new(4600, 200, 0)) },
+	-- Through the lowest rim saddle toward the sea (rim-shell "before", through the west-pass gap).
+	{ name = "west-pass",         cf = CFrame.lookAt(Vector3.new(-1500, 250, 0), Vector3.new(-6000, 500, 0)) },
+	-- High orbit outside the rim looking back at the outer face (rim-shell "before", from outside).
+	{ name = "outside-in",        cf = CFrame.lookAt(Vector3.new(6500, 1500, 0), Vector3.new(4000, 600, 0)) },
 }
 
 -- DWELL: the sync budget. Held long enough that PowerShell's settle+screenshot completes before

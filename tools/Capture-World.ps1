@@ -1,11 +1,11 @@
 <#
-.SYNOPSIS  M2 "THE EYES": build the worldV2 valley in EDIT mode and screenshot 8 fixed vantages.
+.SYNOPSIS  M2 "THE EYES": build the worldV2 valley in EDIT mode and screenshot 11 fixed vantages.
 .DESCRIPTION
     Phase V, packet M2. Produces the contact sheet Fable audits against VISUAL-QUALITY-BAR.md sec 2:
       1. Bootstrap Rojo + build EaglesVsCrows.rbxlx (unless -NoBuild and a place already exists).
       2. Bootstrap run-in-roblox (needs Roblox Studio installed).
       3. Launch Studio headlessly against the place, injecting tests/capture/world.capture.luau,
-         which builds the NEW WorldGen valley in edit mode and steps the camera through 8 poses.
+         which builds the NEW WorldGen valley in edit mode and steps the camera through 11 poses.
       4. Tail the injected script's stdout; on each `M2READY <i> <name>` line, settle briefly then
          screenshot the Studio window into captures/$Session/NN_name.png. Optionally montage them.
 
@@ -25,7 +25,7 @@
     mirroring Smoke-Boot.ps1 and verify.ps1's degrade contract.
 
     Exit codes:  0 = PASS (>=1 non-empty PNG saved)   1 = FAIL (injected script errored)   2 = UNAVAILABLE.
-.PARAMETER TimeoutSec  Hard wall for the Studio run (default 180s: cold-open + 8 * 2.5s dwell + slack).
+.PARAMETER TimeoutSec  Hard wall for the Studio run (default 180s: cold-open + 11 * 2.5s dwell + slack).
 .PARAMETER NoBuild     Reuse the existing EaglesVsCrows.rbxlx instead of rebuilding.
 .PARAMETER Session     Capture folder tag; images land in captures/<Session>/ (default S49).
 #>
