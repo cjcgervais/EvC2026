@@ -215,7 +215,14 @@ local function buildTree(pos, pineBias)
 			-- anchorBase=true: pos.Y is the trunk BASE (the trunk is built at pos + h/2), so the mesh
 			-- must ground its lowest extent there — otherwise its trunk-centre origin sits at pos.Y and
 			-- ~40% of the tree sinks below the terrain, dropping the crown below the perch canopies.
-			MeshFactory.build(variant, CFrame.new(pos), targetHeight, worldFolder, true)
+			-- S50 audit FIX 4: one bad manifest entry must never kill the boot — skip just this tree's
+			-- mesh swap (it stays as the invisible Trunk/Canopy contract parts) and keep planting the rest.
+			local okMesh, errMesh = pcall(function()
+				MeshFactory.build(variant, CFrame.new(pos), targetHeight, worldFolder, true)
+			end)
+			if not okMesh then
+				warn("[MeshProp] skipped " .. tostring(variant and variant.rootName) .. ": " .. tostring(errMesh))
+			end
 		end
 	end
 	return crownY

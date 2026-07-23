@@ -955,7 +955,12 @@ function WorldGen.build(target, cfg)
 				local roleMul = ROLE_SIZE_MUL[pt.role] or 1.0
 				local targetHeight = math.max(2, variant.height * (0.7 + pt.hseed * 0.6) * roleMul * (pt.sizeMul or 1.0))
 				local cf = CFrame.new(pt.x, pt.y, pt.z) * CFrame.Angles(0, math.rad(pt.rotY), 0)
-				MeshFactory.build(variant, cf, targetHeight, scatterFolder)
+				-- S50 audit FIX 4: one bad manifest entry (a dead meshId, a malformed variant) must never
+				-- kill the boot — skip just that prop and keep scattering the rest.
+				local okMesh, errMesh = pcall(MeshFactory.build, variant, cf, targetHeight, scatterFolder)
+				if not okMesh then
+					warn("[MeshProp] skipped " .. tostring(variant and variant.rootName) .. ": " .. tostring(errMesh))
+				end
 			end
 			if i % YIELD_EVERY == 0 then task.wait() end
 		end
