@@ -4,14 +4,17 @@
       "WebSearch",
       "WebFetch",
       "Bash",
-      "PowerShell"
+      "PowerShell",
+      "Edit",
+      "Write",
+      "Read",
+      "Glob",
+      "Grep",
+      "Skill",
+      "Agent",
+      "Task"
     ],
-    "ask": [
-      "Bash(git commit:*)",
-      "Bash(git push:*)",
-      "PowerShell(git commit:*)",
-      "PowerShell(git push:*)"
-    ]
+    "defaultMode": "acceptEdits"
   },
   "hooks": {
     "SessionStart": [
