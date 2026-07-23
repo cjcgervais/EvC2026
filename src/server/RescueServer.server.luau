@@ -205,6 +205,60 @@ local function buildWaterfall()
 		Vector3.new(d.X, R.deliverPadY + 6, d.Z), legacyAxis())
 	pool.Transparency = 0.35
 
+	-- Waterfall MOTION FX (M4, asset-free: all GPU-side particles, no per-frame server loop).
+	-- The `fall` sheet is 6(X) × 250(Y) × 120(Z) centred at (920, 125, 0): face normal ±X, the drop
+	-- runs down Y, the sheet spans Z. These emitters give the static glass sheet motion, base spray and
+	-- rising mist. Purely cosmetic — nothing here is queried, collided, or read by gameplay.
+	-- (1) Falling water DOWN the sheet — emitter parented to the sheet part emits throughout its 250-tall
+	-- volume; downward EmissionDirection + gravity-ish Acceleration streaks it down toward the pool.
+	local fallFX = Instance.new("ParticleEmitter")
+	fallFX.Name = "FallWaterFX"
+	fallFX.Color = ColorSequence.new(Color3.fromRGB(220, 238, 255), Color3.fromRGB(255, 255, 255))
+	fallFX.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 11), NumberSequenceKeypoint.new(1, 17) })
+	fallFX.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.4), NumberSequenceKeypoint.new(0.85, 0.45), NumberSequenceKeypoint.new(1, 1) })
+	fallFX.Lifetime = NumberRange.new(3.2, 4.0)
+	fallFX.Rate = 55
+	fallFX.Speed = NumberRange.new(35, 55)
+	fallFX.SpreadAngle = Vector2.new(6, 10)
+	fallFX.Acceleration = Vector3.new(0, -70, 0)
+	fallFX.EmissionDirection = Enum.NormalId.Bottom
+	fallFX.LightEmission = 0.3
+	fallFX.Parent = fall
+
+	-- Base attachment at the plunge-pool surface (~world (920, 3, 0)); carries the spray + rising mist.
+	local baseAtt = Instance.new("Attachment")
+	baseAtt.Position = Vector3.new(0, -(R.deliverPadY * 0.5) + 3, 0)
+	baseAtt.Parent = fall
+	-- (2) Impact SPRAY / foam — short-lived white burst UP + outward where the fall hits the pool.
+	local spray = Instance.new("ParticleEmitter")
+	spray.Name = "WaterfallSpray"
+	spray.Color = ColorSequence.new(Color3.fromRGB(240, 250, 255), Color3.new(1, 1, 1))
+	spray.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 5), NumberSequenceKeypoint.new(1, 12) })
+	spray.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.3), NumberSequenceKeypoint.new(1, 1) })
+	spray.Lifetime = NumberRange.new(0.5, 1.1)
+	spray.Rate = 50
+	spray.Speed = NumberRange.new(20, 45)
+	spray.SpreadAngle = Vector2.new(55, 55)
+	spray.Acceleration = Vector3.new(0, -60, 0)
+	spray.EmissionDirection = Enum.NormalId.Top
+	spray.LightEmission = 0.4
+	spray.Parent = baseAtt
+	-- (3) Rising base MIST — soft, large, near-transparent haze creeping up so the base reads atmospheric.
+	-- Complements the updraft's higher mist (below) rather than duplicating it.
+	local baseMist = Instance.new("ParticleEmitter")
+	baseMist.Name = "WaterfallBaseMist"
+	baseMist.Color = ColorSequence.new(Color3.fromRGB(225, 240, 252))
+	baseMist.Size = NumberSequence.new(34, 72)
+	baseMist.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.7), NumberSequenceKeypoint.new(1, 1) })
+	baseMist.Lifetime = NumberRange.new(3.0, 5.0)
+	baseMist.Rate = 12
+	baseMist.Speed = NumberRange.new(8, 16)
+	baseMist.SpreadAngle = Vector2.new(40, 40)
+	baseMist.Acceleration = Vector3.new(0, 6, 0)
+	baseMist.EmissionDirection = Enum.NormalId.Top
+	baseMist.LightEmission = 0.5
+	baseMist.Parent = baseAtt
+
 	-- Updraft column VFX — translucent cyan cylinder + rising mist so the ride reads. (Force is client-side.)
 	-- This site was ALWAYS correct (height first); it is routed through the helper for uniformity and
 	-- deliberately does NOT pass `legacy`, so the kill switch cannot break what was never broken.
