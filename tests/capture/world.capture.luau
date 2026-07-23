@@ -56,6 +56,15 @@ local okB, errB = pcall(function()
 end)
 need(okB, "WorldGen.build errored in real Studio: " .. tostring(errB))
 
+-- 3. SETTLE — the Terrain render mesher lags the voxel writes asynchronously (build() only issues the
+--    Fill* calls; the visual mesh regenerates on its own schedule), so shooting immediately after
+--    build() races it — two runs of this same script rendered differently. Hold a fixed settle window
+--    before the vantage loop so every capture run shoots the same converged mesh.
+print("[CAPTURE] settling...")
+for _ = 1, 12 do
+	task.wait(1)
+end
+
 --------------------------------------------------------------------------------
 -- FIXED VANTAGE TABLE (hardening ③): committed config. Changing a pose is a reviewable diff, so
 -- no session can silently reframe flattering shots. Coordinates derive from world FACTS:

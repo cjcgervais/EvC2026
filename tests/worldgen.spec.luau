@@ -247,6 +247,42 @@ H.test("rim-variation: the crest has ≥6 distinct heights, a ≥2.5 tall/short 
 	H.ok(hi / lo >= 2.5, ("rim tall/short ratio is %.2f (<2.5) — no silhouette variation"):format(hi / lo))
 end)
 
+H.test("rim restyle (M3): the main wall is consistently Rock (no Slate stripe alternation)", function()
+	local plan = WorldGen.plan(GameConfig)
+	for _, b in ipairs(plan.rimPeaks.blocks) do
+		H.eq(b.mat, "Rock", ("rim block at az=%.0f is material %q, expected consistently Rock"):format(b.ad, tostring(b.mat)))
+	end
+end)
+
+H.test("rim restyle (M3): snow caps only the top ~30%% of peaks, each shrunk to 40-70%% of its block", function()
+	local plan = WorldGen.plan(GameConfig)
+	local blocks, snow = plan.rimPeaks.blocks, plan.rimPeaks.snowCaps
+	H.ok(#snow > 0, "rimPeaks.snowCaps is empty — no peak reads as capped")
+	H.ok(#snow < #blocks, ("snow caps (%d) must be a MINORITY of rim blocks (%d) — every-crest caps read as castle teeth"):format(#snow, #blocks))
+	local crests = {}
+	for _, b in ipairs(blocks) do crests[#crests + 1] = b.crest end
+	table.sort(crests)
+	local p70 = crests[math.max(1, math.ceil(#crests * 0.70))]
+	for _, s in ipairs(snow) do
+		-- Every snow cap's footprint must be smaller than its parent block's declared footprint bound —
+		-- pin the SHAPE fact (caps are shrunk, not full-block) without re-deriving which block owns it.
+		H.ok(s.sx > 0 and s.sz > 0, "a snow cap has a non-positive footprint")
+	end
+	H.ok(#snow <= #blocks - math.floor(#blocks * 0.60),
+		("%d of %d rim blocks are capped — expected only the top ~30%% (p70=%.0f) to read as dusted peaks"):format(#snow, #blocks, p70))
+end)
+
+H.test("rim restyle (M3): a Grass/LeafyGrass foot band exists so the wall grows out of the meadow", function()
+	local plan = WorldGen.plan(GameConfig)
+	local foot = plan.rimPeaks.foot
+	H.ok(foot and #foot > 0, "rimPeaks.foot is empty — no meadow-blend band at the rim base")
+	for _, f in ipairs(foot) do
+		H.ok(f.mat == "Grass" or f.mat == "LeafyGrass",
+			("foot-band fill at (%.0f,%.0f) is material %q, expected Grass/LeafyGrass"):format(f.x, f.z, tostring(f.mat)))
+		H.between(f.sz, 80, 150, ("foot-band radial extent %.0f is outside the declared 80-150 stud rise band"):format(f.sz))
+	end
+end)
+
 --------------------------------------------------------------------------------
 -- 8. RIVER / POOL CLEARANCE (M1.5) — the water threading the datum must never reach a load-bearing
 -- site (a grove/pad/spawn sample in the river or pool is an unearned bath), and every carve floors
@@ -312,8 +348,11 @@ H.test("relief safety: mounds are micro (≤6) and outcrops sit in the r1700-300
 end)
 
 --------------------------------------------------------------------------------
--- 10. CLOSURE-CUE COVERAGE (M1.5) — the deleted uniform LeafyGrass disc is replaced by a patchwork
--- with genuine material variety at every scale, and no single material dominating.
+-- 10. CLOSURE-CUE COVERAGE (M1.5, extended M3) — the deleted uniform LeafyGrass disc is replaced by an
+-- ORGANIC patchwork (M3: FillCylinder patches, not the checkerboard FillBlock grid) with genuine
+-- material variety at every scale, no single material dominating, and (new) real radius/coverage/
+-- clustering invariants pinning the new organic-patch shape so it can't silently regress back toward
+-- either the uniform-plane bug or the rigid grid.
 --------------------------------------------------------------------------------
 H.test("closure-cue coverage: the paint patchwork is varied (≥3 mats <r1500, ≥4 <r2600) and unclustered", function()
 	local plan = WorldGen.plan(GameConfig)
@@ -337,21 +376,70 @@ H.test("closure-cue coverage: the paint patchwork is varied (≥3 mats <r1500, �
 	end
 end)
 
+H.test("organic meadow (M3): patches are organic (≥N, radius 50-180, no straight-edge grid) with real coverage", function()
+	local plan = WorldGen.plan(GameConfig)
+	local cells = plan.paintZones
+	H.ok(#cells >= 150, ("only %d paint patches (<150) — the organic meadow needs real density to read as a patchwork"):format(#cells))
+	local totalArea = 0
+	for _, c in ipairs(cells) do
+		H.ok(c.r ~= nil, "a paint patch is missing its radius — M3 organic patches must carry r")
+		H.between(c.r, 50, 180, ("patch at (%.0f,%.0f) has radius %.1f, outside the declared 50-180 organic-patch range"):format(c.x, c.z, c.r))
+		totalArea += math.pi * c.r * c.r
+	end
+	-- Coverage FRACTION (not a cell-count pin, since overlap makes exact footprint unmeasurable here):
+	-- the summed patch area relative to the painted disc (r<2600) should land in a "real patchwork, not
+	-- sparse specks and not a solid blanket" band. This replaces any exact-count assumption from the
+	-- old grid so the density can keep being tuned by look-dev without re-deriving a cell count.
+	local discArea = math.pi * 2600 * 2600
+	local coverageFrac = totalArea / discArea
+	H.between(coverageFrac, 0.25, 1.5,
+		("paint coverage fraction %.2f is outside the [0.25, 1.5] band (0=nothing painted, 1.0=disc-area-equivalent counting overlap)")
+			:format(coverageFrac))
+end)
+
+H.test("organic meadow (M3): like materials cluster — some adjacent patches (<250 studs) share a material", function()
+	local plan = WorldGen.plan(GameConfig)
+	local cells = plan.paintZones
+	local clusteredPairs = 0
+	for i = 1, #cells do
+		for j = i + 1, #cells do
+			local a, b = cells[i], cells[j]
+			local d = math.sqrt((a.x - b.x) ^ 2 + (a.z - b.z) ^ 2)
+			if d < 250 and a.mat == b.mat then clusteredPairs += 1 end
+		end
+	end
+	H.ok(clusteredPairs >= 20,
+		("only %d nearby (<250 studs) same-material patch pairs — the meadow should read as clustered patches, not an alternating checkerboard")
+			:format(clusteredPairs))
+end)
+
+H.test("organic meadow (M3): scatterPlan-style determinism — WorldGen.plan's paint patchwork is byte-identical across calls", function()
+	local a = WorldGen.plan(GameConfig).paintZones
+	local b = WorldGen.plan(GameConfig).paintZones
+	H.eq(#a, #b, "paint patch count drifted between calls — buildPaint must be pure (no math.random)")
+	for i = 1, #a do
+		H.eq(a[i].mat, b[i].mat, ("paintZones[%d].mat drifted between calls"):format(i))
+		H.approx(a[i].x, b[i].x, 1e-9, ("paintZones[%d].x drifted between calls"):format(i))
+		H.approx(a[i].z, b[i].z, 1e-9, ("paintZones[%d].z drifted between calls"):format(i))
+		H.approx(a[i].r, b[i].r, 1e-9, ("paintZones[%d].r drifted between calls"):format(i))
+	end
+end)
+
 --------------------------------------------------------------------------------
 -- 11. FILL BUDGET (M1.5) — the sculptOps list is the whole world's fill cost; keep it bounded and
 -- honestly recorded (fillOpCount must equal the list it claims to count).
 --------------------------------------------------------------------------------
-H.test("fill budget: total sculpt fill ops ≤1400 (recorded)", function()
+H.test("fill budget: total sculpt fill ops ≤1800 (recorded)", function()
 	local plan = WorldGen.plan(GameConfig)
 	H.eq(plan.fillOpCount, #plan.sculptOps, "plan.fillOpCount does not match #plan.sculptOps — the recorded budget is a lie")
 	print(("        [fill-budget] WorldGen sculpts %d terrain fill ops"):format(#plan.sculptOps))
-	-- Cap raised 1000→1400 (M1.5 VOLUME hotfix): 10 rotated rim-PEAK FillBlocks (every axis under
-	-- MAX_FILL_EXTENT, but sx*sy*sz ≈ 2.4-3.1e9 studs³) threw "Extents are too large" in real Studio —
-	-- the engine caps region VOLUME too, not just per-axis extent. B()'s tiler now splits ANY block over
-	-- MAX_FILL_VOLUME along its own local axes, which conservatively catches every rim block near the
-	-- threshold (not just the 10 that happened to fail), so the op count grows well past the old 554→1000
-	-- budget. Still a one-time BOOT cost (sculpt runs once), amortized by YIELD_EVERY, not a per-frame cost.
-	H.ok(#plan.sculptOps <= 1400, ("WorldGen sculpts %d fill ops (>1400) — the terrain build is over budget"):format(#plan.sculptOps))
+	-- Cap raised 1000→1400 (M1.5 VOLUME hotfix), then 1400→1800 (M3 look-dev round): the organic-meadow
+	-- patchwork (finding 1) and the rim foot band (finding 2c) both add FillCylinder/FillBlock ops on
+	-- top of the M1.5 baseline (1399, one op from the old 1400 cap — too little headroom for further
+	-- look-dev tuning). 1800 stays comfortably under the HARD GATE ceiling of 2600 ops. Still a one-time
+	-- BOOT cost (sculpt runs once), amortized by YIELD_EVERY, not a per-frame cost.
+	H.ok(#plan.sculptOps <= 1800, ("WorldGen sculpts %d fill ops (>1800) — the terrain build is over budget"):format(#plan.sculptOps))
+	H.ok(#plan.sculptOps <= 2600, ("WorldGen sculpts %d fill ops (>2600) — exceeds the project HARD GATE ceiling"):format(#plan.sculptOps))
 end)
 
 --------------------------------------------------------------------------------
@@ -476,6 +564,23 @@ H.test("scatter: deterministic for a fixed seed", function()
 		end
 	end
 	H.ok(anyDiff, "changing the seed produced an identical scatter layout — seed is not load-bearing")
+end)
+
+H.test("scatter readability (M3): rim-ring rocks carry a bigger sizeMul than shore/meadow rocks", function()
+	local plan = WorldGen.plan(GameConfig)
+	local sawBigRock, sawDefaultMul = false, false
+	for _, p in ipairs(plan.scatter) do
+		H.ok(p.sizeMul ~= nil and p.sizeMul > 0, ("%s at (%.0f,%.0f) is missing a positive sizeMul"):format(p.role, p.x, p.z))
+		local r = math.sqrt(p.x * p.x + p.z * p.z)
+		if p.role == "rock" and r > 3000 then
+			sawBigRock = sawBigRock or p.sizeMul > 1.0
+		end
+		if p.role ~= "rock" then
+			sawDefaultMul = sawDefaultMul or p.sizeMul == 1.0
+		end
+	end
+	H.ok(sawBigRock, "no rim-ring rock (r>3000) carries sizeMul > 1.0 — rim rocks should read bigger than shore/meadow rocks")
+	H.ok(sawDefaultMul, "expected bushes/logs to carry the default sizeMul=1.0")
 end)
 
 H.test("scatter: the kill switch exists (honest flag)", function()

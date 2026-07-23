@@ -153,12 +153,10 @@ local function buildRim()
 		local h = RIM_HEIGHT * rimFrac(ad) * (1 + (n01(i + 1) - 0.5) * 0.16) -- ±8% jitter
 		local px, pz = math.cos(a) * INNER_R, math.sin(a) * INNER_R
 		local w = (2 * math.pi * INNER_R) / INNER_N * 1.6
+		-- M3 rim restyle (a): the inner face reads consistently Rock (no Slate stripe alternation —
+		-- that alternation was the "vertical striping" the audit flagged).
 		local mat = "Rock"
-		if h < 1000 and n01(i * 3 + 7) < 0.33 then mat = "Slate" end -- ~1/3 of LOWER blocks → Slate
 		blocks[#blocks + 1] = { x = px, z = pz, y = h / 2 - 40, sx = w, sy = h + 80, sz = w, yaw = -a, mat = mat, crest = h, ad = ad }
-		if h > 1350 then
-			snow[#snow + 1] = { x = px, z = pz, y = h * 0.94, sx = w, sy = h * 0.12 + 20, sz = w }
-		end
 	end
 
 	local OUTER_R, OUTER_N = 4900, 40
@@ -170,10 +168,28 @@ local function buildRim()
 		local px, pz = math.cos(a) * OUTER_R, math.sin(a) * OUTER_R
 		local w = (2 * math.pi * OUTER_R) / OUTER_N * 1.6
 		local mat = "Rock"
-		if h < 1000 and n01(i * 7 + 3) < 0.33 then mat = "Slate" end
 		blocks[#blocks + 1] = { x = px, z = pz, y = h / 2 - 40, sx = w, sy = h + 80, sz = w, yaw = -a, mat = mat, crest = h, ad = ad }
-		if h > 1350 then
-			snow[#snow + 1] = { x = px, z = pz, y = h * 0.94, sx = w, sy = h * 0.12 + 20, sz = w }
+	end
+
+	-- M3 rim restyle (b): snow caps only the TOP ~30% of peaks by crest height (a real 70th-percentile
+	-- cutoff over the whole crest population, not a fixed Y threshold), each capped at an irregular
+	-- extent (40-70% of the block's own footprint) with a per-block jittered offset — a dusting on the
+	-- highest peaks, not a uniform white block on every crest ("castle teeth").
+	do
+		local crests = {}
+		for _, b in ipairs(blocks) do crests[#crests + 1] = b.crest end
+		table.sort(crests)
+		local p70 = crests[math.max(1, math.ceil(#crests * 0.70))]
+		for bi, b in ipairs(blocks) do
+			if b.crest >= p70 then
+				local extent = 0.40 + n01(bi * 13 + 29) * 0.30 -- 40%..70% of the block's footprint
+				local offX = (n01(bi * 17 + 3) - 0.5) * b.sx * 0.25
+				local offZ = (n01(bi * 19 + 41) - 0.5) * b.sz * 0.25
+				snow[#snow + 1] = {
+					x = b.x + offX, z = b.z + offZ, y = b.crest * 0.94,
+					sx = b.sx * extent, sy = b.crest * 0.12 + 20, sz = b.sz * extent,
+				}
+			end
 		end
 	end
 
@@ -188,7 +204,22 @@ local function buildRim()
 		talus[#talus + 1] = { x = px, y = 70, z = pz, sx = w, sy = 140, sz = baseR - toe, yaw = -a }
 	end
 
-	return blocks, snow, talus
+	-- M3 rim restyle (c): a FOOT BAND of Grass/LeafyGrass fills right where the talus toe meets the
+	-- meadow floor (the first ~80-150 studs of the rise), so the rim wall grows OUT of the meadow
+	-- instead of butting against it as a bare seam.
+	local foot = {}
+	local FOOT_N, footInnerR = 32, toe - 90
+	for i = 0, FOOT_N - 1 do
+		local ad = (i / FOOT_N) * 360
+		local a = math.rad(ad)
+		local band = 80 + n01(i * 41 + 5) * 70 -- 80..150 studs of radial rise, jittered per wedge
+		local mid = footInnerR + band / 2
+		local w = (2 * math.pi * mid) / FOOT_N * 1.3
+		local mat = (n01(i * 31 + 71) < 0.55) and "Grass" or "LeafyGrass"
+		foot[#foot + 1] = { x = math.cos(a) * mid, y = -2, z = math.sin(a) * mid, sx = w, sy = 6, sz = band, yaw = -a, mat = mat }
+	end
+
+	return blocks, snow, talus, foot
 end
 
 --------------------------------------------------------------------------------
@@ -274,13 +305,26 @@ local OUTCROPS = {
 }
 
 --------------------------------------------------------------------------------
--- MATERIAL PAINT (the S45 closure-cue fix). The single 2800 LeafyGrass disc — the uniform-plane bug —
--- is DELETED. In its place: a deterministic 300-stud-grid patchwork over r<2600. Per cell a weighted
--- hash picks {LeafyGrass45, Grass35, Ground12, Mud8}; cells near a water carve are skipped so the
--- beaches read. Each cell paints a 260-stud FillBlock 4 thick, top 0 (40-stud grass grout between).
+-- MATERIAL PAINT (M3 organic-meadow restyle). The old rigid 300-stud SQUARE-FillBlock grid — which
+-- read as a farmland CHECKERBOARD from altitude (the audit's headline finding) — is REPLACED by
+-- organic FillCylinder patches: hash-jittered centers off a coarse candidate grid (so nothing lands
+-- on a straight line), radii 50-180 (round footprints, zero straight edges), and a coarse cluster
+-- hash so 2-4 NEIGHBORING patches tend to share a material (the audit's "like materials cluster"
+-- ask) instead of alternating cell-to-cell. Weights are biased toward LeafyGrass/Grass and away from
+-- the stark Ground/Mud browns (the "pops like tilled fields" contrast complaint) — the smaller diff
+-- than repainting terrainStyle's global material colors. Cells near a water carve are skipped so the
+-- beaches read. Each patch is a thin (4-stud) FillCylinder, top at Y=0 (matches the old grid's top).
 --------------------------------------------------------------------------------
 local PAINT_MATS = { "LeafyGrass", "Grass", "Ground", "Mud" }
-local PAINT_WTS  = { 0.45, 0.35, 0.12, 0.08 }
+local PAINT_WTS  = { 0.52, 0.34, 0.08, 0.06 } -- more LeafyGrass/Grass, fewer stark Ground/Mud patches
+
+local PATCH_GRID    = 220 -- candidate-center stride (jitter fills the gaps, so nothing grid-aligns)
+local PATCH_JITTER   = 140 -- max +/- offset applied to each grid candidate (< grid/2, avoids collapse)
+local PATCH_R_MIN    = 50
+local PATCH_R_MAX    = 180
+local PATCH_H        = 4  -- thin fill, same height as the old grid cells
+local CLUSTER_CELL   = 380 -- coarse cell so ~2-4 neighboring patches likely share a cluster material
+local CLUSTER_P      = 0.72 -- probability a patch inherits its cluster's material vs. rolling fresh
 
 local function pointSegDist(px, pz, ax, az, bx, bz)
 	local dx, dz = bx - ax, bz - az
@@ -290,17 +334,26 @@ local function pointSegDist(px, pz, ax, az, bx, bz)
 	return math.sqrt((px - (ax + t * dx)) ^ 2 + (pz - (az + t * dz)) ^ 2)
 end
 
+local function paintPick(h)
+	local v = n01(h)
+	local c = 0
+	for i, w in ipairs(PAINT_WTS) do
+		c = c + w
+		if v < c then return PAINT_MATS[i] end
+	end
+	return PAINT_MATS[#PAINT_MATS]
+end
+
+-- clusterMat(x,z) — the dominant material for the coarse cell a patch center falls in; neighboring
+-- patch centers quantize to the same cell, so they draw the same hash and (usually) the same material.
+local function clusterMat(x, z)
+	local cxi = math.floor(x / CLUSTER_CELL + 0.5)
+	local czi = math.floor(z / CLUSTER_CELL + 0.5)
+	return paintPick(cxi * 92821 + czi * 68923 + 5)
+end
+
 local function buildPaint()
 	local cells = {}
-	local function pick(h)
-		local v = n01(h)
-		local c = 0
-		for i, w in ipairs(PAINT_WTS) do
-			c = c + w
-			if v < c then return PAINT_MATS[i] end
-		end
-		return PAINT_MATS[#PAINT_MATS]
-	end
 	local function nearWater(x, z)
 		for _, c in ipairs(POOL.cyls) do
 			if math.sqrt((x - c.x) ^ 2 + (z - c.z) ^ 2) < c.r + 150 then return true end
@@ -314,11 +367,24 @@ local function buildPaint()
 		end
 		return false
 	end
-	for ix = -9, 9 do
-		for iz = -9, 9 do
-			local x, z = ix * 300, iz * 300
+	local n = 0
+	local IMAX = math.ceil(2700 / PATCH_GRID)
+	for ix = -IMAX, IMAX do
+		for iz = -IMAX, IMAX do
+			n = n + 1
+			local gx, gz = ix * PATCH_GRID, iz * PATCH_GRID
+			local jx = (n01(n * 3 + 1) - 0.5) * 2 * PATCH_JITTER
+			local jz = (n01(n * 5 + 7) - 0.5) * 2 * PATCH_JITTER
+			local x, z = gx + jx, gz + jz
 			if math.sqrt(x * x + z * z) < 2600 and not nearWater(x, z) then
-				cells[#cells + 1] = { x = x, z = z, mat = pick(ix * 73856093 + iz * 19349663) }
+				local rad = PATCH_R_MIN + n01(n * 7 + 13) * (PATCH_R_MAX - PATCH_R_MIN)
+				local mat
+				if n01(n * 11 + 19) < CLUSTER_P then
+					mat = clusterMat(x, z)
+				else
+					mat = paintPick(n * 97 + 41)
+				end
+				cells[#cells + 1] = { x = x, z = z, r = rad, mat = mat }
 			end
 		end
 	end
@@ -375,7 +441,10 @@ function WorldGen.scatterPlan(cfg, seed)
 
 	local pts = {}
 	local i = 0
-	local function push(role, x, z)
+	-- sizeMul: an EXTRA per-point size multiplier on top of the applier's role-based scale (M3
+	-- readability pass). Only the rim-ring rocks use it (>1.0) so rim-ring rocks read bigger than
+	-- shore/meadow ones, matching the audit's "rim-ring rocks can go bigger" ask.
+	local function push(role, x, z, sizeMul)
 		-- Shore rocks are offset from a water carve center, which can itself sit close to SCATTER_MAX_R
 		-- (e.g. the ValleyLake), so the offset point must be re-checked against the valley radius too —
 		-- not just the ring/annulus radii the callers below already stayed inside of.
@@ -387,16 +456,18 @@ function WorldGen.scatterPlan(cfg, seed)
 			rotY = scatterHash(seed, i * 3 + 1) * 360,
 			vseed = scatterHash(seed, i * 3 + 2),
 			hseed = scatterHash(seed, i * 3 + 3),
+			sizeMul = sizeMul or 1.0,
 		}
 	end
 
-	-- 1) Rocks along the rim base ring (r 3150..3350, safely inside SCATTER_MAX_R).
+	-- 1) Rocks along the rim base ring (r 3150..3350, safely inside SCATTER_MAX_R). sizeMul 1.3: rim
+	-- rocks read bigger than shore/meadow rocks (both role "rock") at flight altitude.
 	local ROCK_RING_N = 44
 	for k = 0, ROCK_RING_N - 1 do
 		local ad = (k / ROCK_RING_N) * 360 + (scatterHash(seed, k) - 0.5) * 6
 		local a = math.rad(ad)
 		local r = 3150 + scatterHash(seed, k + 900) * 200
-		push("rock", math.cos(a) * r, math.sin(a) * r)
+		push("rock", math.cos(a) * r, math.sin(a) * r, 1.3)
 	end
 
 	-- 2) Rocks near the lake + pool shores (just outside each carve's radius).
@@ -468,8 +539,10 @@ end
 local function buildTerrainStyle()
 	return {
 		materials = {
-			Grass = { 110, 160, 70 }, LeafyGrass = { 88, 142, 58 }, Ground = { 140, 110, 80 },
-			Mud = { 96, 74, 56 }, Sand = { 218, 198, 152 }, Rock = { 130, 118, 106 },
+			-- M3 restyle: Ground/Mud nudged toward the grass luminance (was 140/110/80 and 96/74/56) so
+			-- the meadow's brown patches read as muted earth tones, not tilled-field contrast pops.
+			Grass = { 110, 160, 70 }, LeafyGrass = { 88, 142, 58 }, Ground = { 132, 122, 90 },
+			Mud = { 104, 92, 66 }, Sand = { 218, 198, 152 }, Rock = { 130, 118, 106 },
 			Slate = { 106, 100, 96 }, Snow = { 238, 232, 226 },
 		},
 		water = { color = { 52, 132, 150 }, reflectance = 0.35, waveSize = 0.12, waveSpeed = 14 },
@@ -510,7 +583,7 @@ end
 -- ops: B=FillBlock, W=FillWedge, C=FillCylinder(upright), L=FillBall. Materials are STRING keys
 -- (sculpt maps them to Enum.Material) so plan() never constructs an Enum it doesn't need.
 --------------------------------------------------------------------------------
-local function assembleOps(rimBlocks, rimSnow, rimTalus, paintCells, water)
+local function assembleOps(rimBlocks, rimSnow, rimTalus, rimFoot, paintCells, water)
 	local ops = {}
 	-- B() — a FillBlock op. Roblox Terrain rejects a fill ("Extents are too large") if any axis exceeds
 	-- MAX_FILL_EXTENT OR the region volume exceeds MAX_FILL_VOLUME — the volume check is the one that
@@ -577,9 +650,10 @@ local function assembleOps(rimBlocks, rimSnow, rimTalus, paintCells, water)
 	B(0, CATCH_FLOOR_Y - CATCH_THICKNESS / 2, 0, REACHABLE_RADIUS * 2, CATCH_THICKNESS, REACHABLE_RADIUS * 2, "Rock")
 	-- 2) FLOOR — the flat grass slab, top at datum Y=0, across the playable bowl.
 	B(0, -40, 0, FLAT_R * 2, 80, FLAT_R * 2, "Grass")
-	-- 3) PAINT PATCHWORK — 260-stud tiles 4 thick, top 0 (replaces the deleted uniform LeafyGrass disc).
+	-- 3) PAINT PATCHWORK (M3) — organic FillCylinder patches, 4 thick, top 0 (replaces both the
+	-- deleted uniform LeafyGrass disc AND the checkerboard FillBlock grid).
 	for _, c in ipairs(paintCells) do
-		B(c.x, -2, c.z, 260, 4, 260, c.mat)
+		C(c.x, -2, c.z, PATCH_H, c.r, c.mat)
 	end
 	-- 4) MESA SKIRT — a painted Mud/Ground ring (r 260→340) around the mesa footprint at datum. Zero height.
 	for i = 0, 7 do
@@ -592,10 +666,11 @@ local function assembleOps(rimBlocks, rimSnow, rimTalus, paintCells, water)
 	B(-6300, -6, 0, 3400, 68, 16000, "Ground")
 	B(0, -6, 6300, 9200, 68, 3400, "Ground")
 	B(0, -6, -6300, 9200, 68, 3400, "Ground")
-	-- 6) RIM blocks + snow caps + talus.
+	-- 6) RIM blocks + snow caps + talus + the M3 grass foot band.
 	for _, b in ipairs(rimBlocks) do B(b.x, b.y, b.z, b.sx, b.sy, b.sz, b.mat, b.yaw) end
 	for _, s in ipairs(rimSnow) do B(s.x, s.y, s.z, s.sx, s.sy, s.sz, "Snow") end
 	for _, t in ipairs(rimTalus) do W(t.x, t.y, t.z, t.sx, t.sy, t.sz, "Ground", t.yaw) end
+	for _, f in ipairs(rimFoot) do B(f.x, f.y, f.z, f.sx, f.sy, f.sz, f.mat, f.yaw) end
 	-- 7) MICRO RELIEF — grass mounds (≤6 protrusion) then rock outcrops (r1700-3000 arcs).
 	for _, m in ipairs(MOUNDS) do L(m.x, m.protrude - m.r, m.z, m.r, "Grass") end
 	for _, o in ipairs(OUTCROPS) do L(o.x, o.protrude - o.r, o.z, o.r, "Rock") end
@@ -653,10 +728,10 @@ function WorldGen.plan(cfg)
 	cfg = cfg or {}
 	local flight = cfg.Flight or {}
 
-	local rimBlocks, rimSnow, rimTalus = buildRim()
+	local rimBlocks, rimSnow, rimTalus, rimFoot = buildRim()
 	local paintCells = buildPaint()
 	local water = buildWater()
-	local sculptOps = assembleOps(rimBlocks, rimSnow, rimTalus, paintCells, water)
+	local sculptOps = assembleOps(rimBlocks, rimSnow, rimTalus, rimFoot, paintCells, water)
 
 	return {
 		-- Birth contract (must match legacy BuildMap: GameServer:260 Gravity, :267 StreamingEnabled).
@@ -678,7 +753,7 @@ function WorldGen.plan(cfg)
 		parts = {},
 
 		-- M1.5 CONTENT — DATA consumed by sculpt/build, and read by the new gates.
-		rimPeaks = { peaks = PEAKS, westPass = WEST_PASS, blocks = rimBlocks, snowCaps = rimSnow, talus = rimTalus },
+		rimPeaks = { peaks = PEAKS, westPass = WEST_PASS, blocks = rimBlocks, snowCaps = rimSnow, talus = rimTalus, foot = rimFoot },
 		river = { halfWidth = RIVER.halfWidth, surfaceY = RIVER.surfaceY, floorY = RIVER.floorY, points = RIVER.points, pool = POOL },
 		lakeCarve = LAKE_CARVE,
 		paintZones = paintCells,
@@ -843,6 +918,9 @@ function WorldGen.build(target, cfg)
 	-- honestly zero new Instances. Respects the every-24-ops yield rule (S49 landmine).
 	if cfg and cfg.Map and cfg.Map.meshScatter then
 		local ROLE_TO_PROPS = { rock = AssetManifest.props.rock, bush = AssetManifest.props.bush, log = AssetManifest.props.log }
+		-- M3 scatter-readability pass: rocks/bushes/logs read as specks from flight altitude. Scale
+		-- each role's target height up; rim-ring rocks (pt.sizeMul > 1) go bigger still.
+		local ROLE_SIZE_MUL = { rock = 1.8, bush = 1.5, log = 1.5 }
 		local scatterFolder = Instance.new("Folder")
 		scatterFolder.Name = "Scatter"
 		scatterFolder.Parent = map
@@ -850,7 +928,8 @@ function WorldGen.build(target, cfg)
 			local variants = ROLE_TO_PROPS[pt.role]
 			if variants and #variants > 0 then
 				local variant = variants[math.max(1, math.min(#variants, math.floor(pt.vseed * #variants) + 1))]
-				local targetHeight = math.max(2, variant.height * (0.7 + pt.hseed * 0.6))
+				local roleMul = ROLE_SIZE_MUL[pt.role] or 1.0
+				local targetHeight = math.max(2, variant.height * (0.7 + pt.hseed * 0.6) * roleMul * (pt.sizeMul or 1.0))
 				local cf = CFrame.new(pt.x, pt.y, pt.z) * CFrame.Angles(0, math.rad(pt.rotY), 0)
 				MeshFactory.build(variant, cf, targetHeight, scatterFolder)
 			end
