@@ -4,7 +4,64 @@ Read this first. It tells the next agent exactly where the project stands, the o
 
 ---
 
-## ▶▶ S48 COLD START — MAP-FIRST (the strategy of record; this box supersedes every queue below)
+## ▶▶ S50 COLD START — FABLE-LED BUILD (current; supersedes the S48/S49 box below, kept as history)
+
+**Chad's directive (S50):** the Opus-led `/master-loop` §8 model wasn't working — **Fable now leads
+the build directly.** Sonnet = writer/builder subagents, Opus = verifier subagents; fully automated,
+no mid-run Chad prompts; free Roblox creator-store assets, swappable; one build, one map level; ping
+Chad only when done. This ANSWERS the Gate V-LOOK mesh-source question (the old D1/M3 asks) —
+free creator-store, swappable, chosen without asking Chad per-asset.
+
+**M4 BUILT AND COMMITTED:** `8f2fb9d` M4-A (`AssetManifest.luau` — 20 variants: 5 treeLeafy, 2 treePine,
+10 rock, 2 bush, 1 log + sunset skybox + backup; extractor `tools/Extract-Assets.ps1` +
+`tools/asset-extract/` — swap an asset = change one ID in the extractor list, rerun, regenerate) ·
+`b519cc4` M4-B (`MeshFactory.luau` CMPA+SpecialMesh-fallback; `RescueServer` buildTree mesh visual swap
+behind `Map.meshTrees` with the procedural trunk/Canopy parts kept invisible so the Canopy contract is
+untouched; `WorldGen.scatterPlan` ≤140 rocks/bushes/logs behind `Map.meshScatter`; skybox behind
+`Map.meshSky`) · `d3fbe3a` Opus P1 fix (trees were centered-in-ground → base-anchor added) ·
+`394e675` P2/P3 fixes (mesh rng stream isolated from the round rng; tree-planting loops yield every 8) ·
+`c3aa2ed` smoke extension (in-engine `CreateMeshPartAsync` gate — LIVE, manifest meshSize matches engine
+exactly).
+
+**Asset pipeline (proven by spikes):** anonymous toolbox APIs curate (triangles/scripts/isFree/votes
+machine-filtered); `game:GetObjects("rbxassetid://<id>")` at plugin security in run-in-roblox EDIT mode
+extracts un-acquired free models (`InsertService:LoadAsset` fails auth on 18/20; assetdelivery download
+is a dead end — stale cookie). The extraction run IS the authorization gate (kills the S43 bad-asset-ID
+class). No committed binaries — meshes stream by ID (all curated ids pre-2021 = permanently public).
+
+**CRITICAL FIND (`be08875`):** WorldGen Terrain fills have an engine **VOLUME** limit besides the
+≤4000/axis extent limit; 10 rotated rim blocks threw "Extents are too large" in-engine while passing
+every per-axis gate. **Chad's S49 "accepted" boot almost certainly DIED mid-sculpt at op#317 (~68%
+built).** Fix: `MAX_FILL_VOLUME=3.0e8` + local-axis tiling (rotated blocks tile fine); ops 554→1234;
+Tier-4 now gates extent AND volume on every op.
+
+**M2 EYES NOW WORK** (`9e09993` + memory `reference-m2-eyes-working`): the S49 "unreliable" verdict was
+3 stacked bugs — the volume crash; orphaned Studio windows covering the screen during `CopyFromScreen`
+(killing run-in-roblox does NOT kill its Studio child); edit-mode viewport ignores
+`CameraType.Scriptable` (write `cam.CFrame`/`Focus` directly). 8-vantage captures + contact sheet now
+reliable. To run cleanly: **kill `RobloxStudio*` orphans first, clear AutoSaves, expect ~4 min.**
+12s mesher-settle added (async Terrain mesher races the shots).
+
+**M3 LOOK ROUND 1** (`a5e4e8a`, from Fable's screenshot audit): organic meadow (406 jittered
+FillCylinder patches replace the rigid 260-stud checkerboard grid; material clustering; muted earth
+tones), rim restyle (uniform Rock wall, percentile-gated irregular snow caps, grass foot band), scatter
+scale-up (rock ×1.8, bush/log ×1.5), capture settle. Ops 1234→1399. **VISUALLY UNAUDITED yet** — the
+re-capture caught Chad's War Thunder session on screen; the audit runs when the screen is free.
+
+**Verify state:** Tier-4 **262/262** green · rojo PASS · luau-lsp **0 NEW** vs baseline (8 findings at
+`dc8810c`, 8 now — proven via a baseline worktree with sourcemap; the tier's red summary is
+pre-existing) · selene UNAVAILABLE (pre-existing 404) · Studio smoke PASS (incl. the new mesh gates) ·
+in-engine per-op diag 0/1234 failures.
+
+**STILL PENDING — FEEL unverified.** The full game scene (mesh trees on groves, waterfall FX, critters)
+exists only in PLAY mode; edit captures show terrain+lighting+scatter+skybox only. **NEXT:**
+① round-2 visual audit of `a5e4e8a` (Fable, once the screen is free) ② Chad flies the finished map
+(terminal accept/reject, memory `feedback-chad-terminal-accept-reject`) ③ if accepted → M5 polish /
+audio M6.
+
+---
+
+## (historical) ▶▶ S48 COLD START — MAP-FIRST (superseded by the S50 box above; kept as history)
 
 **HEADING:** *build the REAL map — Terrain + lighting first (code-only, zero assets), meshes when
 sourced; every packet leaves the published look visibly closer.*

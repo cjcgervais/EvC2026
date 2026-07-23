@@ -430,7 +430,13 @@ cap unchanged; tree part count reviewed at C3 (art pass) with an explicit instan
   closure-cue coverage, fill budget). Tier-4 228/228, rojo PASS. APPEARANCE still unseen (needs a capture/
   Studio boot); trees/waterfall/skybox = M4 meshes (blocked on Chad's asset pick). The valley is now a
   FINISHED terrain+lighting state for Chad's terminal accept/reject.
-- **M2 — THE EYES (screenshot harness). ✅ HARNESS BUILT S49 (commit-ready; capture pending Chad's run).**
+- **M2 — THE EYES (screenshot harness). ✅ WORKING S50.** The S49 "unreliable" verdict (0 images,
+  run-in-roblox script-timeout blamed) was actually **3 stacked bugs**: the WorldGen volume-limit
+  crash (see M1 amend below); orphaned Studio windows covering the screen during `CopyFromScreen`
+  (killing run-in-roblox does not kill its Studio child); the edit-mode viewport ignoring
+  `CameraType.Scriptable` (fixed by writing `cam.CFrame`/`Focus` directly). 8-vantage captures + contact
+  sheet now reliable — kill `RobloxStudio*` orphans first, clear AutoSaves, expect ~4 min per run.
+  (historical harness-build record below.) ✅ HARNESS BUILT S49 (commit-ready; capture pending Chad's run).
   Built `tools/Capture-World.ps1` + `tests/capture/world.capture.luau` (edit-mode WorldGen.build + 8
   committed vantages + stdout `M2READY`/dwell capture). Design deviation (documented): run-in-roblox is
   one-way stdout only, so a stdout signal + 2.5s dwell replaces the impossible bidirectional sentinel-file
@@ -456,7 +462,13 @@ cap unchanged; tree part count reviewed at C3 (art pass) with an explicit instan
   (`worldV2` on); ONE sheet with the flag off is the legacy "before" record. Note: WorldGen
   being a pure module (M1) is what makes edit-mode building possible — M1 must land first.
   `[model: opus | gate: harness produces a sheet Fable can audit]`
-- **M3 — LOOK-DEV ITERATE → GATE V-LOOK.** Fable image-audits the M1 world against
+- **M3 — LOOK-DEV ITERATE → GATE V-LOOK. ⏳ ROUND 1 BUILT S50 (unaudited).** `a5e4e8a`: organic
+  meadow (406 jittered FillCylinder patches replace the rigid 260-stud checkerboard grid; material
+  clustering; muted earth tones), rim restyle (uniform Rock wall, percentile-gated irregular snow caps,
+  grass foot band), scatter scale-up (rock ×1.8, bush/log ×1.5), capture settle. Ops 1234→1399. The
+  round-2 capture caught Chad's War Thunder session on screen instead of the world — the visual audit
+  is still pending, now that M2's eyes work reliably it runs as soon as the screen is free. (original
+  spec below.) Fable image-audits the M1 world against
   `VISUAL-QUALITY-BAR.md` §2, iterating terrain/lighting CONFIG in batches (art passes batch;
   ≤3 audit rounds per the SKILL, then surface) to a Fable PASS. A/B contact sheets vs the
   legacy sheet. One capture at LOW quality level (the reopened render question — the boot
@@ -466,7 +478,15 @@ cap unchanged; tree part count reviewed at C3 (art pass) with an explicit instan
   `assets/`; alternative: he approves specific creator-store IDs — publisher/license verified
   per bar §1.5 before any `.rbxm` is committed; the S43 asset-ID tombstone applies).
   `[model: fable audits | gate: image gate → Chad ratification in chat]`
-- **M4 — MESH PROPS (the asset pass).** Blocked-on: the Gate V-LOOK asset decision. Mesh
+- **M4 — MESH PROPS (the asset pass). ✅ DONE S50.** Asset-source decision made by Chad directive
+  (S50 — Fable leads, free swappable creator-store IDs, no per-asset ask), superseding the old
+  D1/M3 "ask at Gate V-LOOK" plan. `AssetManifest.luau` (20 variants + sunset skybox) via
+  `tools/Extract-Assets.ps1`; `MeshFactory.luau` mesh-swap wired into `RescueServer` trees (Canopy
+  contract untouched) and `WorldGen.scatterPlan` (rocks/bushes/logs) behind `Map.meshTrees` /
+  `Map.meshScatter` / `Map.meshSky`. Commits: `8f2fb9d` M4-A, `b519cc4` M4-B, `d3fbe3a` P1
+  base-anchor fix, `394e675` P2/P3 rng-isolation + yield fixes, `c3aa2ed` in-engine CMPA smoke gate.
+  Tier-4 262/262, Studio smoke PASS. (original scope below.) Blocked-on: the Gate V-LOOK asset
+  decision. Mesh
   trees/rocks/set pieces + the waterfall rebuilt to its DoD (motion + spray + mist + sound)
   per the ratified look; ingestion path per bar §1.5 (committed `.rbxm` →
   `ReplicatedStorage.Assets`); triangle counts vs the §3 asset budget, enforced by headless
@@ -543,6 +563,13 @@ seam noted in the audit — MANDATORY before any leaderboard/multiplayer surface
 ---
 
 ## 8. Execution model v2 (S47 — Fable supervises, Opus/Sonnet build, Chad decides)
+
+> **⚠️ AMENDED S50 (2026-07-22/23, Chad directive):** the "default DRIVER is an Opus session"
+> model below was NOT working. **Fable now LEADS the build directly** — Sonnet runs as
+> writer/builder subagents, Opus as verifier subagents, fully automated with no mid-run Chad
+> prompts. Free/swappable Roblox creator-store assets, one build, one map level; ping Chad only
+> when a milestone is done. This supersedes the bullet immediately below; the role-routing table
+> after it still describes the underlying model split and stands.
 
 - **The harness is `/master-loop`, and the default DRIVER is an Opus session.** Chad launches
   grind sessions with the main model set to **Opus** (`/model`); Fable is reached as a
