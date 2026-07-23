@@ -845,7 +845,10 @@ end
 -- memory). The yield PURPOSE is unchanged (reset the execution-time budget so no stretch trips the
 -- guard); only the cadence that decides WHEN to pay for it changes. Not called by the lune tests (they
 -- exercise plan() only), so this engine-only yield can't touch Tier-4.
-local YIELD_BUDGET_S = 1.5
+-- S51: live [SculptProf] profiling showed yields were NOT the sculpt cost (65.9s → 68.9s after this
+-- budget existed at 1.5s) — the fill calls themselves dominate. Tightened to 0.5s: same guard purpose,
+-- but buys exhaustion-guard headroom for free since the yield cadence was never the bottleneck.
+local YIELD_BUDGET_S = 0.5
 function WorldGen.sculpt(terrain, plan)
 	local lastYield = os.clock()
 	-- S51 [SculptProf] — always-on per-op-class timing so a slow boot can be attributed to a specific
