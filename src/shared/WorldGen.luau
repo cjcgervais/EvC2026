@@ -699,7 +699,36 @@ local function assembleOps(rimBlocks, rimSnow, rimTalus, rimFoot, paintCells, wa
 	B(0, 16, 6300, 9200, 24, 3400, "Ground")
 	B(0, 16, -6300, 9200, 24, 3400, "Ground")
 	-- 6) RIM blocks + snow caps + talus + the M3 grass foot band.
-	for _, b in ipairs(rimBlocks) do B(b.x, b.y, b.z, b.sx, b.sy, b.sz, b.mat, b.yaw) end
+	-- RIM SHELL (not solid): a profiler + volume pass showed each rim block's buried core (everything
+	-- below the visible crest, down to the deep catch floor) was 84% of ALL sculpt-op volume in the whole
+	-- map — cost with zero visual return, since nothing is ever below the rim's outer/inner faces. Each
+	-- block becomes 3 fills instead of 1: an inner-face wall and an outer-face wall (both RIM_WALL_T studs
+	-- thick, spanning the full height from RIM_BASE_Y up to the crest), plus a full-footprint top skin
+	-- (RIM_SKIN_T studs thick, spanning the block's whole sx×sz footprint at the crest). Every EXTERIOR
+	-- surface — inner face, outer face, and crest — lands at the exact same world radius/height the solid
+	-- block had; nothing visible changes. The full-footprint skins are the same footprint the solid tops
+	-- were, so the two rings' skins still overlap exactly as before, sealing the inter-ring trench with no
+	-- gap. The hollow interior this creates is sealed on every side: the two walls close it radially down
+	-- to RIM_BASE_Y (-40, at/below the deep catch floor), the skin closes it from above, and neighboring
+	-- blocks around the ring overlap tangentially the same way the solid blocks always did — so there is no
+	-- opening a bird's swept-sphere collision could ever find (P3 stays intact; exterior geometry identical
+	-- to the solid version). Capture-gated via the rim-nadir/west-pass/outside-in poses.
+	local RIM_WALL_T, RIM_SKIN_T, RIM_BASE_Y = 100, 120, -40
+	local function emitRimShell(b)
+		local a  = math.atan2(b.z, b.x)
+		local R  = math.sqrt(b.x * b.x + b.z * b.z)
+		local w, h = b.sx, b.crest
+		local inR, outR = R - w / 2, R + w / 2
+		local wallY, wallSy = (h + RIM_BASE_Y) / 2, h - RIM_BASE_Y
+		local ri, ro = inR + RIM_WALL_T / 2, outR - RIM_WALL_T / 2
+		B(math.cos(a) * ri, wallY, math.sin(a) * ri, RIM_WALL_T, wallSy, b.sz, b.mat, b.yaw) -- inner face
+		B(math.cos(a) * ro, wallY, math.sin(a) * ro, RIM_WALL_T, wallSy, b.sz, b.mat, b.yaw) -- outer face
+		B(b.x, h - RIM_SKIN_T / 2, b.z, w, RIM_SKIN_T, b.sz, b.mat, b.yaw)                    -- full-footprint top skin
+	end
+	-- b.y and b.sy are unused by the emitter above (the shell derives its own Y-extents from b.crest and
+	-- RIM_BASE_Y) — do NOT strip them from the block records: buildRim's snow-cap pass, the talus/foot
+	-- bands, and the worldgen tests all still read fields off these same records.
+	for _, b in ipairs(rimBlocks) do emitRimShell(b) end
 	for _, s in ipairs(rimSnow) do B(s.x, s.y, s.z, s.sx, s.sy, s.sz, "Snow") end
 	for _, t in ipairs(rimTalus) do W(t.x, t.y, t.z, t.sx, t.sy, t.sz, "Ground", t.yaw) end
 	for _, f in ipairs(rimFoot) do B(f.x, f.y, f.z, f.sx, f.sy, f.sz, f.mat, f.yaw) end

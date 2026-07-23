@@ -467,17 +467,39 @@ end)
 -- 11. FILL BUDGET (M1.5) — the sculptOps list is the whole world's fill cost; keep it bounded and
 -- honestly recorded (fillOpCount must equal the list it claims to count).
 --------------------------------------------------------------------------------
-H.test("fill budget: total sculpt fill ops ≤1800 (recorded)", function()
+H.test("fill budget: total sculpt fill ops ≤1100 (recorded)", function()
 	local plan = WorldGen.plan(GameConfig)
 	H.eq(plan.fillOpCount, #plan.sculptOps, "plan.fillOpCount does not match #plan.sculptOps — the recorded budget is a lie")
 	print(("        [fill-budget] WorldGen sculpts %d terrain fill ops"):format(#plan.sculptOps))
-	-- Cap raised 1000→1400 (M1.5 VOLUME hotfix), then 1400→1800 (M3 look-dev round): the organic-meadow
-	-- patchwork (finding 1) and the rim foot band (finding 2c) both add FillCylinder/FillBlock ops on
-	-- top of the M1.5 baseline (1399, one op from the old 1400 cap — too little headroom for further
-	-- look-dev tuning). 1800 stays comfortably under the HARD GATE ceiling of 2600 ops. Still a one-time
-	-- BOOT cost (sculpt runs once), amortized by YIELD_EVERY, not a per-frame cost.
-	H.ok(#plan.sculptOps <= 1800, ("WorldGen sculpts %d fill ops (>1800) — the terrain build is over budget"):format(#plan.sculptOps))
+	-- Cap raised 1000→1400 (M1.5 VOLUME hotfix), then 1400→1800 (M3 look-dev round), then TIGHTENED
+	-- 1800→1100 (rim-shell packet): the rim's per-block solid emission (buried core down to the deep
+	-- catch floor, 84% of ALL sculpt volume) was replaced with a 3-piece shell (inner wall + outer wall +
+	-- full-footprint top skin) per block — same visible geometry, far fewer/cheaper ops. Count dropped
+	-- 1291→911; 1100 keeps meaningful headroom without re-opening the old 1800 ceiling. Still comfortably
+	-- under the HARD GATE ceiling of 2600 ops, and still a one-time BOOT cost (sculpt runs once),
+	-- amortized by YIELD_EVERY, not a per-frame cost.
+	H.ok(#plan.sculptOps <= 1100, ("WorldGen sculpts %d fill ops (>1100) — the terrain build is over budget"):format(#plan.sculptOps))
 	H.ok(#plan.sculptOps <= 2600, ("WorldGen sculpts %d fill ops (>2600) — exceeds the project HARD GATE ceiling"):format(#plan.sculptOps))
+end)
+
+--------------------------------------------------------------------------------
+-- 11b. RIM SHELL VOLUME (rim-shell packet) — pins the actual cost win directly: each rim block is now
+-- emitted as a hollow shell (two thin face walls + a top skin) instead of a solid fill down to the deep
+-- catch floor, so the sum of all FillBlock volume should have collapsed by roughly the "84% was buried
+-- core" finding. Bracket it rather than pin an exact float — the block set (from buildRim) is allowed to
+-- drift slightly without breaking this gate, only a real regression back toward "solid" should trip it.
+--------------------------------------------------------------------------------
+H.test("rim shell: total B-op volume collapsed (shell, not solid, rim blocks)", function()
+	local plan = WorldGen.plan(GameConfig)
+	local totalVol = 0
+	for _, o in ipairs(plan.sculptOps) do
+		if o.op == "B" then
+			totalVol = totalVol + o.sx * o.sy * o.sz
+		end
+	end
+	print(("        [rim-shell] total B-op volume = %.3e studs^3"):format(totalVol))
+	H.ok(totalVol >= 4.0e10, ("total B-op volume %.3e is implausibly low — the rim shell may be missing faces"):format(totalVol))
+	H.ok(totalVol <= 6.0e10, ("total B-op volume %.3e (>6.0e10) — the rim is still (near-)solid, the shell win didn't land"):format(totalVol))
 end)
 
 --------------------------------------------------------------------------------
