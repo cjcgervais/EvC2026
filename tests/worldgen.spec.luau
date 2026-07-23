@@ -341,38 +341,68 @@ end)
 -- 11. FILL BUDGET (M1.5) — the sculptOps list is the whole world's fill cost; keep it bounded and
 -- honestly recorded (fillOpCount must equal the list it claims to count).
 --------------------------------------------------------------------------------
-H.test("fill budget: total sculpt fill ops ≤1000 (recorded)", function()
+H.test("fill budget: total sculpt fill ops ≤1400 (recorded)", function()
 	local plan = WorldGen.plan(GameConfig)
 	H.eq(plan.fillOpCount, #plan.sculptOps, "plan.fillOpCount does not match #plan.sculptOps — the recorded budget is a lie")
 	print(("        [fill-budget] WorldGen sculpts %d terrain fill ops"):format(#plan.sculptOps))
-	-- Cap raised 700→1000: Roblox Terrain's ~4096 per-axis fill limit forces the big axis-aligned slabs
-	-- (catch slab, grass floor, apron, WestSea carve) to TILE into ≤MAX_FILL_EXTENT sub-blocks. That is a
-	-- one-time BOOT cost (sculpt runs once), not a per-frame cost, so the higher ceiling is honest.
-	H.ok(#plan.sculptOps <= 1000, ("WorldGen sculpts %d fill ops (>1000) — the terrain build is over budget"):format(#plan.sculptOps))
+	-- Cap raised 1000→1400 (M1.5 VOLUME hotfix): 10 rotated rim-PEAK FillBlocks (every axis under
+	-- MAX_FILL_EXTENT, but sx*sy*sz ≈ 2.4-3.1e9 studs³) threw "Extents are too large" in real Studio —
+	-- the engine caps region VOLUME too, not just per-axis extent. B()'s tiler now splits ANY block over
+	-- MAX_FILL_VOLUME along its own local axes, which conservatively catches every rim block near the
+	-- threshold (not just the 10 that happened to fail), so the op count grows well past the old 554→1000
+	-- budget. Still a one-time BOOT cost (sculpt runs once), amortized by YIELD_EVERY, not a per-frame cost.
+	H.ok(#plan.sculptOps <= 1400, ("WorldGen sculpts %d fill ops (>1400) — the terrain build is over budget"):format(#plan.sculptOps))
 end)
 
 --------------------------------------------------------------------------------
--- 12. FILL EXTENT (M1.5 hotfix) — the bug lune couldn't see. Roblox Terrain fills throw "Extents are
--- too large" past ~4096 studs/axis; only the real-engine M2 capture caught WorldGen.build on boot.
--- This gate makes it headless: EVERY op must be ≤ MAX_FILL_EXTENT on X and Z, so an oversized slab
--- (or a future one) can never regress past the assembler's tiler.
+-- 12. FILL EXTENT + VOLUME (M1.5 hotfix) — the bug lune couldn't see, twice over. Roblox Terrain fills
+-- throw "Extents are too large" past ~4096 studs on ANY axis, AND past a region-VOLUME limit even when
+-- every axis is individually small — only the real-engine M2 capture caught either class on boot (10
+-- rotated rim-PEAK blocks, dims sx=sz≈1231.5 sy=1593-2044, every axis under 4000 but sx*sy*sz≈2.4-3.1e9
+-- studs³). The ORIGINAL version of this gate only checked per-axis extent, which is exactly why it
+-- MISSED the volume bug — it is extended here to also assert volume, so a future oversized fill (rotated
+-- or not) can never regress past the assembler's tiler again.
 --------------------------------------------------------------------------------
-H.test("fill extent: no sculpt op exceeds the Terrain per-axis fill limit on X or Z", function()
+H.test("fill extent+volume: no sculpt op exceeds the Terrain per-axis OR region-volume fill limit", function()
 	local plan = WorldGen.plan(GameConfig)
 	local MAX = plan.maxFillExtent
+	local MAXV = plan.maxFillVolume
 	H.ok(MAX and MAX <= 4096, ("maxFillExtent=%s must exist and stay under Roblox's ~4096 limit"):format(tostring(MAX)))
+	H.ok(MAXV and MAXV <= 3.84e8, ("maxFillVolume=%s must exist and stay under the proven-passing 3.84e8 bound"):format(tostring(MAXV)))
 	for i, o in ipairs(plan.sculptOps) do
-		local ex, ez
+		local ex, ez, vol
 		if o.op == "B" or o.op == "W" then
 			ex, ez = o.sx, o.sz
-		elseif o.op == "C" or o.op == "L" then
+			vol = o.sx * o.sy * o.sz
+		elseif o.op == "C" then
 			ex, ez = o.rad * 2, o.rad * 2
+			vol = math.pi * o.rad * o.rad * o.h
+		elseif o.op == "L" then
+			ex, ez = o.rad * 2, o.rad * 2
+			vol = (4 / 3) * math.pi * o.rad ^ 3
 		end
 		H.ok(ex ~= nil, ("sculptOps[%d] has op %q with no known XZ extents"):format(i, tostring(o.op)))
 		H.ok(ex <= MAX and ez <= MAX,
 			("sculptOps[%d] (op %q, mat %s) is %.0f×%.0f — exceeds the %d per-axis Terrain fill limit ('Extents are too large')")
 				:format(i, tostring(o.op), tostring(o.mat), ex, ez, MAX))
+		H.ok(vol <= MAXV,
+			("sculptOps[%d] (op %q, mat %s) is %.0f studs³ — exceeds the %.0f region-volume Terrain fill limit ('Extents are too large')")
+				:format(i, tostring(o.op), tostring(o.mat), vol, MAXV))
 	end
+end)
+
+H.test("fill volume regression: zero B ops exceed MAX_FILL_VOLUME (the rim-PEAK bug, explicitly)", function()
+	local plan = WorldGen.plan(GameConfig)
+	local MAXV = plan.maxFillVolume
+	local overCount, maxVol = 0, 0
+	for _, o in ipairs(plan.sculptOps) do
+		if o.op == "B" then
+			local vol = o.sx * o.sy * o.sz
+			if vol > maxVol then maxVol = vol end
+			if vol > MAXV then overCount = overCount + 1 end
+		end
+	end
+	H.eq(overCount, 0, ("%d FillBlock op(s) still exceed MAX_FILL_VOLUME=%.0f (max seen %.0f) — the rim-PEAK tiler regressed"):format(overCount, MAXV, maxVol))
 end)
 
 --------------------------------------------------------------------------------

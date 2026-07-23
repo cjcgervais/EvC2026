@@ -70,9 +70,15 @@ local REACHABLE_RADIUS   = 8000
 -- Roblox Terrain fill has a ~4096-stud PER-AXIS extent limit ("Extents are too large" on FillBlock);
 -- lune has no Terrain so only a REAL engine (the M2 capture smoke) sees it. The big axis-aligned slabs
 -- (catch slab 16000², grass floor 6800², apron slabs, the WestSea carve 5400×18000) all blow it, so
--- the B() assembler tiles any oversized AXIS-ALIGNED block into a grid of sub-blocks ≤ this. A one-time
+-- the B() assembler tiles any oversized block into a grid of sub-blocks ≤ this. A one-time
 -- boot cost, not per-frame. The extent gate asserts no op ever exceeds it again.
 local MAX_FILL_EXTENT   = 4000
+
+-- The engine limit is ALSO on region VOLUME, not just per-axis extent: 10 of the rotated rim PEAK
+-- blocks (sx=sz≈1231.5, sy 1593-2044 — every axis well under MAX_FILL_EXTENT) still threw "Extents are
+-- too large" in real Studio. The largest FillBlock proven to pass is the catch slab tile at
+-- 4000×~24×4000 ≈ 3.84e8 studs³, so this budget sits comfortably under that proven-passing bound.
+local MAX_FILL_VOLUME   = 3.0e8
 
 -- surfaceY(x,z) → the SOLID terrain surface height at world XZ. Pure; no state, no random.
 local function surfaceY(x, z)
@@ -506,31 +512,61 @@ end
 --------------------------------------------------------------------------------
 local function assembleOps(rimBlocks, rimSnow, rimTalus, paintCells, water)
 	local ops = {}
-	-- B() — a FillBlock op. If the block is bigger than MAX_FILL_EXTENT on X or Z it would throw
-	-- "Extents are too large" in a real engine (lune can't see this), so tile any oversized
-	-- AXIS-ALIGNED block into a grid whose union EXACTLY covers the original extents (the last tile in
-	-- each row/col is the remainder, so non-integer divisions are exact). Rotated blocks are never
-	-- big enough to trigger this, but if one ever were, tiling in world XZ would be wrong — so error
-	-- loudly rather than mis-tile. Pure/deterministic geometry.
+	-- B() — a FillBlock op. Roblox Terrain rejects a fill ("Extents are too large") if any axis exceeds
+	-- MAX_FILL_EXTENT OR the region volume exceeds MAX_FILL_VOLUME — the volume check is the one that
+	-- bites blocks whose every axis looks fine (the rotated rim PEAKS: sx=sz≈1231.5, sy 1593-2044, all
+	-- < 4000, but sx*sy*sz ≈ 2.4-3.1e9 studs³). So tile ANY oversized block — axis-aligned or rotated,
+	-- on X/Y/Z alike — into equal-size sub-blocks split along the block's own LOCAL axes, each satisfying
+	-- both limits. Equal-size children (not "full tile + remainder") means every sub-block is identical
+	-- geometry, so no sliver fills and the union exactly reproduces the original volume.
+	--
+	-- World placement of a local offset (ox,oy,oz) under yaw: sculpt() applies
+	-- `CFrame.new(x,y,z) * CFrame.Angles(0, yaw, 0)`, and Roblox's CFrame.Angles(0,ry,0) is the standard
+	-- right-hand-rule rotation about +Y, whose matrix sends local +X → world (cos ry, 0, -sin ry) and
+	-- local +Z → world (sin ry, 0, cos ry). So:
+	--   wx = x + ox*cos(yaw) + oz*sin(yaw)
+	--   wz = z - ox*sin(yaw) + oz*cos(yaw)
+	--   wy = y + oy   (yaw only rotates about Y, so Y offsets are untouched)
+	-- At yaw=0 this reduces to wx = x+ox, wz = z+oz — the plain axis-aligned case — so one code path
+	-- covers both.
 	local function pushB(x, y, z, sx, sy, sz, mat, yaw) ops[#ops + 1] = { op = "B", x = x, y = y, z = z, sx = sx, sy = sy, sz = sz, mat = mat, yaw = yaw } end
 	local function B(x, y, z, sx, sy, sz, mat, yaw)
-		if sx > MAX_FILL_EXTENT or sz > MAX_FILL_EXTENT then
-			if yaw and yaw ~= 0 then
-				error(("WorldGen: rotated block (%.0f×%.0f) exceeds MAX_FILL_EXTENT and cannot be safely tiled in world XZ"):format(sx, sz))
+		local yw = yaw or 0
+		if sx <= MAX_FILL_EXTENT and sy <= MAX_FILL_EXTENT and sz <= MAX_FILL_EXTENT and sx * sy * sz <= MAX_FILL_VOLUME then
+			pushB(x, y, z, sx, sy, sz, mat, yaw)
+			return
+		end
+		local nx = math.max(1, math.ceil(sx / MAX_FILL_EXTENT))
+		local ny = math.max(1, math.ceil(sy / MAX_FILL_EXTENT))
+		local nz = math.max(1, math.ceil(sz / MAX_FILL_EXTENT))
+		-- Per-axis extent is now satisfied; grow whichever local axis is currently largest until the
+		-- sub-block volume also fits. Bounded iteration count — geometry here never needs more than a
+		-- handful of splits per axis.
+		for _ = 1, 64 do
+			local subX, subY, subZ = sx / nx, sy / ny, sz / nz
+			if subX * subY * subZ <= MAX_FILL_VOLUME then break end
+			if subX >= subY and subX >= subZ then
+				nx = nx + 1
+			elseif subY >= subX and subY >= subZ then
+				ny = ny + 1
+			else
+				nz = nz + 1
 			end
-			local nx, nz = math.ceil(sx / MAX_FILL_EXTENT), math.ceil(sz / MAX_FILL_EXTENT)
-			local x0, z0 = x - sx / 2, z - sz / 2
-			for ix = 0, nx - 1 do
-				local tx = math.min(MAX_FILL_EXTENT, sx - ix * MAX_FILL_EXTENT)
-				local cx = x0 + ix * MAX_FILL_EXTENT + tx / 2
+		end
+		local subX, subY, subZ = sx / nx, sy / ny, sz / nz
+		local cosYw, sinYw = math.cos(yw), math.sin(yw)
+		for ix = 0, nx - 1 do
+			local ox = -sx / 2 + subX / 2 + ix * subX
+			for iy = 0, ny - 1 do
+				local oy = -sy / 2 + subY / 2 + iy * subY
 				for iz = 0, nz - 1 do
-					local tz = math.min(MAX_FILL_EXTENT, sz - iz * MAX_FILL_EXTENT)
-					local cz = z0 + iz * MAX_FILL_EXTENT + tz / 2
-					pushB(cx, y, cz, tx, sy, tz, mat, yaw)
+					local oz = -sz / 2 + subZ / 2 + iz * subZ
+					local wx = x + ox * cosYw + oz * sinYw
+					local wz = z - ox * sinYw + oz * cosYw
+					local wy = y + oy
+					pushB(wx, wy, wz, subX, subY, subZ, mat, yaw)
 				end
 			end
-		else
-			pushB(x, y, z, sx, sy, sz, mat, yaw)
 		end
 	end
 	local function W(x, y, z, sx, sy, sz, mat, yaw) ops[#ops + 1] = { op = "W", x = x, y = y, z = z, sx = sx, sy = sy, sz = sz, mat = mat, yaw = yaw } end
@@ -653,6 +689,7 @@ function WorldGen.plan(cfg)
 		sculptOps = sculptOps,
 		fillOpCount = #sculptOps,
 		maxFillExtent = MAX_FILL_EXTENT, -- the per-axis Terrain fill limit the extent gate enforces
+		maxFillVolume = MAX_FILL_VOLUME, -- the region-VOLUME Terrain fill limit the extent gate enforces
 
 		-- Lighting rig (data only).
 		lighting = buildLighting(),
