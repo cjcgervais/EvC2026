@@ -30,7 +30,7 @@
          LAYER 2 (keystroke-free AutoSave harvest, if Layer 1 never lands a save): Studio's AutoSave
          fires ~5min after modification as long as Studio stays open — world.bake.luau's dwell was
          extended to 420s (with a BAKEWAIT heartbeat) specifically to hold the process open for this.
-         Poll %LOCALAPPDATA%\Roblox\AutoSaves (cleared at preflight, so any file that appears is new)
+         Poll %LOCALAPPDATA%\Roblox\RobloxStudio\AutoSaves (cleared at preflight, so any file that appears is new)
          for up to 7 minutes; the newest .rbxl/.rbxlx that shows up is used as the saved place instead.
          run-in-roblox opened the place from a temp .rbxlx path (named in the window title AND the
          newest run-in-roblox-place.rbxlx under $env:TEMP — this script checks the title first, falls
@@ -41,7 +41,7 @@
 
     S51 ORPHAN LESSON (memory: reference-m2-eyes-working.md): a prior capture session left orphaned
     Studio windows + stale AutoSaves that silently corrupted results. This script Stop-Process'es any
-    existing RobloxStudio* process and clears %LOCALAPPDATA%\Roblox\AutoSaves before launching, so a
+    existing RobloxStudio* process and clears %LOCALAPPDATA%\Roblox\RobloxStudio\AutoSaves before launching, so a
     bake never races a leftover window or gets its Ctrl+S caught by an autosave-recovery dialog.
 
     Degrades to UNAVAILABLE (never a hard FAIL) if Studio / run-in-roblox / Lune can't be obtained,
@@ -186,7 +186,7 @@ try {
     }
 } catch {}
 try {
-    $autoSaves = Join-Path $env:LOCALAPPDATA 'Roblox\AutoSaves'
+    $autoSaves = Join-Path $env:LOCALAPPDATA 'Roblox\RobloxStudio\AutoSaves'
     if (Test-Path $autoSaves) {
         Say "Preflight: clearing $autoSaves" DarkGray
         Get-ChildItem $autoSaves -File -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
@@ -322,7 +322,7 @@ try {
                     # --     open long enough for this. AutoSaves was already cleared at preflight, so any
                     # --     file that shows up here is new. Do NOT kill Studio while polling. ---
                     Say "  Layer1 exhausted -> falling back to AutoSave harvest (up to 7min, Studio stays open)..." Yellow
-                    $autoSavesDir = Join-Path $env:LOCALAPPDATA 'Roblox\AutoSaves'
+                    $autoSavesDir = Join-Path $env:LOCALAPPDATA 'Roblox\RobloxStudio\AutoSaves'
                     $layer2Deadline = (Get-Date).AddSeconds(420)
                     $autoSaveHit = $null
                     while (-not $autoSaveHit -and (Get-Date) -lt $layer2Deadline) {
