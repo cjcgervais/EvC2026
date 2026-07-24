@@ -62,8 +62,8 @@ local MeshFactory = require(script.Parent.MeshFactory)
 -- heightAt backs the datum gate + thermals; the ENCLOSING RIM WALL is gone (Chad: "an arena instead
 -- of the outdoors"). The surround now CRESTS at a low broken foothill height then FALLS AWAY toward a
 -- hazed horizon, so the world reads as open outdoors, not a bowl with a lid. The discrete sculpted
--- foothills (buildFoothills) and the distant backdrop mountains (buildDistantMountains, Parts) carry
--- the actual silhouette; this function is DATA for gates/thermals only — never sculpted directly.
+-- foothills (buildFoothills) and the distant backdrop mountains (buildMountainRange, sculpted terrain)
+-- carry the actual silhouette; this function is DATA for gates/thermals only — never sculpted directly.
 --------------------------------------------------------------------------------
 local FLAT_R       = 3400   -- flat playable radius: spawn box, grove annulus, perch band, thermal ring(3200) all inside
 local FOOTHILL_R   = 4300   -- radius of the foothill crest (heightAt only; buildFoothills sculpts near here)
@@ -82,12 +82,15 @@ local FLOOR_RELIEF = 4      -- max |dip| of the shallow playable bowl (kept < th
 local CATCH_FLOOR_Y     = -120
 local CATCH_THICKNESS    = 20
 -- FIX 4 (S51 red-team, P3 safety hole): the far mountain clusters sit at r≈8200 with jitter/geometry
--- offset out to ≈8700-8750 (see buildDistantMountains), but this used to be 8000 — the catch-floor Part
+-- offset out to ≈8700-8750 (old WedgePart backdrop), but this used to be 8000 — the catch-floor Part
 -- span (±REACHABLE_RADIUS) fell SHORT of the mountains it's supposed to backstop, so a bird lured out
 -- past the backdrop that descends falls past the net straight to the unconditional -200 kill (the only
 -- lethal mechanism in rescue). Raised with margin past the outermost mountain Part; the catch floor is a
 -- single Part now (zero sculpt cost), so widening it costs nothing.
-local REACHABLE_RADIUS   = 9500
+-- §2 bar packet: 9500 → 9800. buildMountainRange() now sculpts real terrain peaks (not Parts) whose
+-- geometry reaches plan.mountainMaxR ≈ 9000 (radial jitter + footprint + body-ball jitter margin,
+-- computed live, not eyeballed) — REACHABLE_RADIUS must clear that with the same ≥500-stud P3 margin.
+local REACHABLE_RADIUS   = 9800
 
 -- Roblox Terrain fill has a ~4096-stud PER-AXIS extent limit ("Extents are too large" on FillBlock);
 -- lune has no Terrain so only a REAL engine (the M2 capture smoke) sees it. The big axis-aligned slabs
@@ -139,7 +142,7 @@ end
 
 -- surfaceY(x,z) → the SOLID terrain surface height at world XZ. Pure; no state, no random. Data for
 -- gates/thermals only — the outer branches are NEVER sculpted directly (buildFoothills/
--- buildFalloffCollar/buildDistantMountains carry the actual open-horizon geometry).
+-- buildFalloffCollar/buildMountainRange carry the actual open-horizon geometry).
 local function surfaceY(x, z)
 	local r = math.sqrt(x * x + z * z)
 	if r <= FLAT_R then
@@ -296,14 +299,17 @@ local function buildFalloffCollar()
 end
 
 --------------------------------------------------------------------------------
--- DISTANT MOUNTAINS (open-horizon packet) — the backdrop silhouette, ported from the legacy layered-
--- Part precedent (GameServer.server.luau's ringMtns, the flag-off path) but CLUSTERED with real gaps
--- instead of an even ring, so empty sky reads between them. Parts, not terrain — zero sculpt cost
--- (invariant ④: every one is CanQuery=false, so the style-economy meter can't drift). A mid ridge
--- (r≈6200, warm-shifted Rock) and a farther, taller, cooler/bluer snow-capped range (r≈8200) give
--- aerial-perspective depth; the far range is phase-offset from the mid ridge so the sky gaps layer
--- instead of stacking. Every crest Y is hash-jittered unique so no two overlapping Parts can share a
--- top-face Y (the coplanarity gate).
+-- MOUNTAIN RANGES (§2 bar-compliance packet — real terrain, not Parts). The old backdrop was ~75
+-- WedgePart peaks (owner-rejected as "wedge slop" — not built to the visual-quality bar). This replaces
+-- their EMISSION with layered Rock/Snow TERRAIN sculpt ops while INHERITING their LAYOUT exactly: a mid
+-- ridge (r≈6200, warm Rock, no snow) and a farther, taller, snow-capped range (r≈8200), each in explicit
+-- uneven clusters (not an even ring — the gaps BETWEEN clusters are the point) with the far range
+-- phase-offset from the mid range so the sky gaps layer instead of stacking, and az=0 forced on the far
+-- range (behind the mesa at (1150,0), the waterfall's backdrop peak). The old per-Part warm/cool color
+-- ramp is DROPPED — terrain has no per-op color, only a material; Atmosphere's Decay (buildLighting)
+-- now carries the near-warm/far-cool aerial-perspective cue on its own. Every mountain sculpt op is
+-- tagged feature="mountain" (assembleOps' B/W/L below) so the mountain-volume gate and any future
+-- mountain-scoped check can find them without re-deriving the cluster layout.
 --------------------------------------------------------------------------------
 local MOUNTAIN_MID_R, MOUNTAIN_FAR_R = 6200, 8200
 -- Explicit, uneven cluster azimuths (not an evenly-spaced ring) — the gaps BETWEEN clusters are the
@@ -311,132 +317,82 @@ local MOUNTAIN_MID_R, MOUNTAIN_FAR_R = 6200, 8200
 -- forced on the far range: behind the mesa at (1150,0), the waterfall's backdrop peak.
 local MOUNTAIN_MID_CLUSTERS = { 20, 95, 150, 230, 300, 345 }
 local MOUNTAIN_FAR_CLUSTERS = { 0, 60, 130, 195, 260, 320 }
-local MOUNTAIN_SNOW_COLOR = Color3.fromRGB(232, 238, 246)
-
--- mountainColor(cool) → warm Rock (cool=0, mid ridge) fading to a cooler, bluer Rock (cool=1, far
--- peaks) — the aerial-perspective cue the thin haze then finishes with distance fog.
-local function mountainColor(cool)
-	return Color3.fromRGB(
-		math.floor(120 - 22 * cool),
-		math.floor(112 - 14 * cool),
-		math.floor(100 + 46 * cool)
-	)
-end
+local MOUNTAIN_RADIAL_JITTER = 200 -- ± studs per peak off its cluster radius (TIGHTENED from ±250)
+local MOUNTAIN_AZ_SPREAD = 9       -- ± degrees per peak off its cluster's center azimuth
+local MOUNTAIN_FOOT_W_MIN, MOUNTAIN_FOOT_W_MAX = 900, 1500 -- tangential footprint
+local MOUNTAIN_FOOT_D_MIN, MOUNTAIN_FOOT_D_MAX = 500, 700  -- radial footprint
+local MOUNTAIN_MID_H_MIN, MOUNTAIN_MID_H_MAX = 700, 1400
+-- Far height ceiling TRIMMED 2400→2200 (budget trim 3 of 3 — see buildMountainRange's volume note).
+local MOUNTAIN_FAR_H_MIN, MOUNTAIN_FAR_H_MAX = 1600, 2200
+-- Base-block height fraction TRIMMED 0.25→0.15 (budget trim 1 of 3; the measured Σ needed a deeper
+-- cut than 0.20 to clear the whole-world total gate with real margin — see buildMountainRange's note).
+local MOUNTAIN_BASE_FRAC = 0.15
+-- Body-spine ball count. Far TRIMMED 7→6 to match mid (budget trim 2 of 3); both then TRIMMED 6→5
+-- (measured Σ needed a deeper cut here too — the body spine is the dominant volume term).
+local MOUNTAIN_MID_BODY_N, MOUNTAIN_FAR_BODY_N = 5, 5
 
 -- localOffset(x,z,yaw,ox,oz) → world XZ of a local-frame offset (ox,oz) under a Y-yaw. Same right-hand
 -- rotation convention assembleOps' B() tiler derives in detail (see its comment): local +X → world
--- (cos yaw, -sin yaw), local +Z → world (sin yaw, cos yaw). Shared here so the wedge-pair placement below
--- and B()'s tiler agree on what "yaw" means.
+-- (cos yaw, -sin yaw), local +Z → world (sin yaw, cos yaw). Shared with yawTangent below so mountain
+-- body-spine jitter and B()'s tiler agree on what "yaw" means.
 local function localOffset(x, z, yaw, ox, oz)
 	local c, s = math.cos(yaw), math.sin(yaw)
 	return x + ox * c + oz * s, z - ox * s + oz * c
 end
 
--- FIX 1 (S51 horizon-iterate-2, machine-eyes: "mountains read as CITY BOXES, not peaks"): each peak used
--- to be a single flat-topped axis-aligned cube — a downtown skyline silhouette. A peak is now a WedgePart
--- PAIR forming a ridge tent. WedgePart geometry: height varies along LOCAL Z (full Size.Y at local
--- Z=-size.z/2, zero at local Z=+size.z/2) and is CONSTANT along local X. So each wedge's local Z is
--- yawed onto the WORLD TANGENTIAL axis — the silhouette (height vs. tangential position) reads as a
--- triangle when viewed radially from the play area, exactly the peaked profile wanted — while local X
--- (Size.X = depth, the unsloped extrusion thickness) stays on the WORLD RADIAL axis. Both wedges' tall
--- (-Z local) edges land on the same world point (the shared apex/ridge line); the mirror wedge is yawed
--- +pi so its local +Z points the opposite tangential direction, sloping down to the other side.
-local function emitPeak(parts, px, pz, az, width, depth, height, baseY, yawJit, color, seed)
-	local sizeZ = width / 2  -- each wedge's own slope-run length; the mirrored pair spans the full width
-	local offset = sizeZ / 2 -- wedge center sits this far from the shared apex/ridge line
-	local yawA = -az + yawJit -- ±0.2 rad yaw-jitter off tangent (spec FIX 1), shared by both wedges of the pair
-	local yawB = yawA + math.pi
-	local topY = baseY + height
-	local widx = 0
-	for _, yaw in ipairs({ yawA, yawB }) do
-		widx = widx + 1
-		local cx, cz = localOffset(px, pz, yaw, 0, offset)
-		-- Coplanarity gate: jitter every crest Y unique, plus a tiny per-wedge nudge — the mirrored pair
-		-- shares the apex/ridge line (and can overlap there), so it must never read as an exact top-face
-		-- match even before the continuous hash jitter is considered.
-		local crestJ = (n01(seed + 13 + widx) - 0.5) * 4 + widx * 0.08
-		local ty = topY + crestJ
-		parts[#parts + 1] = {
-			name = "Peak" .. tostring(#parts + 1),
-			shape = "Wedge",
-			size = Vector3.new(depth, ty - baseY, sizeZ),
-			pos = Vector3.new(cx, (baseY + ty) / 2, cz),
-			yaw = yaw,
-			canQuery = false,
-			transparency = 0,
-			color = color,
-			material = Enum.Material.Rock,
-		}
-	end
-end
+-- yawTangent(az) → the yaw (radians) under which local +Z reads as WORLD TANGENTIAL and local +X reads
+-- as WORLD RADIAL at azimuth az — the same convention the old WedgePart emitPeak used (yaw = -az), kept
+-- so a peak's ridge line still runs tangential (a triangle silhouette from the play area) and its base
+-- mass/jitter still run radial.
+local function yawTangent(az) return -az end
 
--- Snow cap: a SMALLER wedge pair sitting flush on the peak's upper slope (top ~25%-ish of tall peaks
--- only), same ridge line/yaw as the peak beneath it, scaled down so it reads as a cap, not a second peak.
-local function emitSnowCap(parts, px, pz, az, width, depth, height, baseY, yawJit, seed)
-	local capWidth, capDepth = width * 0.6, depth * 0.62
-	local capHeight = height * 0.28
-	local topY = baseY + height
-	local capBaseY = topY - capHeight * 0.85 -- flush into the peak's top ~25%-ish band
-	local sizeZ = capWidth / 2
-	local offset = sizeZ / 2
-	local yawA = -az + yawJit
-	local yawB = yawA + math.pi
-	local widx = 0
-	for _, yaw in ipairs({ yawA, yawB }) do
-		widx = widx + 1
-		local cx, cz = localOffset(px, pz, yaw, 0, offset)
-		local crestJ = (n01(seed + 17 + widx) - 0.5) * 3 + widx * 0.05
-		local by = capBaseY + crestJ * 0.3
-		local ty = capBaseY + capHeight + crestJ
-		parts[#parts + 1] = {
-			name = "PeakSnow" .. tostring(#parts + 1),
-			shape = "Wedge",
-			size = Vector3.new(capDepth, ty - by, sizeZ),
-			pos = Vector3.new(cx, (by + ty) / 2, cz),
-			yaw = yaw,
-			canQuery = false,
-			transparency = 0,
-			color = MOUNTAIN_SNOW_COLOR,
-			material = Enum.Material.Snow,
-		}
-	end
-end
-
--- emitCluster: 2-3 overlapping peaks spread within ~18° of centerAz. The wide width band (900-1600) vs.
--- the tight az spread is what makes neighboring peaks within a cluster overlap ~30% and read as one
--- jagged ridge mass rather than separate boxes (FIX 1's "overlap neighbors ~30%" ask).
-local function emitCluster(parts, centerAz, r, hMin, hMax, wMin, wMax, dMin, dMax, cool, snowCap, seedBase)
+-- mountainClusterPeaks(out, centerAz, r, hMin, hMax, snow, bodyN, seedBase) — appends 2-3 peak
+-- descriptor records to `out` for one cluster. Pure. Mirrors the old emitCluster's spread/jitter/seed
+-- pattern: overlapping peaks within ±9° of the cluster center read as one jagged ridge mass, not
+-- separate boxes.
+local function mountainClusterPeaks(out, centerAz, r, hMin, hMax, snow, bodyN, seedBase)
 	local n = 2 + math.floor(n01(seedBase) * 2) -- 2..3 overlapping peaks per cluster
 	for k = 1, n do
 		local h1 = seedBase + k * 37
-		local az = centerAz + (n01(h1) - 0.5) * 18 -- spread within ~18° of the cluster center
-		local a = math.rad(az)
-		local rr = r + (n01(h1 + 3) - 0.5) * 500
-		local h = hMin + n01(h1 + 7) * (hMax - hMin)
-		local width = wMin + n01(h1 + 11) * (wMax - wMin)  -- tangential — WIDER than tall (FIX 1)
-		local depth = dMin + n01(h1 + 29) * (dMax - dMin)  -- radial
-		local yawJit = (n01(h1 + 23) - 0.5) * 0.4           -- ±0.2 rad
-		local px, pz = math.cos(a) * rr, math.sin(a) * rr
-		local baseY = -20 + (n01(h1 + 31) - 0.5) * 6        -- bury slightly into the foothill toe, varied
-		emitPeak(parts, px, pz, a, width, depth, h, baseY, yawJit, mountainColor(cool), h1)
-		if snowCap and h > (hMin + hMax) / 2 then
-			emitSnowCap(parts, px, pz, a, width, depth, h, baseY, yawJit, h1)
-		end
+		local az = math.rad(centerAz + (n01(h1) - 0.5) * (2 * MOUNTAIN_AZ_SPREAD))
+		local rr = r + (n01(h1 + 3) - 0.5) * (2 * MOUNTAIN_RADIAL_JITTER)
+		local peakH = hMin + n01(h1 + 7) * (hMax - hMin)
+		local footW = MOUNTAIN_FOOT_W_MIN + n01(h1 + 11) * (MOUNTAIN_FOOT_W_MAX - MOUNTAIN_FOOT_W_MIN)
+		local footD = MOUNTAIN_FOOT_D_MIN + n01(h1 + 29) * (MOUNTAIN_FOOT_D_MAX - MOUNTAIN_FOOT_D_MIN)
+		local baseY = -20 + (n01(h1 + 31) - 0.5) * 8 -- ±4, bury slightly into the foothill toe, varied
+		local px, pz = math.cos(az) * rr, math.sin(az) * rr
+		out[#out + 1] = {
+			px = px, pz = pz, az = az, peakH = peakH, footW = footW, footD = footD,
+			snow = snow, baseY = baseY, bodyN = bodyN, seed = h1,
+			-- reach: how far this peak's own geometry can extend past its center radius — radial half-
+			-- footprint, plus the body-spine's radial jitter margin, plus a flat safety pad.
+			reach = rr + footD / 2 + 0.16 * footW + 400,
+		}
 	end
 end
 
--- buildDistantMountains() → plan.parts records (Parts, not terrain). Pure: only Vector3/Color3 value
--- construction, matching buildCatchFloorPart's contract. CanQuery=false (CastShadow/CanCollide=false
--- come from build()'s Part-minting loop defaults).
-local function buildDistantMountains()
-	local parts = {}
+-- buildMountainRange() → { peaks = {...descriptors...}, maxR = number }. Pure. maxR is the outermost
+-- reach any peak's geometry extends to; REACHABLE_RADIUS (P3) must clear it with margin. Volume budget:
+-- the naive (untrimmed: base frac 0.25, far body-ball N=7, far H ceiling 2400) numbers measure ≈4.14e10
+-- studs³ mountain / ≈5.19e10 world total across ≈278 mountain ops — over both the mountain gate
+-- ([2.4e10, 3.6e10]) and the whole-world gate ([1.8e10, 4.2e10]). The design's 3 trims (far H ceiling
+-- 2400→2200, far body-ball N 7→6) plus a measured-deeper base-fraction cut (0.25→0.15, not just →0.20 —
+-- the body-spine balls turned out to be the dominant volume term, so the naive 0.20 stop still left the
+-- world-total gate with almost no margin) and body-ball N dropped to 5 on BOTH ranges (not just far)
+-- land it at mountainVol≈2.96e10 (inside the [2.8e10,3.0e10] target band) / worldVol≈4.02e10 — see
+-- tests/worldgen.spec.luau's "sculpt volume" gate for the live, test-asserted numbers.
+local function buildMountainRange()
+	local peaks, maxR = {}, 0
 	for ci, az in ipairs(MOUNTAIN_MID_CLUSTERS) do
-		emitCluster(parts, az, MOUNTAIN_MID_R, 700, 1400, 900, 1600, 400, 800, 0.0, false, ci * 500)
+		mountainClusterPeaks(peaks, az, MOUNTAIN_MID_R, MOUNTAIN_MID_H_MIN, MOUNTAIN_MID_H_MAX, false, MOUNTAIN_MID_BODY_N, ci * 500)
 	end
 	for ci, az in ipairs(MOUNTAIN_FAR_CLUSTERS) do
-		emitCluster(parts, az, MOUNTAIN_FAR_R, 1600, 2600, 900, 1600, 400, 800, 1.0, true, 3000 + ci * 500)
+		mountainClusterPeaks(peaks, az, MOUNTAIN_FAR_R, MOUNTAIN_FAR_H_MIN, MOUNTAIN_FAR_H_MAX, true, MOUNTAIN_FAR_BODY_N, 3000 + ci * 500)
 	end
-	return parts
+	for _, p in ipairs(peaks) do
+		if p.reach > maxR then maxR = p.reach end
+	end
+	return { peaks = peaks, maxR = maxR }
 end
 
 --------------------------------------------------------------------------------
@@ -744,9 +700,15 @@ local function buildLighting()
 		-- Pulled Density/Haze back down and shifted Decay cooler/bluer (less warm-pink, more cool blue-
 		-- gray) so depth reads in distinct layers: warm golden-hour valley near, mid ridge still legible,
 		-- far peaks half-dissolved into cool haze, and real sky gaps between clusters read as SKY, not
-		-- pink soup. Keep ClockTime/Bloom/ColorCorrection (locked golden-hour rig) untouched.
+		-- pink soup.
+		-- §2 bar packet: thinned again, 0.14→0.09 / 2.4→1.8 — the mountains are now real sculpted
+		-- terrain out to r≈9000 (not WedgePart slop at ~8700), and the far-read criterion needs those
+		-- ranges to stay LEGIBLE as layered ridgelines from altitude, not dissolve into a haze wall.
+		-- Decay (70,88,150) is KEPT as-is — it's now the SOLE carrier of the near-warm/far-cool cue
+		-- (the old per-Part color ramp is gone). ClockTime/Bloom/ColorCorrection/Brightness (locked
+		-- golden-hour rig) stay untouched.
 		Atmosphere = {
-			Density = 0.14, Offset = 0.6, Haze = 2.4, Glare = 0.4,
+			Density = 0.09, Offset = 0.6, Haze = 1.8, Glare = 0.4,
 			Color = Color3.fromRGB(255, 205, 165),
 			Decay = Color3.fromRGB(70, 88, 150),
 		},
@@ -808,7 +770,7 @@ end
 -- ops: B=FillBlock, W=FillWedge, C=FillCylinder(upright), L=FillBall. Materials are STRING keys
 -- (sculpt maps them to Enum.Material) so plan() never constructs an Enum it doesn't need.
 --------------------------------------------------------------------------------
-local function assembleOps(foothills, foothillToe, falloffCollar, paintCells, water)
+local function assembleOps(foothills, foothillToe, falloffCollar, paintCells, water, mountains)
 	local ops = {}
 	-- B() — a FillBlock op. Roblox Terrain rejects a fill ("Extents are too large") if any axis exceeds
 	-- MAX_FILL_EXTENT OR the region volume exceeds MAX_FILL_VOLUME — the volume check is the one that
@@ -827,11 +789,15 @@ local function assembleOps(foothills, foothillToe, falloffCollar, paintCells, wa
 	--   wy = y + oy   (yaw only rotates about Y, so Y offsets are untouched)
 	-- At yaw=0 this reduces to wx = x+ox, wz = z+oz — the plain axis-aligned case — so one code path
 	-- covers both.
-	local function pushB(x, y, z, sx, sy, sz, mat, yaw) ops[#ops + 1] = { op = "B", x = x, y = y, z = z, sx = sx, sy = sy, sz = sz, mat = mat, yaw = yaw } end
-	local function B(x, y, z, sx, sy, sz, mat, yaw)
+	-- feature (optional, trailing) — an extra, purely descriptive tag carried on the op record (e.g.
+	-- "mountain" for buildMountainRange's ops below). sculpt() and the extent/coplanarity-style gates
+	-- iterate generically over op/mat/sx/sy/sz/rad fields and never touch it, so a nil feature on every
+	-- other producer's ops is unaffected; it exists purely so a gate can `filter feature=="mountain"`.
+	local function pushB(x, y, z, sx, sy, sz, mat, yaw, feature) ops[#ops + 1] = { op = "B", x = x, y = y, z = z, sx = sx, sy = sy, sz = sz, mat = mat, yaw = yaw, feature = feature } end
+	local function B(x, y, z, sx, sy, sz, mat, yaw, feature)
 		local yw = yaw or 0
 		if sx <= MAX_FILL_EXTENT and sy <= MAX_FILL_EXTENT and sz <= MAX_FILL_EXTENT and sx * sy * sz <= MAX_FILL_VOLUME then
-			pushB(x, y, z, sx, sy, sz, mat, yaw)
+			pushB(x, y, z, sx, sy, sz, mat, yaw, feature)
 			return
 		end
 		local nx = math.max(1, math.ceil(sx / MAX_FILL_EXTENT))
@@ -862,7 +828,7 @@ local function assembleOps(foothills, foothillToe, falloffCollar, paintCells, wa
 					local wx = x + ox * cosYw + oz * sinYw
 					local wz = z - ox * sinYw + oz * cosYw
 					local wy = y + oy
-					pushB(wx, wy, wz, subX, subY, subZ, mat, yaw)
+					pushB(wx, wy, wz, subX, subY, subZ, mat, yaw, feature)
 				end
 			end
 		end
@@ -871,12 +837,12 @@ local function assembleOps(foothills, foothillToe, falloffCollar, paintCells, wa
 	-- exact "Extents are too large" class the rim-PEAK bug proved possible. These three now assert the
 	-- same per-axis-extent + region-volume bounds AT PLAN TIME (pure error(), no Instances touched), so
 	-- an oversized wedge/cylinder/ball is caught by Tier-4 the moment it's authored, never in a live boot.
-	local function W(x, y, z, sx, sy, sz, mat, yaw)
+	local function W(x, y, z, sx, sy, sz, mat, yaw, feature)
 		if not (sx <= MAX_FILL_EXTENT and sy <= MAX_FILL_EXTENT and sz <= MAX_FILL_EXTENT and sx * sy * sz <= MAX_FILL_VOLUME) then
 			error(("WorldGen W() wedge %.1fx%.1fx%.1f (mat %s) exceeds MAX_FILL_EXTENT=%d or MAX_FILL_VOLUME=%.0f (vol=%.0f)")
 				:format(sx, sy, sz, tostring(mat), MAX_FILL_EXTENT, MAX_FILL_VOLUME, sx * sy * sz))
 		end
-		ops[#ops + 1] = { op = "W", x = x, y = y, z = z, sx = sx, sy = sy, sz = sz, mat = mat, yaw = yaw }
+		ops[#ops + 1] = { op = "W", x = x, y = y, z = z, sx = sx, sy = sy, sz = sz, mat = mat, yaw = yaw, feature = feature }
 	end
 	local function C(x, y, z, h, rad, mat)
 		local vol = math.pi * rad * rad * h
@@ -886,13 +852,13 @@ local function assembleOps(foothills, foothillToe, falloffCollar, paintCells, wa
 		end
 		ops[#ops + 1] = { op = "C", x = x, y = y, z = z, h = h, rad = rad, mat = mat }
 	end
-	local function L(x, y, z, rad, mat)
+	local function L(x, y, z, rad, mat, feature)
 		local vol = (4 / 3) * math.pi * rad ^ 3
 		if not (2 * rad <= MAX_FILL_EXTENT and vol <= MAX_FILL_VOLUME) then
 			error(("WorldGen L() ball rad=%.1f (mat %s) exceeds MAX_FILL_EXTENT=%d or MAX_FILL_VOLUME=%.0f (vol=%.0f)")
 				:format(rad, tostring(mat), MAX_FILL_EXTENT, MAX_FILL_VOLUME, vol))
 		end
-		ops[#ops + 1] = { op = "L", x = x, y = y, z = z, rad = rad, mat = mat }
+		ops[#ops + 1] = { op = "L", x = x, y = y, z = z, rad = rad, mat = mat, feature = feature }
 	end
 
 	-- 1) CATCH SLAB (P3) — this used to be a terrain FillBlock here (tiled into ~36 sub-fills of ~4000²
@@ -924,6 +890,50 @@ local function assembleOps(foothills, foothillToe, falloffCollar, paintCells, wa
 	-- 7) MICRO RELIEF — grass mounds (≤6 protrusion) then rock outcrops (r1700-3000 arcs).
 	for _, m in ipairs(MOUNDS) do L(m.x, m.protrude - m.r, m.z, m.r, "Grass") end
 	for _, o in ipairs(OUTCROPS) do L(o.x, o.protrude - o.r, o.z, o.r, "Rock") end
+
+	-- 7b) MOUNTAIN RANGES (§2 bar packet) — layered Rock/Snow terrain clusters, replacing the old
+	-- WedgePart backdrop. Every op tagged feature="mountain" so the mountain-volume gate can sum
+	-- exactly this content without touching anything else in sculptOps. Each peak is 4 layers: a Rock
+	-- base mass, a body "spine" of jittered balls (Rock below the snowline / Snow above it), a
+	-- wedge-pair ridge cap (triangle silhouette from the play area), and — snow peaks only — a small
+	-- Snow crown ball. Placed before water (never overlaps a carve; ordering doesn't matter here).
+	local function emitMountainPeak(pk)
+		local az, footW, footD, peakH, baseY, snow, bodyN, seed =
+			pk.az, pk.footW, pk.footD, pk.peakH, pk.baseY, pk.snow, pk.bodyN, pk.seed
+		local px, pz = pk.px, pk.pz
+		local snowlineY = baseY + peakH * (snow and 0.66 or 2.0)
+		local yaw = yawTangent(az)
+
+		-- L1 base mass (Rock): a squat block under the peak, footW tangential x footD radial.
+		local baseSy = MOUNTAIN_BASE_FRAC * peakH
+		local baseTopY = baseY + baseSy
+		B(px, (baseY + baseTopY) / 2, pz, footW, baseSy, footD, "Rock", yaw, "mountain")
+
+		-- L2 body spine: N jittered balls climbing the peak, Rock below the snowline / Snow above it.
+		for kk = 0, bodyN - 1 do
+			local t = kk / (bodyN - 1)
+			local by = baseY + peakH * (0.15 + 0.80 * t)
+			local rad = math.clamp(footW * (0.42 - 0.30 * t), 130, 400)
+			local jt = (n01(seed + 41 + kk) - 0.5) * (2 * 0.16 * footW) -- tangential jitter
+			local jr = (n01(seed + 53 + kk) - 0.5) * (2 * 0.14 * footD) -- radial jitter
+			local jx, jz = localOffset(px, pz, yaw, jr, jt)
+			local mat = (by > snowlineY) and "Snow" or "Rock"
+			L(jx, by, jz, rad, mat, "mountain")
+		end
+
+		-- L3 ridge cap: two wedges back-to-back — height varies along tangential = a triangle read.
+		local capY = baseY + peakH * 0.72
+		local capMat = (capY > snowlineY) and "Snow" or "Rock"
+		W(px, capY, pz, 0.30 * footD, 0.40 * peakH, 0.50 * footW, capMat, yaw, "mountain")
+		W(px, capY, pz, 0.30 * footD, 0.40 * peakH, 0.50 * footW, capMat, yaw + math.pi, "mountain")
+
+		-- L4 snow crown (snow peaks only): a small cap ball at the very top.
+		if snow then
+			local crownRad = math.clamp(0.14 * footW, 120, 220)
+			L(px, baseY + peakH * 0.94, pz, crownRad, "Snow", "mountain")
+		end
+	end
+	for _, pk in ipairs(mountains.peaks) do emitMountainPeak(pk) end
 
 	-- 8) WATER — LAST, so it carves through the floor/paint. Each carve is Air → Rock floor → Water.
 	local function carveCyl(x, z, radius, surf, floor)
@@ -1008,9 +1018,11 @@ function WorldGen.plan(cfg)
 	local falloffCollar = buildFalloffCollar()
 	local paintCells = buildPaint()
 	local water = buildWater()
-	local sculptOps = assembleOps(foothills, foothillToe, falloffCollar, paintCells, water)
+	local mountains = buildMountainRange()
+	local sculptOps = assembleOps(foothills, foothillToe, falloffCollar, paintCells, water, mountains)
+	-- §2 bar packet: the distant-mountain backdrop is now sculpted TERRAIN (mountains.peaks, tagged
+	-- feature="mountain" in sculptOps above), not Parts — plan.parts returns to just the P3 catch floor.
 	local parts = { buildCatchFloorPart() }
-	for _, m in ipairs(buildDistantMountains()) do parts[#parts + 1] = m end
 
 	return {
 		-- Birth contract (must match legacy BuildMap: GameServer:260 Gravity, :267 StreamingEnabled).
@@ -1026,10 +1038,16 @@ function WorldGen.plan(cfg)
 		-- P3 catch floor.
 		catchFloorY = CATCH_FLOOR_Y,
 		reachableRadius = REACHABLE_RADIUS,
+		-- §2 bar packet: the outermost radius any sculpted mountain peak's geometry reaches (computed
+		-- live by buildMountainRange, not eyeballed) — the water-P3 catch-floor gate checks
+		-- reachableRadius against THIS now that mountains are terrain, not Parts (parts-derived would
+		-- read 0 for a mountain radius since only the CatchFloor Part remains in plan.parts).
+		mountainMaxR = mountains.maxR,
 
-		-- Decorative Parts: the invisible P3 catch floor (buildCatchFloorPart, canQuery=true — the
-		-- documented invariant-④ exception) plus the distant backdrop mountains (buildDistantMountains,
-		-- canQuery=false). Any FUTURE decorative Part added here MUST be canQuery=false.
+		-- Decorative Parts: just the invisible P3 catch floor now (buildCatchFloorPart, canQuery=true —
+		-- the documented invariant-④ exception). The distant backdrop mountains are sculpted TERRAIN
+		-- (mountains.peaks, feature="mountain" ops in sculptOps), not Parts. Any FUTURE decorative Part
+		-- added here MUST be canQuery=false.
 		parts = parts,
 
 		-- OPEN-HORIZON CONTENT — DATA consumed by sculpt/build, and read by the new gates. westArc is

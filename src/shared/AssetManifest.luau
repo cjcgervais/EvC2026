@@ -53,19 +53,12 @@ return {
 		source = "Roblox creator store, free assets; see tools/asset-extract/",
 	},
 
+	-- §2 bar packet: swapped to the VERIFIED sunset set (627302570, TracyCyanne) as primary — the
+	-- far-read horizon/sky criterion needs a sky that actually reads as a sunset from altitude, not
+	-- just "not broken". Render is PROVISIONAL until an in-Studio capture confirms it (audition tracked
+	-- in the look-dev sheet); fallbacks if it doesn't read: the old primary below (now skyboxBackup),
+	-- then Map.meshSky=false (the procedural default-sky floor).
 	skybox = {
-		bk = "rbxassetid://600830446",
-		dn = "rbxassetid://600831635",
-		ft = "rbxassetid://600832720",
-		lf = "rbxassetid://600886090",
-		rt = "rbxassetid://600833862",
-		up = "rbxassetid://600835177",
-		sun = "rbxasset://sky/sun.jpg",
-		sunSize = 21,
-		sourceAssetId = 5186800496,
-		creator = "DotDDotexe",
-	},
-	skyboxBackup = {
 		bk = "rbxassetid://541743453",
 		dn = "rbxassetid://541743443",
 		ft = "rbxassetid://541743446",
@@ -76,6 +69,20 @@ return {
 		sunSize = 21,
 		sourceAssetId = 627302570,
 		creator = "TracyCyanne",
+	},
+	-- Former primary (DotDDotexe, 5186800496) — demoted to backup, not deleted, so a rejected-sunset
+	-- capture can fall back to it without re-authoring the manifest.
+	skyboxBackup = {
+		bk = "rbxassetid://600830446",
+		dn = "rbxassetid://600831635",
+		ft = "rbxassetid://600832720",
+		lf = "rbxassetid://600886090",
+		rt = "rbxassetid://600833862",
+		up = "rbxassetid://600835177",
+		sun = "rbxasset://sky/sun.jpg",
+		sunSize = 21,
+		sourceAssetId = 5186800496,
+		creator = "DotDDotexe",
 	},
 
 	props = {

@@ -90,20 +90,15 @@ H.test("water-P3: the hidden CATCH FLOOR underlies the whole reachable world abo
 	H.ok(plan.catchFloorY < minWaterFloor,
 		("catchFloorY=%.0f must sit below the lowest water floor (%.0f) or it caps a lake"):format(plan.catchFloorY, minWaterFloor))
 	-- (b) P3 coverage: the catch slab must reach at least 500 studs past the outermost distant-mountain
-	-- Part (by XZ radius), so no reachable void gap — including just beyond the mountain backdrop, the
-	-- S51 red-team's P3 safety hole — can drop a bird past -200. Derived from plan.parts (not a hard-coded
-	-- constant) so a future mountain-radius tune can never go stale against this gate again.
-	local maxMtnR = 0
-	for _, p in ipairs(plan.parts) do
-		if p.name ~= "CatchFloor" then
-			local r = math.sqrt(p.pos.X ^ 2 + p.pos.Z ^ 2)
-			if r > maxMtnR then maxMtnR = r end
-		end
-	end
-	H.ok(maxMtnR > 0, "expected at least one distant-mountain part to compute the reachable-radius margin from")
-	H.ok(plan.reachableRadius >= maxMtnR + 500,
-		("reachableRadius=%.0f must cover at least 500 studs past the outermost distant-mountain part (r=%.0f)")
-			:format(plan.reachableRadius, maxMtnR))
+	-- geometry, so no reachable void gap — including just beyond the mountain backdrop, the S51
+	-- red-team's P3 safety hole — can drop a bird past -200. §2 bar packet: the mountains are now
+	-- sculpted TERRAIN, not Parts (plan.parts holds only the CatchFloor), so this reads
+	-- plan.mountainMaxR (computed live by buildMountainRange) instead of deriving it from plan.parts —
+	-- a future mountain-radius tune can never go stale against this gate.
+	H.ok(plan.mountainMaxR and plan.mountainMaxR > 0, "expected plan.mountainMaxR to compute the reachable-radius margin from")
+	H.ok(plan.reachableRadius >= plan.mountainMaxR + 500,
+		("reachableRadius=%.0f must cover at least 500 studs past the outermost mountain geometry (mountainMaxR=%.0f)")
+			:format(plan.reachableRadius, plan.mountainMaxR))
 end)
 
 H.test("water-P3: sampling every water region, the solid floor never crosses the failsafe", function()
@@ -264,14 +259,24 @@ H.test("contract: plan is deterministic — identical heightAt + water + parts +
 	H.eq(#a.relief.mounds, #b.relief.mounds, "relief mound count drifted between calls")
 	H.eq(#a.relief.outcrops, #b.relief.outcrops, "relief outcrop count drifted between calls")
 	H.eq(#a.river.points, #b.river.points, "river polyline drifted between calls")
-	-- a representative sculpt-op, foothill crest, and distant-mountain part are byte-identical.
+	-- a representative sculpt-op, foothill crest, and mountain op are byte-identical.
 	H.eq(a.sculptOps[1].mat, b.sculptOps[1].mat, "sculptOps[1].mat drifted")
 	H.eq(a.foothills[1].crest, b.foothills[1].crest, "foothill crest drifted between calls")
-	local aMtn, bMtn
-	for _, p in ipairs(a.parts) do if p.name ~= "CatchFloor" then aMtn = p; break end end
-	for _, p in ipairs(b.parts) do if p.name ~= "CatchFloor" then bMtn = p; break end end
-	H.ok(aMtn ~= nil and bMtn ~= nil, "expected at least one distant-mountain part in plan.parts")
-	H.eq(aMtn.pos.Y, bMtn.pos.Y, "distant-mountain part Y drifted between calls")
+	-- §2 bar packet: the distant mountains are sculpted TERRAIN ops (feature="mountain"), not Parts, so
+	-- the determinism pin reads the first such op instead of the first non-CatchFloor plan.parts entry.
+	local function firstMountainOp(sculptOps)
+		for _, o in ipairs(sculptOps) do
+			if o.feature == "mountain" then return o end
+		end
+		return nil
+	end
+	local aMtn, bMtn = firstMountainOp(a.sculptOps), firstMountainOp(b.sculptOps)
+	H.ok(aMtn ~= nil and bMtn ~= nil, "expected at least one feature==\"mountain\" op in plan.sculptOps")
+	H.eq(aMtn.mat, bMtn.mat, "first mountain op's mat drifted between calls")
+	H.eq(aMtn.y, bMtn.y, "first mountain op's y drifted between calls")
+	local aExtent = aMtn.rad or aMtn.sy
+	local bExtent = bMtn.rad or bMtn.sy
+	H.eq(aExtent, bExtent, "first mountain op's rad/sy drifted between calls")
 	H.eq(a.paintZones[1].mat, b.paintZones[1].mat, "paintZones[1].mat drifted between calls")
 end)
 
@@ -319,28 +324,30 @@ H.test("foothill restyle: hills read Grass/Ground (folds the old 'consistently R
 	end
 end)
 
-H.test("distant mountains: non-solid backdrop clusters exist with a sky gap and snow-capped tall far peaks", function()
+H.test("distant mountains: sculpted backdrop clusters exist with a sky gap and snow-capped far peaks", function()
 	local plan = WorldGen.plan(GameConfig)
-	local mtns = {}
-	for _, p in ipairs(plan.parts) do
-		if p.name ~= "CatchFloor" then mtns[#mtns + 1] = p end
+	-- §2 bar packet: the backdrop is now sculpted TERRAIN (feature="mountain" sculptOps), not Parts —
+	-- the old WedgePart-based gate (parts minus CatchFloor) is replaced by filtering sculptOps directly.
+	local mtnOps = {}
+	for _, o in ipairs(plan.sculptOps) do
+		if o.feature == "mountain" then mtnOps[#mtnOps + 1] = o end
 	end
-	H.ok(#mtns >= 20, ("only %d distant-mountain parts (<20) — the backdrop would read sparse"):format(#mtns))
+	H.ok(#mtnOps >= 150, ("only %d mountain sculpt ops (<150) — the backdrop would read sparse"):format(#mtnOps))
 	local sawSnow, sawFar = false, false
-	for _, p in ipairs(mtns) do
-		H.eq(p.canQuery, false, ("mountain part %q must be CanQuery=false (invariant ④)"):format(tostring(p.name)))
-		local r = math.sqrt(p.pos.X ^ 2 + p.pos.Z ^ 2)
-		H.between(r, 5500, 9500, ("mountain part %q is at r=%.0f, outside the declared 6000-9000-ish backdrop band"):format(tostring(p.name), r))
-		if p.material == Enum.Material.Snow then sawSnow = true end
+	for _, o in ipairs(mtnOps) do
+		H.ok(o.mat == "Rock" or o.mat == "Snow", ("mountain op mat %q, expected Rock or Snow"):format(tostring(o.mat)))
+		local r = math.sqrt(o.x * o.x + o.z * o.z)
+		H.between(r, 5500, 9500, ("mountain op is at r=%.0f, outside the declared 5500-9500 backdrop band"):format(r))
+		if o.mat == "Snow" then sawSnow = true end
 		if r > 7000 then sawFar = true end
 	end
 	H.ok(sawSnow, "expected at least one snow-capped tall far peak")
 	H.ok(sawFar, "expected at least one far-range mountain cluster (r>7000)")
-	-- ≥1 empty azimuth arc ≥30° wide (sky gap): sweep 5° steps and find the longest run with no mountain
-	-- part within a generous 400-stud angular-adjacent window.
+	-- ≥1 empty azimuth arc ≥30° wide (sky gap): same longest-run-over-sorted-azimuths algorithm as the
+	-- old Part-based gate, now swept over mountain op positions.
 	local azList = {}
-	for _, p in ipairs(mtns) do
-		azList[#azList + 1] = math.deg(math.atan2(p.pos.Z, p.pos.X)) % 360
+	for _, o in ipairs(mtnOps) do
+		azList[#azList + 1] = math.deg(math.atan2(o.z, o.x)) % 360
 	end
 	table.sort(azList)
 	local longestGap = 0
@@ -525,23 +532,38 @@ H.test("fill budget: total sculpt fill ops ≤1100 (recorded)", function()
 end)
 
 --------------------------------------------------------------------------------
--- 11b. SCULPT VOLUME BUDGET (open-horizon packet) — pins the actual cost win directly: the rim wall's
--- buried-core mass (84% of all sculpt volume) is gone entirely, replaced by the much cheaper floor +
--- thinned WestSea + foothills + falloff collar + water carves. Predicted total ≈1.06e10 studs³ (down
--- from ≈5.1e10 with the old rim wall) — bracket it rather than pin an exact float, so tuning can drift
--- without breaking this gate; only a real regression back toward the old wall-scale mass should trip it.
+-- 11b. SCULPT VOLUME BUDGET — the open-horizon packet pinned the pre-mountain-terrain B-op volume; the
+-- §2 bar packet adds real sculpted mountain terrain (feature="mountain" ops, B+W+L), so the budget is
+-- now two gates: (a) the mountain-volume gate alone, pinning the new content's cost directly (target
+-- ~2.8-3.0e10 studs³, ceiling trimmed from a naive ≈3.5e10 via MOUNTAIN_BASE_FRAC/BODY_N/H_MAX — see
+-- WorldGen's buildMountainRange comment); (b) a whole-world, all-op-type total so a regression anywhere
+-- (mountains OR the pre-existing floor/foothill/collar/water content) still trips something. Volume per
+-- op type mirrors the fill extent+volume gate below: B/W = sx*sy*sz, C = pi*rad^2*h, L = (4/3)*pi*rad^3.
 --------------------------------------------------------------------------------
-H.test("sculpt volume: total B-op volume stays open-horizon-sized (<=1.2e10, >=6e9)", function()
-	local plan = WorldGen.plan(GameConfig)
-	local totalVol = 0
-	for _, o in ipairs(plan.sculptOps) do
-		if o.op == "B" then
-			totalVol = totalVol + o.sx * o.sy * o.sz
-		end
+local function opVolume(o)
+	if o.op == "B" or o.op == "W" then
+		return o.sx * o.sy * o.sz
+	elseif o.op == "C" then
+		return math.pi * o.rad * o.rad * o.h
+	elseif o.op == "L" then
+		return (4 / 3) * math.pi * o.rad ^ 3
 	end
-	print(("        [sculpt-volume] total B-op volume = %.3e studs^3"):format(totalVol))
-	H.ok(totalVol >= 6.0e9, ("total B-op volume %.3e is implausibly low (<6.0e9) — the world may be missing terrain"):format(totalVol))
-	H.ok(totalVol <= 1.2e10, ("total B-op volume %.3e (>1.2e10) — over the open-horizon sculpt-volume budget (rim wall may have regrown)"):format(totalVol))
+	return 0
+end
+
+H.test("sculpt volume: mountain-op volume lands in the §2 bar-packet budget band", function()
+	local plan = WorldGen.plan(GameConfig)
+	local mtnVol, worldVol = 0, 0
+	for _, o in ipairs(plan.sculptOps) do
+		local v = opVolume(o)
+		worldVol = worldVol + v
+		if o.feature == "mountain" then mtnVol = mtnVol + v end
+	end
+	print(("        [sculpt-volume] mountain op volume = %.3e studs^3, world total = %.3e studs^3"):format(mtnVol, worldVol))
+	H.ok(mtnVol >= 2.4e10, ("mountain-op volume %.3e is below the §2 bar-packet floor (2.4e10) — the mountains may have shrunk/vanished"):format(mtnVol))
+	H.ok(mtnVol <= 3.6e10, ("mountain-op volume %.3e is above the §2 bar-packet ceiling (3.6e10) — apply the budget trims (base fraction/body-ball count/height ceiling)"):format(mtnVol))
+	H.ok(worldVol >= 1.8e10, ("world sculpt-op volume %.3e is implausibly low (<1.8e10) — the world may be missing terrain"):format(worldVol))
+	H.ok(worldVol <= 4.2e10, ("world sculpt-op volume %.3e (>4.2e10) — over the whole-world sculpt-volume budget"):format(worldVol))
 end)
 
 --------------------------------------------------------------------------------
