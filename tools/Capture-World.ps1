@@ -54,6 +54,8 @@ if (-not ("EvcNative" -as [type])) {
         public static extern bool GetWindowRect(System.IntPtr hWnd, out RECT lpRect);
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         public static extern bool SetForegroundWindow(System.IntPtr hWnd);
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        public static extern bool PrintWindow(System.IntPtr hWnd, System.IntPtr hdcBlt, uint nFlags);
         public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
 '@ | Out-Null
 }
@@ -91,22 +93,50 @@ if (-not (Test-Path $rir)) { Say "UNAVAILABLE: run-in-roblox.exe missing" Yellow
 # --- Studio-window capture: RobloxStudioBeta's MainWindowHandle -> GetWindowRect; fall back to the
 #     full primary screen if the handle can't be found (a covered/minimised window still yields a shot).
 function Capture-Studio($path) {
-    $rect = $null
+    # S52 occlusion fix: PrintWindow (PW_RENDERFULLCONTENT=2) captures the Studio window's OWN
+    # pixels even when other windows sit on top of it - CopyFromScreen grabbed whatever covered
+    # the viewport (twice this session: File Explorer + a terminal ruined two full sheets). We
+    # try PrintWindow first and only fall back to the old screen copy if it fails or returns a
+    # blank frame (some GPU swapchains render black through PrintWindow).
+    $hwnd = [IntPtr]::Zero; $rect = $null
     try {
         $proc = Get-Process -Name 'RobloxStudioBeta' -ErrorAction SilentlyContinue |
                 Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
         if ($proc) {
             $r = New-Object Evc.Native+RECT
             if ([Evc.Native]::GetWindowRect($proc.MainWindowHandle, [ref]$r)) {
-                try { [Evc.Native]::SetForegroundWindow($proc.MainWindowHandle) | Out-Null } catch {}
                 $w = $r.Right - $r.Left; $h = $r.Bottom - $r.Top
                 if ($w -gt 0 -and $h -gt 0) {
+                    $hwnd = $proc.MainWindowHandle
                     $rect = New-Object System.Drawing.Rectangle $r.Left, $r.Top, $w, $h
                 }
             }
         }
     } catch {}
+    if ($hwnd -ne [IntPtr]::Zero) {
+        $bmp = New-Object System.Drawing.Bitmap $rect.Width, $rect.Height
+        $gfx = [System.Drawing.Graphics]::FromImage($bmp)
+        $hdc = $gfx.GetHdc()
+        $ok = $false
+        try { $ok = [Evc.Native]::PrintWindow($hwnd, $hdc, 2) } catch {}
+        $gfx.ReleaseHdc($hdc); $gfx.Dispose()
+        if ($ok) {
+            # Blank-frame guard: sample a sparse pixel grid; all-identical => swapchain rendered
+            # nothing through PrintWindow, fall through to the legacy screen copy.
+            $first = $bmp.GetPixel(10, 10); $allSame = $true
+            foreach ($fx in 0.25, 0.5, 0.75) { foreach ($fy in 0.25, 0.5, 0.75) {
+                if ($bmp.GetPixel([int]($rect.Width * $fx), [int]($rect.Height * $fy)) -ne $first) { $allSame = $false } } }
+            if (-not $allSame) {
+                $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+                $bmp.Dispose()
+                return
+            }
+        }
+        $bmp.Dispose()
+    }
+    # Legacy fallback: bring-to-front + screen copy (occlusion-vulnerable, but never zero-output).
     if (-not $rect) { $rect = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds }
+    if ($hwnd -ne [IntPtr]::Zero) { try { [Evc.Native]::SetForegroundWindow($hwnd) | Out-Null } catch {} }
     $bmp = New-Object System.Drawing.Bitmap $rect.Width, $rect.Height
     $gfx = [System.Drawing.Graphics]::FromImage($bmp)
     $gfx.CopyFromScreen($rect.Location, [System.Drawing.Point]::Empty, $rect.Size)
