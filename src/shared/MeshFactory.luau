@@ -15,6 +15,18 @@
 	    back to a Part + SpecialMesh (FileMesh, Scale = scaledSize / meshSize). Every part it creates is
 	    Anchored=true, CanCollide=false, CanQuery=false, CanTouch=false, CastShadow=false (ghost-forest +
 	    perf-budget contract, M4-B spec) and parented under a Model named after the variant's rootName.
+
+	    TEMPLATE RESOLUTION (VISUAL-QUALITY-BAR.md sec 1.5 -- committed mesh path, S51): the runtime
+	    InsertService:CreateMeshPartAsync path is permission-fragile and network-dependent, so it is now
+	    the FALLBACK, not the primary path. getTemplate(meshId) first checks
+	    ReplicatedStorage.MeshTemplates (committed via tools/Extract-Meshes.ps1 -> assets/MeshTemplates.rbxm,
+	    mapped in by default.project.json) for a child named exactly `meshId` and, if found, clones it
+	    instantly -- offline, deterministic, zero CDN round-trip. Only when the committed folder is
+	    missing an id (pre-extraction, or a newly-added manifest entry the extractor hasn't caught up to
+	    yet) does it fall back to InsertService:CreateMeshPartAsync, pcall'd, with the same Part+
+	    SpecialMesh (FileMesh) last resort on outright failure. Both paths are cached PER MESH ID in
+	    templateCache so a given id only ever pays its resolution cost once per boot.
+
 	    Never called by a Tier-4 spec — @lune/roblox has no InsertService.
 ]]
 
@@ -88,6 +100,20 @@ end
 
 local templateCache = {} -- meshId -> { kind = "mesh"|"part", template = Instance }
 
+-- findTemplatesFolder() -- looks up ReplicatedStorage.MeshTemplates, the committed-mesh folder
+-- default.project.json $path-maps from assets/MeshTemplates.rbxm (bar sec 1.5). pcall'd: this module
+-- must never hard-error just because the folder is momentarily absent (e.g. a placeholder-only clone
+-- pre-extraction, or a caller running before ReplicatedStorage has finished streaming in edge cases).
+local function findTemplatesFolder()
+	local ok, folder = pcall(function()
+		return game:GetService("ReplicatedStorage"):FindFirstChild("MeshTemplates")
+	end)
+	if ok then
+		return folder
+	end
+	return nil
+end
+
 local function getTemplate(meshId)
 	local cached = templateCache[meshId]
 	if cached ~= nil then
@@ -95,20 +121,30 @@ local function getTemplate(meshId)
 	end
 
 	local rec
-	local InsertService = game:GetService("InsertService")
-	local ok, meshPart = pcall(function()
-		return InsertService:CreateMeshPartAsync(meshId, Enum.CollisionFidelity.Box, Enum.RenderFidelity.Automatic)
-	end)
-	if ok and meshPart then
-		rec = { kind = "mesh", template = meshPart }
+
+	-- 1. Committed template path (bar sec 1.5): instant, offline, deterministic -- zero CDN round-trip.
+	local folder = findTemplatesFolder()
+	local committed = folder and folder:FindFirstChild(meshId)
+	if committed then
+		local kind = (committed.ClassName == "MeshPart") and "mesh" or "part"
+		rec = { kind = kind, template = committed }
 	else
-		local part = Instance.new("Part")
-		part.Shape = Enum.PartType.Block
-		local mesh = Instance.new("SpecialMesh")
-		mesh.MeshType = Enum.MeshType.FileMesh
-		mesh.MeshId = meshId
-		mesh.Parent = part
-		rec = { kind = "part", template = part }
+		-- 2. Fallback: runtime CDN fetch (pre-extraction, or an id the committed folder doesn't have).
+		local InsertService = game:GetService("InsertService")
+		local ok, meshPart = pcall(function()
+			return InsertService:CreateMeshPartAsync(meshId, Enum.CollisionFidelity.Box, Enum.RenderFidelity.Automatic)
+		end)
+		if ok and meshPart then
+			rec = { kind = "mesh", template = meshPart }
+		else
+			local part = Instance.new("Part")
+			part.Shape = Enum.PartType.Block
+			local mesh = Instance.new("SpecialMesh")
+			mesh.MeshType = Enum.MeshType.FileMesh
+			mesh.MeshId = meshId
+			mesh.Parent = part
+			rec = { kind = "part", template = part }
+		end
 	end
 	templateCache[meshId] = rec
 	return rec
@@ -122,6 +158,11 @@ end
 -- first. Returns (successCount, total) so a caller can log how many templates actually resolved. The
 -- per-call getTemplate() path (inside build()) stays as the cache-hit/fallback for anything prewarm
 -- missed (a late-added meshId, a timeout, or a caller that never prewarmed).
+--
+-- S51 (bar sec 1.5): any meshId already served by the committed ReplicatedStorage.MeshTemplates
+-- folder resolves synchronously inside getTemplate() with zero network round-trip, so it is counted
+-- as an INSTANT success here rather than spawned as an async task -- prewarm becomes a no-op (in the
+-- "nothing to wait on" sense) once every referenced mesh has been extracted.
 --------------------------------------------------------------------------------
 local PREWARM_DEADLINE_S = 15
 
@@ -133,15 +174,25 @@ function MeshFactory.prewarm(meshIds)
 	local total = #meshIds
 	local completed = 0
 	local successCount = 0
+	local folder = findTemplatesFolder()
 
 	for _, meshId in ipairs(meshIds) do
-		task.spawn(function()
+		if folder and folder:FindFirstChild(meshId) then
+			-- Committed template: resolve inline, no task.spawn needed -- instant success.
 			local ok, rec = pcall(getTemplate, meshId)
-			if ok and rec and rec.kind == "mesh" then
+			if ok and rec then
 				successCount += 1
 			end
 			completed += 1
-		end)
+		else
+			task.spawn(function()
+				local ok, rec = pcall(getTemplate, meshId)
+				if ok and rec and rec.kind == "mesh" then
+					successCount += 1
+				end
+				completed += 1
+			end)
+		end
 	end
 
 	local start = os.clock()

@@ -10,6 +10,11 @@ build/
 # Workspace.Terrain at build time (tools/Bake-World.ps1 / tools/Extract-Terrain.luau produce it;
 # a placeholder empty Terrain ships so a fresh clone's `rojo build` never fails on a missing $path).
 !assets/BakedTerrain.rbxm
+# ...and the committed mesh-template artifact (VISUAL-QUALITY-BAR.md §1.5): default.project.json
+# $path-maps this into ReplicatedStorage.MeshTemplates so MeshFactory clones committed geometry
+# instead of hitting InsertService:CreateMeshPartAsync at runtime. A placeholder empty Folder ships
+# so a fresh clone's `rojo build` never fails on a missing $path (same reasoning as BakedTerrain).
+!assets/MeshTemplates.rbxm
 
 # Downloaded Rojo binary (bootstrapped by tools/Bootstrap-Rojo.ps1; not committed)
 tools/bin/
