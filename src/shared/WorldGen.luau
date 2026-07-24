@@ -311,7 +311,11 @@ end
 --------------------------------------------------------------------------------
 local GROUND_SKIN_INNER_R, GROUND_SKIN_OUTER_R = 6800, 9600
 local GROUND_SKIN_INNER_Y, GROUND_SKIN_OUTER_Y = -125, -140
-local GROUND_SKIN_N, GROUND_SKIN_BANDS = 36, 3 -- 3 radial bands so the Y descent from -125 to -140 reads gently, not a single flat shelf
+-- S52 FIX 1/2 op-budget trim: bands 3→2, N 36→18 (still comfortably keeps every tile's tangential chord
+-- under MAX_FILL_EXTENT=4000 at this skin's outer radius — see the chord math in the FIX 2 comment below).
+-- Reducing tile COUNT does not shrink coverage or total volume (fewer, proportionally wider overlapping
+-- tiles cover the same ring), it only frees ops for FIX 1's dome hills + FIX 2's new mid skin below.
+local GROUND_SKIN_N, GROUND_SKIN_BANDS = 18, 2
 local GROUND_SKIN_THICK = 8
 local GROUND_SKIN_OVERLAP = 40 -- radial overlap between the skin's own bands AND against the collar's outer edge
 
@@ -332,6 +336,45 @@ local function buildGroundSkin()
 			tiles[#tiles + 1] = {
 				x = math.cos(a) * rMid, y = yBase, z = math.sin(a) * rMid,
 				sx = chord, sy = GROUND_SKIN_THICK, sz = tileSz, yaw = -a, mat = "Ground",
+			}
+		end
+	end
+	return tiles
+end
+
+--------------------------------------------------------------------------------
+-- MID GROUND SKIN (S52 FIX 2) — machine-eyes: top-down views over the annulus r≈3400→5400, BETWEEN the
+-- discrete foothills, saw straight past every gap to the sunset-lit catch floor glowing pink far below —
+-- the foothills are discrete hillforms (buildFoothills), not a continuous ring, so nothing sealed the
+-- ground in between them. This is that seal: a thin continuous Ground band from just under the bowl's
+-- flat-floor lip (r≈3350, tucking under the r=3400 playable edge at Y≈-8) descending to r≈5500 (meeting
+-- the falloff collar's own top band, Y≈-55 near there — see FALLOFF_INNER_Y), tiled the same overlapping
+-- way as buildFalloffCollar/buildGroundSkin (2 radial bands, 15% tangential chord overlap, radial band
+-- overlap) so there is no gap anywhere in the annulus from any azimuth. The dome foothill balls (FIX 1)
+-- then sit ON this skin — emitted after it in assembleOps so their Grass reads on top at any overlap.
+--------------------------------------------------------------------------------
+local MID_SKIN_INNER_R, MID_SKIN_OUTER_R = 3350, 5500
+local MID_SKIN_INNER_Y, MID_SKIN_OUTER_Y = -8, -50
+local MID_SKIN_N, MID_SKIN_BANDS = 20, 2
+local MID_SKIN_THICK = 10
+local MID_SKIN_OVERLAP = 80
+
+-- buildMidGroundSkin() → a flat array of thin skin records {x,y,z,sx,sy,sz,yaw,mat}. Pure.
+local function buildMidGroundSkin()
+	local tiles = {}
+	local bandDepth = (MID_SKIN_OUTER_R - MID_SKIN_INNER_R) / MID_SKIN_BANDS
+	local tileSz = bandDepth + MID_SKIN_OVERLAP
+	for bi = 0, MID_SKIN_BANDS - 1 do
+		local rMid = MID_SKIN_INNER_R + bandDepth * (bi + 0.5)
+		local u = (bi + 0.5) / MID_SKIN_BANDS
+		local yBase = MID_SKIN_INNER_Y + (MID_SKIN_OUTER_Y - MID_SKIN_INNER_Y) * u
+		for i = 0, MID_SKIN_N - 1 do
+			local ad = ((i + bi * 0.5) / MID_SKIN_N) * 360
+			local a = math.rad(ad)
+			local chord = (2 * math.pi * rMid) / MID_SKIN_N * 1.15
+			tiles[#tiles + 1] = {
+				x = math.cos(a) * rMid, y = yBase, z = math.sin(a) * rMid,
+				sx = chord, sy = MID_SKIN_THICK, sz = tileSz, yaw = -a, mat = "Ground",
 			}
 		end
 	end
@@ -787,7 +830,13 @@ local function buildTerrainStyle()
 			Mud = { 104, 92, 66 }, Sand = { 218, 198, 152 }, Rock = { 130, 118, 106 },
 			Slate = { 106, 100, 96 }, Snow = { 238, 232, 226 },
 		},
-		water = { color = { 52, 132, 150 }, reflectance = 0.35, waveSize = 0.12, waveSpeed = 14 },
+		-- S52 FIX 3 (machine-eyes: water reads hot pink under the sunset sky): WaterColor sunk deeper
+		-- blue-teal (was 52,132,150 — still too light to hold its own hue against a warm sunset
+		-- reflection) and WaterTransparency now explicitly set (was UNSET, so Terrain defaulted to
+		-- 0.3 — a very see-through surface lets the pink sky/Atmosphere show straight through instead
+		-- of the water's own color). WaterReflectance kept at 0.35 (already tuned) so the sunset still
+		-- warms the surface without going full pink.
+		water = { color = { 35, 110, 140 }, reflectance = 0.35, transparency = 0.15, waveSize = 0.12, waveSpeed = 14 },
 	}
 end
 
@@ -821,11 +870,67 @@ local function buildDatumSamples()
 end
 
 --------------------------------------------------------------------------------
+-- FOOTHILL DOME EMISSION (S52 FIX 1) — machine-eyes: the old single-B()-block-per-hill emission read as
+-- giant rectangular grass mesas with vertical ruler-straight walls up close (worst on the mountains-north
+-- / fire-line vantages). This turns each hill record's LAYOUT (unchanged: buildFoothills still owns
+-- x/z/crest/ad/band/gap — the counts, azimuths, crest heights and forced gaps are exactly as before) into
+-- a rounded hillform instead: overlapping flattened L() balls (the same "sunk center so the PROTRUSION
+-- above local ground equals a height" trick as the MOUNDS micro-relief, L(x, protrude-r, z, r, mat)) —
+-- one tall ball at the hill's own center (apex = h.crest), an overlapping shoulder ball offset tangentially
+-- (local +Z under h.yaw — the yawTangent convention shared with the mountain body-spine, so the shoulder
+-- reads as spreading ALONG the ring, not radially in/out) for inner-band hills (closer, worst up close —
+-- the ones machine-eyes actually flagged), and a wider, flatter Ground toe ball at every hill's base for
+-- color grounding (Grass dome, Ground foot). Outer-band hills are trimmed to just the center ball + toe
+-- (no shoulder) to hold the ≤1100 fill-budget gate — the outer band sits further out/lower priority.
+-- Every ball radius is clamped [150,400] off the hill's own footprint so it individually clears
+-- MAX_FILL_VOLUME on its own (no B()-style auto-tiling needed for L()). Pure; no Instances.
+--------------------------------------------------------------------------------
+-- Ball radius scales off the hill's own footprint per the 0.35-0.45x spec, but PULLED to the low end
+-- (0.28, plus modest shoulder/toe multipliers below <1.0) — a FULL L() sphere's volume (4/3*pi*r^3)
+-- is dramatically more expensive than the flattened block it replaces for the same visible footprint
+-- (most of the sphere is buried, invisible, but still counted by the sculpt-volume gate), so hitting the
+-- spec's literal 0.35-0.45x/1.18x toe multiplier blew the whole-world volume gate by ~1.2e10 studs³ in
+-- practice (measured). Pulling the scale down keeps the rounded-dome READ (still radius-scaled off each
+-- hill's own footprint, still clamped 150-400) while landing inside [1.8e10,4.2e10].
+local FOOTHILL_BALL_MIN_R, FOOTHILL_BALL_MAX_R = 150, 400
+local FOOTHILL_BALL_RADIUS_FRAC = 0.28
+
+local function buildFoothillDome(hills)
+	local balls = {}
+	for hi, h in ipairs(hills) do
+		local footprint = (h.sx + h.sz) / 2
+		local baseRad = math.clamp(footprint * FOOTHILL_BALL_RADIUS_FRAC, FOOTHILL_BALL_MIN_R, FOOTHILL_BALL_MAX_R)
+
+		-- Ball 1: hill CENTER, tallest — apex sits exactly at the hill's declared crest.
+		balls[#balls + 1] = { x = h.x, y = h.crest - baseRad, z = h.z, rad = baseRad, mat = "Grass" }
+
+		-- Ball 2 (inner band only): an overlapping shoulder, tangentially offset, apex lower than center —
+		-- this is what makes the hill read as a ROLLING dome instead of one perfect sphere. Side alternates
+		-- per hill via the hash for silhouette variety.
+		if h.band == "inner" then
+			local side = (n01(hi * 7 + 13) < 0.5) and -1 or 1
+			local shoulderRad = baseRad * 0.78
+			local shoulderCrest = math.max(h.crest * 0.60, 6)
+			local sx, sz = localOffset(h.x, h.z, h.yaw, 0, side * baseRad * 0.6)
+			balls[#balls + 1] = { x = sx, y = shoulderCrest - shoulderRad, z = sz, rad = shoulderRad, mat = "Grass" }
+		end
+
+		-- Ground toe ball — one wider, flatter ball at the hill's base for color grounding. "Wider" reads
+		-- via its lower crest fraction (a shallower, broader cap breaking the surface, not a bigger sphere)
+		-- rather than a bigger radius, which is what kept it off the volume gate.
+		local toeRad = math.clamp(baseRad * 0.95, FOOTHILL_BALL_MIN_R, FOOTHILL_BALL_MAX_R)
+		local toeCrest = math.max(h.crest * 0.22, 4)
+		balls[#balls + 1] = { x = h.x, y = toeCrest - toeRad, z = h.z, rad = toeRad, mat = "Ground" }
+	end
+	return balls
+end
+
+--------------------------------------------------------------------------------
 -- SCULPT-OP ASSEMBLY — flatten the whole world into the ordered primitive list sculpt() replays.
 -- ops: B=FillBlock, W=FillWedge, C=FillCylinder(upright), L=FillBall. Materials are STRING keys
 -- (sculpt maps them to Enum.Material) so plan() never constructs an Enum it doesn't need.
 --------------------------------------------------------------------------------
-local function assembleOps(foothills, foothillToe, falloffCollar, groundSkin, paintCells, water, mountains)
+local function assembleOps(foothills, foothillToe, falloffCollar, groundSkin, midGroundSkin, paintCells, water, mountains)
 	local ops = {}
 	-- B() — a FillBlock op. Roblox Terrain rejects a fill ("Extents are too large") if any axis exceeds
 	-- MAX_FILL_EXTENT OR the region volume exceeds MAX_FILL_VOLUME — the volume check is the one that
@@ -934,10 +1039,17 @@ local function assembleOps(foothills, foothillToe, falloffCollar, groundSkin, pa
 		local rr = 300
 		B(1150 + math.cos(a) * rr, -2, 0 + math.sin(a) * rr, 130, 4, 130, (i % 2 == 0) and "Mud" or "Ground", -a)
 	end
-	-- 5) FOOTHILLS + toe blend — the broken low hill ring (replaces the old rim wall + apron). Solid
-	-- B() fills: these are low enough (crest ≤ ~320) that the buried core is cheap, unlike the old
-	-- 1800-tall rim peaks that needed hollowing into a shell.
-	for _, h in ipairs(foothills) do B(h.x, h.y, h.z, h.sx, h.sy, h.sz, h.mat, h.yaw) end
+	-- 4b) MID GROUND SKIN (S52 FIX 2) — a thin continuous Ground band under the whole foothill annulus
+	-- (r≈3350→5500), emitted BEFORE the foothill domes so their Grass balls read on top of it at every
+	-- overlap: seals the "no ground between the discrete hills" gap a top-down view used to see straight
+	-- through to the catch floor below.
+	for _, g in ipairs(midGroundSkin) do B(g.x, g.y, g.z, g.sx, g.sy, g.sz, g.mat, g.yaw) end
+	-- 5) FOOTHILLS + toe blend — the broken low hill ring (replaces the old rim wall + apron). S52 FIX 1:
+	-- each hill is now a rounded hillform (overlapping flattened L() balls: a tall center + shoulder,
+	-- Grass, plus a wider flatter Ground toe ball) instead of one rectangular B() block, so it reads as a
+	-- rolling dome up close instead of a mesa with ruler-straight walls. buildFoothillDome consumes the
+	-- SAME hill records (layout untouched) and only changes the emission.
+	for _, b in ipairs(buildFoothillDome(foothills)) do L(b.x, b.y, b.z, b.rad, b.mat) end
 	for _, t in ipairs(foothillToe) do B(t.x, t.y, t.z, t.sx, t.sy, t.sz, t.mat, t.yaw) end
 	-- 6) FALLOFF COLLAR — thin descending Ground skin past the foothills (r≈5400→6800) so the ground
 	-- visibly falls away into the haze instead of ending at a hard edge.
@@ -1079,10 +1191,11 @@ function WorldGen.plan(cfg)
 	local foothillToe = buildFoothillToe()
 	local falloffCollar = buildFalloffCollar()
 	local groundSkin = buildGroundSkin()
+	local midGroundSkin = buildMidGroundSkin()
 	local paintCells = buildPaint()
 	local water = buildWater()
 	local mountains = buildMountainRange()
-	local sculptOps = assembleOps(foothills, foothillToe, falloffCollar, groundSkin, paintCells, water, mountains)
+	local sculptOps = assembleOps(foothills, foothillToe, falloffCollar, groundSkin, midGroundSkin, paintCells, water, mountains)
 	-- §2 bar packet: the distant-mountain backdrop is now sculpted TERRAIN (mountains.peaks, tagged
 	-- feature="mountain" in sculptOps above), not Parts — plan.parts returns to just the P3 catch floor.
 	local parts = { buildCatchFloorPart() }
@@ -1120,6 +1233,7 @@ function WorldGen.plan(cfg)
 		foothillToe = foothillToe,
 		falloffCollar = falloffCollar,
 		groundSkin = groundSkin,
+		midGroundSkin = midGroundSkin,
 		westArc = WEST_ARC,
 		river = { halfWidth = RIVER.halfWidth, surfaceY = RIVER.surfaceY, floorY = RIVER.floorY, points = RIVER.points, pool = POOL },
 		lakeCarve = LAKE_CARVE,
@@ -1219,6 +1333,9 @@ function WorldGen.applyStyle(terrain, style)
 	pcall(function()
 		terrain.WaterColor = Color3.fromRGB(w.color[1], w.color[2], w.color[3])
 		terrain.WaterReflectance = w.reflectance
+		-- S52 FIX 3: WaterTransparency was previously never set (Terrain default ~0.3 let the sunset-pink
+		-- sky show straight through the water instead of its own deep blue-teal color).
+		if w.transparency then terrain.WaterTransparency = w.transparency end
 		terrain.WaterWaveSize = w.waveSize
 		terrain.WaterWaveSpeed = w.waveSpeed
 	end)
