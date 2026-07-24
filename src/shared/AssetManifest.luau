@@ -53,11 +53,12 @@ return {
 		source = "Roblox creator store, free assets; see tools/asset-extract/",
 	},
 
-	-- §2 bar packet: swapped to the VERIFIED sunset set (627302570, TracyCyanne) as primary — the
-	-- far-read horizon/sky criterion needs a sky that actually reads as a sunset from altitude, not
-	-- just "not broken". Render is PROVISIONAL until an in-Studio capture confirms it (audition tracked
-	-- in the look-dev sheet); fallbacks if it doesn't read: the old primary below (now skyboxBackup),
-	-- then Map.meshSky=false (the procedural default-sky floor).
+	-- §2 bar packet: swapped to the sunset set (627302570, TracyCyanne) as primary — the far-read
+	-- horizon/sky criterion needs a sky that actually reads as a sunset from altitude, not just "not
+	-- broken". CONFIRMED RENDERING (S52 captures/S52-mountains, machine-eyes review): the sunset sky is
+	-- live and reads correctly from altitude, no longer provisional. Fallbacks still kept if a future
+	-- capture ever regresses: the old primary below (now skyboxBackup), then Map.meshSky=false (the
+	-- procedural default-sky floor).
 	skybox = {
 		bk = "rbxassetid://541743453",
 		dn = "rbxassetid://541743443",

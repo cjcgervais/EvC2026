@@ -260,14 +260,17 @@ end
 local FALLOFF_INNER_R, FALLOFF_OUTER_R = 5400, 6800
 -- FIX 3 (S51 horizon-iterate-2, machine-eyes: "stepped green cliffs" in 13_mountains-backdrop): the 2
 -- radial bands used to butt edge-to-edge at a fixed Y, so every band boundary read as a hard terraced
--- rectangular step. Sunk both ~15 studs deeper (below the sightline/haze), given per-tile Y jitter so any
--- visible edge breaks instead of ruler-straight, and the bands now overlap radially instead of just
--- touching (see FALLOFF_OVERLAP below) so there's no gap/step between them.
+-- rectangular step. Sunk both ~15 studs deeper (below the sightline/haze), and the bands now overlap
+-- radially instead of just touching (see FALLOFF_OVERLAP below) so there's no gap/step between them.
+-- FIX 1 (S52 machine-eyes, "sunset-sky void glowing pink BETWEEN tiles" from top-down): the per-tile Y
+-- jitter this used to carry (±6 studs) combined with the band gaps to let a top-down view see straight
+-- through the seams to the sky below. Y jitter is REMOVED entirely — every tile in a band now sits at
+-- the exact same yBase, and the two bands are fully solid/overlapping (radially via FALLOFF_OVERLAP,
+-- tangentially via the 1.15x chord widen below) so there is no gap anywhere in the collar from any angle.
 local FALLOFF_INNER_Y, FALLOFF_OUTER_Y = -55, -125
 local FALLOFF_N, FALLOFF_BANDS = 28, 2
 local FALLOFF_THICK = 14
 local FALLOFF_OVERLAP = 80  -- radial overlap added to each tile's depth so neighboring bands overlap, not step
-local FALLOFF_Y_JITTER = 6  -- ± studs, per-tile, so the outer edge reads broken not straight
 
 -- buildFalloffCollar() → a flat array of thin skin records {x,y,z,sx,sy,sz,yaw,mat}. Pure.
 local function buildFalloffCollar()
@@ -284,14 +287,51 @@ local function buildFalloffCollar()
 			local a = math.rad(ad)
 			local chord = (2 * math.pi * rMid) / FALLOFF_N * 1.15
 			local hSeed = bi * 1000 + i * 7 + 41
-			local yj = (n01(hSeed) - 0.5) * (2 * FALLOFF_Y_JITTER) -- FIX 3(b): ±FALLOFF_Y_JITTER, per tile
 			-- FIX 3: blend the INNERMOST ring (bi==0, where the collar meets the foothill toe) toward Grass
 			-- ~half the time so there's no hard green(foothill)→brown(Ground collar) ring; the outer band
 			-- (bi==1, deeper/further from the foothills) stays pure Ground.
 			local mat = (bi == 0 and n01(hSeed + 3) < 0.5) and "Grass" or "Ground"
 			tiles[#tiles + 1] = {
-				x = math.cos(a) * rMid, y = yBase + yj, z = math.sin(a) * rMid,
+				x = math.cos(a) * rMid, y = yBase, z = math.sin(a) * rMid,
 				sx = chord, sy = FALLOFF_THICK, sz = tileSz, yaw = -a, mat = mat,
+			}
+		end
+	end
+	return tiles
+end
+
+--------------------------------------------------------------------------------
+-- GROUND SKIN (S52 FIX 2) — a thin continuous Ground shell past the falloff collar's outer edge
+-- (r≈6800) out to r≈9600 (under the mountain clusters), sealing every top-down sightline that would
+-- otherwise fall straight through to void/skybox (machine-eyes: "top-down void past the collar reads
+-- as glowing pink sky"). Descends gently from the collar's outer Y (-125) to -140, tiled azimuthally
+-- the same overlapping way as the collar (a single radial band since the whole span is one ring — no
+-- internal radial seam to overlap). Nothing is ever landed on out here (P3 catch floor backstops every
+-- void); this only needs to read right from altitude, kept thin like the collar for sculpt-volume cost.
+--------------------------------------------------------------------------------
+local GROUND_SKIN_INNER_R, GROUND_SKIN_OUTER_R = 6800, 9600
+local GROUND_SKIN_INNER_Y, GROUND_SKIN_OUTER_Y = -125, -140
+local GROUND_SKIN_N, GROUND_SKIN_BANDS = 36, 3 -- 3 radial bands so the Y descent from -125 to -140 reads gently, not a single flat shelf
+local GROUND_SKIN_THICK = 8
+local GROUND_SKIN_OVERLAP = 40 -- radial overlap between the skin's own bands AND against the collar's outer edge
+
+-- buildGroundSkin() → a flat array of thin skin records {x,y,z,sx,sy,sz,yaw,mat}. Pure.
+local function buildGroundSkin()
+	local tiles = {}
+	local bandDepth = (GROUND_SKIN_OUTER_R - GROUND_SKIN_INNER_R) / GROUND_SKIN_BANDS
+	local tileSz = bandDepth + GROUND_SKIN_OVERLAP
+	for bi = 0, GROUND_SKIN_BANDS - 1 do
+		local rMid = GROUND_SKIN_INNER_R + bandDepth * (bi + 0.5)
+		local u = (bi + 0.5) / GROUND_SKIN_BANDS
+		local yBase = GROUND_SKIN_INNER_Y + (GROUND_SKIN_OUTER_Y - GROUND_SKIN_INNER_Y) * u
+		for i = 0, GROUND_SKIN_N - 1 do
+			-- stagger seams by half a step per band (matches the collar's staggering) so seams don't stack radially.
+			local ad = ((i + bi * 0.5) / GROUND_SKIN_N) * 360
+			local a = math.rad(ad)
+			local chord = (2 * math.pi * rMid) / GROUND_SKIN_N * 1.15 -- same 15% tangential overlap as the collar
+			tiles[#tiles + 1] = {
+				x = math.cos(a) * rMid, y = yBase, z = math.sin(a) * rMid,
+				sx = chord, sy = GROUND_SKIN_THICK, sz = tileSz, yaw = -a, mat = "Ground",
 			}
 		end
 	end
@@ -326,9 +366,19 @@ local MOUNTAIN_MID_H_MIN, MOUNTAIN_MID_H_MAX = 700, 1400
 local MOUNTAIN_FAR_H_MIN, MOUNTAIN_FAR_H_MAX = 1600, 2200
 -- Base-block height fraction TRIMMED 0.25→0.15 (budget trim 1 of 3; the measured Σ needed a deeper
 -- cut than 0.20 to clear the whole-world total gate with real margin — see buildMountainRange's note).
-local MOUNTAIN_BASE_FRAC = 0.15
+-- S52 FIX 3 (machine-eyes: mountain base blocks read as giant flat green/grass walls, worst on the
+-- az=0 waterfall-backdrop cluster — the rectangular base mass poked above the surrounding ground as a
+-- sheer straight-edged slab): sunk further, from a flat 0.15*peakH fraction to min(0.08*peakH, 120) —
+-- grounding-only, hidden under the body-spine's lowest balls, never part of the visible silhouette (the
+-- ball spine + wedge cap carry that). MOUNTAIN_BASE_FRAC/MOUNTAIN_BASE_MAX are now the two terms of
+-- that min(), applied directly in emitMountainPeak.
+local MOUNTAIN_BASE_FRAC = 0.08
+local MOUNTAIN_BASE_MAX = 120
 -- Body-spine ball count. Far TRIMMED 7→6 to match mid (budget trim 2 of 3); both then TRIMMED 6→5
--- (measured Σ needed a deeper cut here too — the body spine is the dominant volume term).
+-- (measured Σ needed a deeper cut here too — the body spine is the dominant volume term). S52 FIX 3
+-- shrank the base block (mountain-op volume 2.942e10 -> 2.723e10 measured), but that stayed
+-- comfortably above the [2.4e10,3.6e10] gate's floor, so the far-peak body-ball count was NOT bumped
+-- back to 6 (the spec's contingency for a floor breach that didn't happen — see the sculpt volume test).
 local MOUNTAIN_MID_BODY_N, MOUNTAIN_FAR_BODY_N = 5, 5
 
 -- localOffset(x,z,yaw,ox,oz) → world XZ of a local-frame offset (ox,oz) under a Y-yaw. Same right-hand
@@ -379,8 +429,13 @@ end
 -- 2400→2200, far body-ball N 7→6) plus a measured-deeper base-fraction cut (0.25→0.15, not just →0.20 —
 -- the body-spine balls turned out to be the dominant volume term, so the naive 0.20 stop still left the
 -- world-total gate with almost no margin) and body-ball N dropped to 5 on BOTH ranges (not just far)
--- land it at mountainVol≈2.96e10 (inside the [2.8e10,3.0e10] target band) / worldVol≈4.02e10 — see
--- tests/worldgen.spec.luau's "sculpt volume" gate for the live, test-asserted numbers.
+-- land it at mountainVol≈2.96e10 (inside the [2.8e10,3.0e10] target band) / worldVol≈4.02e10.
+-- S52 FIX 3 (machine-eyes: mountain base blocks read as flat green/grass walls) then sunk the base
+-- block from 0.15*peakH to min(0.08*peakH,120), which alone trims mountainVol; S52 FIX 2's new Ground
+-- skin (buildGroundSkin, r≈6800→9600) adds ≈1.2e9 of world-total volume. Net measured: mountainVol
+-- ≈2.72e10 (still comfortably inside [2.4e10,3.6e10] — no body-ball-N contingency needed), worldVol
+-- ≈3.92e10 (comfortably inside [1.8e10,4.2e10]) — see tests/worldgen.spec.luau's "sculpt volume" gate
+-- for the live, test-asserted numbers.
 local function buildMountainRange()
 	local peaks, maxR = {}, 0
 	for ci, az in ipairs(MOUNTAIN_MID_CLUSTERS) do
@@ -770,7 +825,7 @@ end
 -- ops: B=FillBlock, W=FillWedge, C=FillCylinder(upright), L=FillBall. Materials are STRING keys
 -- (sculpt maps them to Enum.Material) so plan() never constructs an Enum it doesn't need.
 --------------------------------------------------------------------------------
-local function assembleOps(foothills, foothillToe, falloffCollar, paintCells, water, mountains)
+local function assembleOps(foothills, foothillToe, falloffCollar, groundSkin, paintCells, water, mountains)
 	local ops = {}
 	-- B() — a FillBlock op. Roblox Terrain rejects a fill ("Extents are too large") if any axis exceeds
 	-- MAX_FILL_EXTENT OR the region volume exceeds MAX_FILL_VOLUME — the volume check is the one that
@@ -887,6 +942,9 @@ local function assembleOps(foothills, foothillToe, falloffCollar, paintCells, wa
 	-- 6) FALLOFF COLLAR — thin descending Ground skin past the foothills (r≈5400→6800) so the ground
 	-- visibly falls away into the haze instead of ending at a hard edge.
 	for _, c in ipairs(falloffCollar) do B(c.x, c.y, c.z, c.sx, c.sy, c.sz, c.mat, c.yaw) end
+	-- 6b) GROUND SKIN (S52 FIX 2) — thin Ground shell past the collar (r≈6800→9600, under the mountain
+	-- clusters) so a top-down sightline anywhere reachable sees ground fading into haze, never void/sky.
+	for _, g in ipairs(groundSkin) do B(g.x, g.y, g.z, g.sx, g.sy, g.sz, g.mat, g.yaw) end
 	-- 7) MICRO RELIEF — grass mounds (≤6 protrusion) then rock outcrops (r1700-3000 arcs).
 	for _, m in ipairs(MOUNDS) do L(m.x, m.protrude - m.r, m.z, m.r, "Grass") end
 	for _, o in ipairs(OUTCROPS) do L(o.x, o.protrude - o.r, o.z, o.r, "Rock") end
@@ -904,8 +962,12 @@ local function assembleOps(foothills, foothillToe, falloffCollar, paintCells, wa
 		local snowlineY = baseY + peakH * (snow and 0.66 or 2.0)
 		local yaw = yawTangent(az)
 
-		-- L1 base mass (Rock): a squat block under the peak, footW tangential x footD radial.
-		local baseSy = MOUNTAIN_BASE_FRAC * peakH
+		-- L1 base mass (Rock): a squat block under the peak, footW tangential x footD radial. S52 FIX 3:
+		-- height capped at min(0.08*peakH, 120) (was a flat 0.15*peakH) so the base is grounding-only —
+		-- its top sits low enough to hide under the body-spine's lowest balls instead of poking a flat
+		-- rectangular slab above the surrounding ground. The center is naturally lower too, since it's
+		-- still anchored at baseY (the block's bottom, unchanged).
+		local baseSy = math.min(MOUNTAIN_BASE_FRAC * peakH, MOUNTAIN_BASE_MAX)
 		local baseTopY = baseY + baseSy
 		B(px, (baseY + baseTopY) / 2, pz, footW, baseSy, footD, "Rock", yaw, "mountain")
 
@@ -1016,10 +1078,11 @@ function WorldGen.plan(cfg)
 	local foothills = buildFoothills()
 	local foothillToe = buildFoothillToe()
 	local falloffCollar = buildFalloffCollar()
+	local groundSkin = buildGroundSkin()
 	local paintCells = buildPaint()
 	local water = buildWater()
 	local mountains = buildMountainRange()
-	local sculptOps = assembleOps(foothills, foothillToe, falloffCollar, paintCells, water, mountains)
+	local sculptOps = assembleOps(foothills, foothillToe, falloffCollar, groundSkin, paintCells, water, mountains)
 	-- §2 bar packet: the distant-mountain backdrop is now sculpted TERRAIN (mountains.peaks, tagged
 	-- feature="mountain" in sculptOps above), not Parts — plan.parts returns to just the P3 catch floor.
 	local parts = { buildCatchFloorPart() }
@@ -1055,6 +1118,8 @@ function WorldGen.plan(cfg)
 		-- without re-deriving it from foothillAmp.
 		foothills = foothills,
 		foothillToe = foothillToe,
+		falloffCollar = falloffCollar,
+		groundSkin = groundSkin,
 		westArc = WEST_ARC,
 		river = { halfWidth = RIVER.halfWidth, surfaceY = RIVER.surfaceY, floorY = RIVER.floorY, points = RIVER.points, pool = POOL },
 		lakeCarve = LAKE_CARVE,
