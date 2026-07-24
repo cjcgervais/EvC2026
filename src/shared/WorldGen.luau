@@ -140,9 +140,10 @@ local function foothillAmp(ad)
 	return WEST_ARC_MIN_AMP + (1.0 - WEST_ARC_MIN_AMP) * s
 end
 
--- surfaceY(x,z) → the SOLID terrain surface height at world XZ. Pure; no state, no random. Data for
--- gates/thermals only — the outer branches are NEVER sculpted directly (buildFoothills/
--- buildFalloffCollar/buildMountainRange carry the actual open-horizon geometry).
+-- surfaceY(x,z) → the SOLID terrain surface height at world XZ. Pure; no state, no random. Backs the
+-- datum gate + thermals, AND is now sampled DIRECTLY by buildOuterGround (S52 solid-annulus rebuild) so
+-- the sculpted outer ground matches this abstract field; buildFoothills/buildMountainRange add the
+-- discrete hill/peak silhouettes on top.
 local function surfaceY(x, z)
 	local r = math.sqrt(x * x + z * z)
 	if r <= FLAT_R then
@@ -248,191 +249,89 @@ local function buildFoothillToe()
 	return toe
 end
 
--- S52 horizon-iterate-5 (machine-eyes captures/S52-mountains3, rim-nadir/overview: sunset-lit tile SIDE
--- faces read as bright red/pink rectangles along the annulus, and top-down seams showed straight through
--- to the void) — FIX: the 3 skin builders below (collar/groundSkin/midGroundSkin) all step down in Y
--- band-by-band; wherever a band's Y-drop from its neighbor exceeded that band's thickness, the lower
--- band's top face fell BELOW the upper band's bottom face and a top-down ray slipped through the gap (or
--- grazed the upper band's now-exposed, sunset-lit side wall). Two shared helpers fix this at the source
--- instead of hand-tuning each skin separately:
---   skinBandCount(innerY, outerY, thick) → the minimum radial band count so consecutive bands' Y step is
---     ALWAYS ≤ the band thickness (ceil(|range| / thick), floored at 2 so every skin keeps its gentle
---     multi-band descent rather than collapsing to one flat shelf) — the necessary-AND-SUFFICIENT no-gap
---     condition: a step of exactly `thick` still puts the lower band's top face exactly at the upper
---     band's bottom face (fully touching, zero seam). A tighter half-thickness margin was tried first but
---     is NOT achievable inside the immovable ≤1100 op / ≤4.2e10 volume budget at these thicknesses (the
---     op/volume cost scales with band count, and half-thickness needs ~2x the bands full-thickness does —
---     measured 1093→1135+ ops and 3.970e10→4.399e10 volume just from the collar+midSkin band counts that
---     rule demanded); full-thickness is the honest no-gap floor and lands the budget in range.
---   ringTileCount(rMid) → the minimum azimuthal tile count for a ring at radius rMid so each tile's
---     tangential chord (with SKIN_AZ_OVERLAP applied) stays at/under MAX_FILL_EXTENT — sized PER BAND
---     (not one shared N for the whole skin) so inner, shorter-circumference bands don't carry the outer
---     band's tile count. This is what keeps the extra bands the Y-step fix requires from blowing the
---     ≤1100 fill-op budget: a shared worst-case N would cost far more ops than right-sizing each ring.
-local SKIN_AZ_OVERLAP = 1.25 -- widened from 1.15x (S52 FIX 3) — more tangential tile overlap, fewer seam reads
-local function skinBandCount(innerY, outerY, thick)
-	return math.max(2, math.ceil(math.abs(outerY - innerY) / thick))
-end
-local function ringTileCount(rMid)
-	return math.max(6, math.ceil((2 * math.pi * rMid * SKIN_AZ_OVERLAP) / MAX_FILL_EXTENT))
-end
-
 --------------------------------------------------------------------------------
--- FALLOFF COLLAR (open-horizon packet, replaces the old APRON) — a thin Ground skin, r≈5400→6600,
--- descending ≈-40 → ≈-110 in several radial bands (see skinBandCount above) so the ground visibly falls
--- toward the haze with no Y-step gap. THIN by design: nothing is ever landed on out here (the P3 catch
--- floor backstops every void), so this only needs to read right from altitude, not hold weight — keeping
--- it a shallow skin (not a solid ramp) is what keeps its sculpt-volume cost bounded instead of the
--- ≈2-4e9 a full solid ramp would cost. Past r≈6600 the ground is OPEN (no more terrain) — haze + the
--- distant Part mountains carry the rest of the horizon.
+-- OUTER GROUND — the SOLID annulus (S52 solid-annulus rebuild; REPLACES buildFalloffCollar +
+-- buildGroundSkin + buildMidGroundSkin, all now deleted). FIVE machine-eyes iterations
+-- (captures/S52-mountains..mountains4) proved that building the outer ground from THIN stepped tile
+-- bands ALWAYS leaks seam reads from above at 4-stud voxel resolution: a shelf edge or band gap shows
+-- the sunset-lit catch floor as a pink/red slot. (The thin skins also carried an orientation bug — the
+-- tangential chord was placed on the RADIAL axis, so sectors were near-non-covering slivers with huge
+-- azimuthal gaps.) The bowl floor never leaks, because it is SOLID. So the whole outer ground is now a
+-- solid annulus (r≈OUTER_GROUND_INNER_R→OUTER_GROUND_OUTER_R): concentric rings, each azimuthally
+-- sectored, every sector ONE solid B block from a constant base Y up to the LOCAL surface top.
+--
+-- WHY SOLID ENDS THE SEAM CLASS: consecutive sectors/rings differ by small height deltas, but each delta
+-- is now backed by SOLID mass beneath (the block runs down to the base), so a step face is always ground
+-- interior — never a see-through gap. The sculpted ground therefore finally MATCHES the abstract surfaceY
+-- field (the same azimuth-aware field the datum gate reads): the rise to ~+220, the fall-away to ≈-90,
+-- and the open west-arc dip all appear in the solid ground, not just the height field.
+--
+-- BASE: OUTER_GROUND_BASE_Y = -70. Where surfaceY dips BELOW base+MIN_THICK (the whole outer band —
+-- surfaceY runs ≈-90..-120 out there, the profile the original volume estimate's "~-20 outside" under-
+-- read), the block bottom follows the surface DOWN (the min() below) so the mass stays solid there too;
+-- MIN_THICK is the guaranteed floor thickness backing every outer step. This is DELIBERATELY far more
+-- voxel volume than the thin skins — that is the whole point. Runtime cost is ZERO (the world is baked);
+-- the only cost is one-time LIVE look-dev sculpt time, bounded by the world-volume gate in
+-- tests/worldgen.spec.luau.
+--
+-- RINGS: OUTER_GROUND_RING_W is a NOMINAL radial width → ceil(span/width) rings, then the exact width is
+--   span/nRings so the rings tile the band with no remainder. Radial block size = ring width +
+--   RADIAL_OVERLAP so neighboring rings OVERLAP (never merely touch → no radial seam even at a step).
+-- SECTORS: per-ring count = max(SECTORS_MIN, ceil(2π·rMid·TANG_OVERLAP / TANG_CAP)) so the tangential
+--   block size (chord × TANG_OVERLAP) always clears MAX_FILL_EXTENT — inner, shorter-circumference rings
+--   use FEWER sectors (the same right-sizing the old ringTileCount did), which is also what holds the
+--   ≤1100 op budget: a shared worst-case sector count would multiply the op cost. TANG_OVERLAP ≥1.2 →
+--   adjacent sectors overlap tangentially by ≥0.2·chord (no azimuthal seam).
+--
+-- ORIENTATION (the bug the old skins had): with yaw = -azimuth, the block's local +X reads world-RADIAL
+-- and local +Z reads world-TANGENTIAL (the yawTangent convention shared with the mountain body-spine).
+-- So sx = the RADIAL depth and sz = the tangential CHORD — NOT the reverse.
 --------------------------------------------------------------------------------
--- Volume-budget trim (order item 3): outer radius 6800→6600 (matched by GROUND_SKIN_INNER_R below, so
--- the collar and groundSkin still meet with no radial gap) — trims the collar's outermost, largest-rMid
--- band slices, part of the headroom needed to clear the world-total gate.
-local FALLOFF_INNER_R, FALLOFF_OUTER_R = 5400, 6600
--- FIX 3 (S51 horizon-iterate-2, machine-eyes: "stepped green cliffs" in 13_mountains-backdrop): the 2
--- radial bands used to butt edge-to-edge at a fixed Y, so every band boundary read as a hard terraced
--- rectangular step. Sunk both ~15 studs deeper (below the sightline/haze), and the bands now overlap
--- radially instead of just touching (see FALLOFF_OVERLAP below) so there's no gap/step between them.
--- FIX 1 (S52 machine-eyes, "sunset-sky void glowing pink BETWEEN tiles" from top-down): the per-tile Y
--- jitter this used to carry (±6 studs) combined with the band gaps to let a top-down view see straight
--- through the seams to the sky below. Y jitter is REMOVED entirely — every tile in a band now sits at
--- the exact same yBase, and the bands are fully solid/overlapping (radially via FALLOFF_OVERLAP,
--- tangentially via the SKIN_AZ_OVERLAP chord widen below) so there is no gap anywhere in the collar from
--- any angle.
-local FALLOFF_INNER_Y, FALLOFF_OUTER_Y = -55, -125
--- S52 horizon-iterate-5: THICK 14→20 (thicker skin = more Y slack before a step exposes a gap/side
--- face), OVERLAP 80→200 (radial overlap floor). BANDS is now DERIVED from skinBandCount so the Y step
--- between consecutive bands is always ≤ FALLOFF_THICK — was a fixed 2, now computed (lands at 4 for this
--- span/thickness). FALLOFF_N (fixed 28) is GONE: per-band tile count now comes from ringTileCount
--- (right-sized per band's own rMid) so the extra bands don't multiply the whole skin's op cost as much.
-local FALLOFF_THICK = 20
-local FALLOFF_OVERLAP = 200 -- radial overlap added to each tile's depth so neighboring bands overlap, not step
-local FALLOFF_BANDS = skinBandCount(FALLOFF_INNER_Y, FALLOFF_OUTER_Y, FALLOFF_THICK)
+local OUTER_GROUND_INNER_R, OUTER_GROUND_OUTER_R = 3350, 9200
+local OUTER_GROUND_BASE_Y   = -70   -- constant base; block bottom drops below it only where surfaceY does
+local OUTER_GROUND_MIN_THICK = 20   -- guaranteed solid thickness where surfaceY sits at/below the base
+local OUTER_GROUND_RING_W    = 975  -- nominal radial ring width → 6 rings across the ~5850-stud band
+local OUTER_GROUND_RADIAL_OVERLAP = 110  -- ≥80: neighboring rings overlap radially enough that the strict
+                                          -- coverage grid (worldgen.spec) reads no top-down hole at ring edges
+local OUTER_GROUND_TANG_OVERLAP   = 1.2 -- ≥1.2× chord: adjacent sectors overlap tangentially
+local OUTER_GROUND_TANG_CAP       = 3950 -- tangential block-size cap (< MAX_FILL_EXTENT 4000, with margin)
+-- SECTORS_MIN is tuned against BOTH gates at once: high enough that every azimuth is close enough to some
+-- sector center for the continuous-coverage grid to read solid (fewer sectors → bigger off-axis radial
+-- penalty → edge holes), yet landing the crest-ring chords just under the MAX_FILL_VOLUME tiling threshold
+-- so the whole annulus holds inside the ≤1100 recorded op budget (the op count is non-monotonic in this
+-- knob: more sectors add base ops but shrink chords, and a shrunk chord that stops auto-tiling can be a net
+-- WIN — 19 lands 1093 total ops where 20 lands 1099). Wider rings (6, not the prompt's 13-16) are the
+-- sanctioned fallback for holding that op bound after the solid mass multiplied the per-band cost.
+local OUTER_GROUND_SECTORS_MIN    = 19
+local OUTER_GROUND_GRASS_Y  = -10   -- sector tops above this read Grass; lower/outer rings read Ground
 
--- buildFalloffCollar() → a flat array of thin skin records {x,y,z,sx,sy,sz,yaw,mat}. Pure.
-local function buildFalloffCollar()
+-- buildOuterGround() → a flat array of solid annulus records {x,y,z,sx,sy,sz,yaw,mat}. Pure. Each record
+-- is emitted as ONE (auto-tiled if oversized) B block by assembleOps.
+local function buildOuterGround()
 	local tiles = {}
-	local bandDepth = (FALLOFF_OUTER_R - FALLOFF_INNER_R) / FALLOFF_BANDS
-	local tileSz = bandDepth + FALLOFF_OVERLAP -- FIX 3(c): wider than the band's own slice → overlaps its neighbor
-	for bi = 0, FALLOFF_BANDS - 1 do
-		local rMid = FALLOFF_INNER_R + bandDepth * (bi + 0.5)
-		local u = (bi + 0.5) / FALLOFF_BANDS
-		local yBase = FALLOFF_INNER_Y + (FALLOFF_OUTER_Y - FALLOFF_INNER_Y) * u
-		local n = ringTileCount(rMid)
-		for i = 0, n - 1 do
-			-- stagger each band's tile seams by half a step so neighboring rings' seams don't line up radially.
-			local ad = ((i + bi * 0.5) / n) * 360
+	local span = OUTER_GROUND_OUTER_R - OUTER_GROUND_INNER_R
+	local nRings = math.ceil(span / OUTER_GROUND_RING_W)
+	local ringW = span / nRings
+	for ri = 0, nRings - 1 do
+		local rMid = OUTER_GROUND_INNER_R + ringW * (ri + 0.5)
+		local n = math.max(OUTER_GROUND_SECTORS_MIN,
+			math.ceil((2 * math.pi * rMid * OUTER_GROUND_TANG_OVERLAP) / OUTER_GROUND_TANG_CAP))
+		local radial = ringW + OUTER_GROUND_RADIAL_OVERLAP
+		for si = 0, n - 1 do
+			-- stagger each ring's seams half a step so consecutive rings' azimuthal seams don't line up.
+			local ad = ((si + ri * 0.5) / n) * 360
 			local a = math.rad(ad)
-			local chord = (2 * math.pi * rMid) / n * SKIN_AZ_OVERLAP
-			local hSeed = bi * 1000 + i * 7 + 41
-			-- FIX 3: blend the INNERMOST ring (bi==0, where the collar meets the foothill toe) toward Grass
-			-- ~half the time so there's no hard green(foothill)→brown(Ground collar) ring; the outer bands
-			-- (further from the foothills) stay pure Ground.
-			local mat = (bi == 0 and n01(hSeed + 3) < 0.5) and "Grass" or "Ground"
+			local cx, cz = math.cos(a) * rMid, math.sin(a) * rMid
+			-- LOCAL surface top = the continuous surfaceY profile at THIS sector's center (azimuth-aware
+			-- foothillAmp included) — this is what makes the sculpted ground match the abstract field.
+			local top = surfaceY(cx, cz)
+			local bottom = math.min(OUTER_GROUND_BASE_Y, top - OUTER_GROUND_MIN_THICK)
+			local chord = (2 * math.pi * rMid) / n * OUTER_GROUND_TANG_OVERLAP
+			local mat = (top > OUTER_GROUND_GRASS_Y) and "Grass" or "Ground"
 			tiles[#tiles + 1] = {
-				x = math.cos(a) * rMid, y = yBase, z = math.sin(a) * rMid,
-				sx = chord, sy = FALLOFF_THICK, sz = tileSz, yaw = -a, mat = mat,
-			}
-		end
-	end
-	return tiles
-end
-
---------------------------------------------------------------------------------
--- GROUND SKIN (S52 FIX 2) — a thin continuous Ground shell past the falloff collar's outer edge
--- (r≈6600) out to r≈8800 (under the mountain clusters), sealing every top-down sightline that would
--- otherwise fall straight through to void/skybox (machine-eyes: "top-down void past the collar reads
--- as glowing pink sky"). Descends gently from the collar's outer Y (-125) to -140, tiled azimuthally
--- the same overlapping way as the collar (bands derived so the Y step between them stays within a
--- thickness, radial overlap floor between bands). Nothing is ever landed on out here (P3 catch floor
--- backstops every void); this only needs to read right from altitude, kept thin for sculpt-volume cost.
---------------------------------------------------------------------------------
--- S52 horizon-iterate-5 volume-budget trim (order item 1, iterated further once measured): outer radius
--- 9600→9200→8800 — the mountains sit ≤8750 (see MOUNTAIN_FAR_R + reach below, and any outlier peak
--- reaching past 8800 is itself opaque terrain, so it self-seals), so 8800 still keeps the visible ground
--- covered beneath every mountain cluster while recovering the world-total volume headroom the thicker
--- skins below spend.
-local GROUND_SKIN_INNER_R, GROUND_SKIN_OUTER_R = 6600, 8800
-local GROUND_SKIN_INNER_Y, GROUND_SKIN_OUTER_Y = -125, -140
--- S52 horizon-iterate-5: THICK 8→16, OVERLAP 40→200. BANDS is now DERIVED (skinBandCount) instead of a
--- fixed 2 — lands at 2 (the floor) for this span/thickness (15-stud Y range needs a step ≤16, so 1 band
--- would technically clear it, but skinBandCount floors at 2 so the skin keeps its gentle multi-band
--- descent). GROUND_SKIN_N (fixed 18) is GONE: per-band tile count now comes from ringTileCount
--- (right-sized per band's own rMid).
--- Volume-budget trim (order item 2): THICK 16→12 — the Y-step gate only needs a band count of 2 either
--- way here (skinBandCount floors at 2, and even ceil(15/12)=2 clears it on its own), so this trim is a
--- pure volume win with zero op cost; still thicker than the pre-fix 8.
-local GROUND_SKIN_THICK = 12
-local GROUND_SKIN_OVERLAP = 200 -- radial overlap between the skin's own bands AND against the collar's outer edge
-local GROUND_SKIN_BANDS = skinBandCount(GROUND_SKIN_INNER_Y, GROUND_SKIN_OUTER_Y, GROUND_SKIN_THICK)
-
--- buildGroundSkin() → a flat array of thin skin records {x,y,z,sx,sy,sz,yaw,mat}. Pure.
-local function buildGroundSkin()
-	local tiles = {}
-	local bandDepth = (GROUND_SKIN_OUTER_R - GROUND_SKIN_INNER_R) / GROUND_SKIN_BANDS
-	local tileSz = bandDepth + GROUND_SKIN_OVERLAP
-	for bi = 0, GROUND_SKIN_BANDS - 1 do
-		local rMid = GROUND_SKIN_INNER_R + bandDepth * (bi + 0.5)
-		local u = (bi + 0.5) / GROUND_SKIN_BANDS
-		local yBase = GROUND_SKIN_INNER_Y + (GROUND_SKIN_OUTER_Y - GROUND_SKIN_INNER_Y) * u
-		local n = ringTileCount(rMid)
-		for i = 0, n - 1 do
-			-- stagger seams by half a step per band (matches the collar's staggering) so seams don't stack radially.
-			local ad = ((i + bi * 0.5) / n) * 360
-			local a = math.rad(ad)
-			local chord = (2 * math.pi * rMid) / n * SKIN_AZ_OVERLAP -- same tangential overlap as the collar
-			tiles[#tiles + 1] = {
-				x = math.cos(a) * rMid, y = yBase, z = math.sin(a) * rMid,
-				sx = chord, sy = GROUND_SKIN_THICK, sz = tileSz, yaw = -a, mat = "Ground",
-			}
-		end
-	end
-	return tiles
-end
-
---------------------------------------------------------------------------------
--- MID GROUND SKIN (S52 FIX 2) — machine-eyes: top-down views over the annulus r≈3400→5400, BETWEEN the
--- discrete foothills, saw straight past every gap to the sunset-lit catch floor glowing pink far below —
--- the foothills are discrete hillforms (buildFoothills), not a continuous ring, so nothing sealed the
--- ground in between them. This is that seal: a thin continuous Ground band from just under the bowl's
--- flat-floor lip (r≈3350, tucking under the r=3400 playable edge at Y≈-8) descending to r≈5400 (meeting
--- the falloff collar's own top band, Y≈-55 near there — see FALLOFF_INNER_Y), tiled the same overlapping
--- way as buildFalloffCollar/buildGroundSkin (bands derived so the Y step between them is always ≤ the
--- skin's own thickness, tangential chord overlap, radial band overlap) so there is no gap anywhere in
--- the annulus from any azimuth. The dome foothill balls (FIX 1) then sit ON this skin — emitted after it
--- in assembleOps so their Grass reads on top at any overlap.
---------------------------------------------------------------------------------
--- Volume-budget trim: outer radius 5500→5400 (still overlaps the collar's own inner band via the radial
--- OVERLAP floor below, so there is no seam) — a small additional cut alongside the collar/groundSkin
--- trims above, needed to clear the world-total gate once the thicker skins were fully measured.
-local MID_SKIN_INNER_R, MID_SKIN_OUTER_R = 3350, 5400
-local MID_SKIN_INNER_Y, MID_SKIN_OUTER_Y = -8, -50
--- S52 horizon-iterate-5: THICK 10→16, OVERLAP 80→200. BANDS is now DERIVED (skinBandCount) instead of a
--- fixed 2 — the 42-stud Y range needs a step ≤16, so this lands at 3 bands. MID_SKIN_N (fixed 20) is
--- GONE: per-band tile count now comes from ringTileCount (right-sized per band's own rMid) so the extra
--- bands don't multiply this skin's op cost as much as a shared worst-case N would.
-local MID_SKIN_THICK = 16
-local MID_SKIN_OVERLAP = 200
-local MID_SKIN_BANDS = skinBandCount(MID_SKIN_INNER_Y, MID_SKIN_OUTER_Y, MID_SKIN_THICK)
-
--- buildMidGroundSkin() → a flat array of thin skin records {x,y,z,sx,sy,sz,yaw,mat}. Pure.
-local function buildMidGroundSkin()
-	local tiles = {}
-	local bandDepth = (MID_SKIN_OUTER_R - MID_SKIN_INNER_R) / MID_SKIN_BANDS
-	local tileSz = bandDepth + MID_SKIN_OVERLAP
-	for bi = 0, MID_SKIN_BANDS - 1 do
-		local rMid = MID_SKIN_INNER_R + bandDepth * (bi + 0.5)
-		local u = (bi + 0.5) / MID_SKIN_BANDS
-		local yBase = MID_SKIN_INNER_Y + (MID_SKIN_OUTER_Y - MID_SKIN_INNER_Y) * u
-		local n = ringTileCount(rMid)
-		for i = 0, n - 1 do
-			local ad = ((i + bi * 0.5) / n) * 360
-			local a = math.rad(ad)
-			local chord = (2 * math.pi * rMid) / n * SKIN_AZ_OVERLAP
-			tiles[#tiles + 1] = {
-				x = math.cos(a) * rMid, y = yBase, z = math.sin(a) * rMid,
-				sx = chord, sy = MID_SKIN_THICK, sz = tileSz, yaw = -a, mat = "Ground",
+				-- yaw=-a → local +X radial (sx = radial depth), local +Z tangential (sz = chord).
+				x = cx, y = (top + bottom) / 2, z = cz,
+				sx = radial, sy = top - bottom, sz = chord, yaw = -a, mat = mat,
 			}
 		end
 	end
@@ -990,7 +889,7 @@ end
 -- ops: B=FillBlock, W=FillWedge, C=FillCylinder(upright), L=FillBall. Materials are STRING keys
 -- (sculpt maps them to Enum.Material) so plan() never constructs an Enum it doesn't need.
 --------------------------------------------------------------------------------
-local function assembleOps(foothills, foothillToe, falloffCollar, groundSkin, midGroundSkin, paintCells, water, mountains)
+local function assembleOps(foothills, foothillToe, outerGround, paintCells, water, mountains)
 	local ops = {}
 	-- B() — a FillBlock op. Roblox Terrain rejects a fill ("Extents are too large") if any axis exceeds
 	-- MAX_FILL_EXTENT OR the region volume exceeds MAX_FILL_VOLUME — the volume check is the one that
@@ -1099,24 +998,21 @@ local function assembleOps(foothills, foothillToe, falloffCollar, groundSkin, mi
 		local rr = 300
 		B(1150 + math.cos(a) * rr, -2, 0 + math.sin(a) * rr, 130, 4, 130, (i % 2 == 0) and "Mud" or "Ground", -a)
 	end
-	-- 4b) MID GROUND SKIN (S52 FIX 2) — a thin continuous Ground band under the whole foothill annulus
-	-- (r≈3350→5500), emitted BEFORE the foothill domes so their Grass balls read on top of it at every
-	-- overlap: seals the "no ground between the discrete hills" gap a top-down view used to see straight
-	-- through to the catch floor below.
-	for _, g in ipairs(midGroundSkin) do B(g.x, g.y, g.z, g.sx, g.sy, g.sz, g.mat, g.yaw) end
+	-- 4b) OUTER GROUND (S52 solid-annulus rebuild) — the SOLID annulus (r≈3350→9200) that REPLACES the
+	-- three thin skins (falloff collar / ground skin / mid-ground skin), which always leaked seam reads
+	-- from above at voxel resolution. Emitted BEFORE the foothill domes so their Grass balls read on top
+	-- of it at every overlap. Each sector is one solid B block from a constant base up to the LOCAL
+	-- surfaceY profile — so a step face is always ground interior, never a see-through gap. Tagged
+	-- feature="outerground" so a scoped coverage/volume gate can find exactly these ops.
+	for _, g in ipairs(outerGround) do B(g.x, g.y, g.z, g.sx, g.sy, g.sz, g.mat, g.yaw, "outerground") end
 	-- 5) FOOTHILLS + toe blend — the broken low hill ring (replaces the old rim wall + apron). S52 FIX 1:
 	-- each hill is now a rounded hillform (overlapping flattened L() balls: a tall center + shoulder,
 	-- Grass, plus a wider flatter Ground toe ball) instead of one rectangular B() block, so it reads as a
 	-- rolling dome up close instead of a mesa with ruler-straight walls. buildFoothillDome consumes the
-	-- SAME hill records (layout untouched) and only changes the emission.
+	-- SAME hill records (layout untouched) and only changes the emission. The domes now sit on top of the
+	-- SOLID outer-ground annulus (emitted just above).
 	for _, b in ipairs(buildFoothillDome(foothills)) do L(b.x, b.y, b.z, b.rad, b.mat) end
 	for _, t in ipairs(foothillToe) do B(t.x, t.y, t.z, t.sx, t.sy, t.sz, t.mat, t.yaw) end
-	-- 6) FALLOFF COLLAR — thin descending Ground skin past the foothills (r≈5400→6600) so the ground
-	-- visibly falls away into the haze instead of ending at a hard edge.
-	for _, c in ipairs(falloffCollar) do B(c.x, c.y, c.z, c.sx, c.sy, c.sz, c.mat, c.yaw) end
-	-- 6b) GROUND SKIN (S52 FIX 2) — thin Ground shell past the collar (r≈6600→8800, under the mountain
-	-- clusters) so a top-down sightline anywhere reachable sees ground fading into haze, never void/sky.
-	for _, g in ipairs(groundSkin) do B(g.x, g.y, g.z, g.sx, g.sy, g.sz, g.mat, g.yaw) end
 	-- 7) MICRO RELIEF — grass mounds (≤6 protrusion) then rock outcrops (r1700-3000 arcs).
 	for _, m in ipairs(MOUNDS) do L(m.x, m.protrude - m.r, m.z, m.r, "Grass") end
 	for _, o in ipairs(OUTCROPS) do L(o.x, o.protrude - o.r, o.z, o.r, "Rock") end
@@ -1249,13 +1145,11 @@ function WorldGen.plan(cfg)
 
 	local foothills = buildFoothills()
 	local foothillToe = buildFoothillToe()
-	local falloffCollar = buildFalloffCollar()
-	local groundSkin = buildGroundSkin()
-	local midGroundSkin = buildMidGroundSkin()
+	local outerGround = buildOuterGround()
 	local paintCells = buildPaint()
 	local water = buildWater()
 	local mountains = buildMountainRange()
-	local sculptOps = assembleOps(foothills, foothillToe, falloffCollar, groundSkin, midGroundSkin, paintCells, water, mountains)
+	local sculptOps = assembleOps(foothills, foothillToe, outerGround, paintCells, water, mountains)
 	-- §2 bar packet: the distant-mountain backdrop is now sculpted TERRAIN (mountains.peaks, tagged
 	-- feature="mountain" in sculptOps above), not Parts — plan.parts returns to just the P3 catch floor.
 	local parts = { buildCatchFloorPart() }
@@ -1291,9 +1185,7 @@ function WorldGen.plan(cfg)
 		-- without re-deriving it from foothillAmp.
 		foothills = foothills,
 		foothillToe = foothillToe,
-		falloffCollar = falloffCollar,
-		groundSkin = groundSkin,
-		midGroundSkin = midGroundSkin,
+		outerGround = outerGround,
 		westArc = WEST_ARC,
 		river = { halfWidth = RIVER.halfWidth, surfaceY = RIVER.surfaceY, floorY = RIVER.floorY, points = RIVER.points, pool = POOL },
 		lakeCarve = LAKE_CARVE,

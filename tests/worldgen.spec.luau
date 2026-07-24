@@ -521,24 +521,39 @@ H.test("fill budget: total sculpt fill ops ≤1100 (recorded)", function()
 	H.eq(plan.fillOpCount, #plan.sculptOps, "plan.fillOpCount does not match #plan.sculptOps — the recorded budget is a lie")
 	print(("        [fill-budget] WorldGen sculpts %d terrain fill ops"):format(#plan.sculptOps))
 	-- Cap raised 1000→1400 (M1.5 VOLUME hotfix), then 1400→1800 (M3 look-dev round), then tightened
-	-- 1800→1100 (rim-shell packet). Open-horizon packet: the rim wall (88 shelled blocks + snow/talus/
-	-- foot bands + a 4-slab apron) is GONE, replaced by a much cheaper broken foothill ring + a thin
-	-- falloff collar + zero-terrain-cost distant mountain Parts — count dropped to roughly ~330 ops.
-	-- 1100 stays the recorded ceiling (comfortable headroom, no need to re-tighten it this packet) and
-	-- is still comfortably under the HARD GATE ceiling of 2600 ops; still a one-time BOOT cost (sculpt
-	-- runs once), amortized by the time-budget yield, not a per-frame cost.
+	-- 1800→1100 (rim-shell packet). The S52 solid-annulus rebuild REPLACED the three thin outer skins
+	-- (falloff collar / ground skin / mid-ground skin, ≈108 ops) with a SOLID outer-ground annulus. Solid
+	-- mass multiplies the per-band cost, so the annulus is sized (6 wide rings × ~19-26 adaptive sectors,
+	-- crest-ring chords tuned just under the fill-VOLUME tiling threshold) to hold this SAME 1100 recorded
+	-- bound — it is NOT raised (lands ~1093). Wider rings than the fine-step ideal are the price of that.
+	-- Still comfortably under the HARD GATE ceiling of 2600 ops, and a one-time BOOT cost (sculpt runs
+	-- once, amortized by the time-budget yield), not a per-frame cost.
 	H.ok(#plan.sculptOps <= 1100, ("WorldGen sculpts %d fill ops (>1100) — the terrain build is over budget"):format(#plan.sculptOps))
 	H.ok(#plan.sculptOps <= 2600, ("WorldGen sculpts %d fill ops (>2600) — exceeds the project HARD GATE ceiling"):format(#plan.sculptOps))
 end)
 
 --------------------------------------------------------------------------------
--- 11b. SCULPT VOLUME BUDGET — the open-horizon packet pinned the pre-mountain-terrain B-op volume; the
--- §2 bar packet adds real sculpted mountain terrain (feature="mountain" ops, B+W+L), so the budget is
--- now two gates: (a) the mountain-volume gate alone, pinning the new content's cost directly (target
--- ~2.8-3.0e10 studs³, ceiling trimmed from a naive ≈3.5e10 via MOUNTAIN_BASE_FRAC/BODY_N/H_MAX — see
--- WorldGen's buildMountainRange comment); (b) a whole-world, all-op-type total so a regression anywhere
--- (mountains OR the pre-existing floor/foothill/collar/water content) still trips something. Volume per
--- op type mirrors the fill extent+volume gate below: B/W = sx*sy*sz, C = pi*rad^2*h, L = (4/3)*pi*rad^3.
+-- 11b. SCULPT VOLUME BUDGET — two gates: (a) the mountain-volume gate alone, pinning the sculpted
+-- mountain terrain's cost directly (feature="mountain" ops, B+W+L; target ~2.8-3.0e10 studs³, ceiling
+-- trimmed from a naive ≈3.5e10 via MOUNTAIN_BASE_FRAC/BODY_N/H_MAX — see WorldGen's buildMountainRange
+-- comment); (b) a whole-world, all-op-type total so a regression anywhere (mountains OR the floor/
+-- foothill/outer-ground/water content) still trips something. Volume per op type mirrors the fill
+-- extent+volume gate below: B/W = sx*sy*sz, C = pi*rad^2*h, L = (4/3)*pi*rad^3.
+--
+-- WORLD-TOTAL CEILING RAISED 4.2e10 → 6.0e10 (S52 solid-annulus rebuild). The outer ground was three
+-- THIN stepped skins (falloff collar / ground skin / mid-ground skin, ≈5.2e9 total); FIVE machine-eyes
+-- iterations (captures/S52-mountains..mountains4) proved thin stepped bands ALWAYS leak seam reads from
+-- above at 4-stud voxel resolution — a shelf edge or gap shows the sunset-lit catch floor as a pink slot.
+-- The bowl floor never leaks because it is SOLID. The outer ground is now ONE solid annulus (r≈3350→9200,
+-- base Y=-70 up to the surfaceY profile) — deliberately far more voxel volume (the solid mass under every
+-- sector is what ends the seam-leak class). The measured honest world total is ≈5.74e10 (the CREST band,
+-- base -70 up to surfaceY≈+220 ≈ 290 studs thick over a wide annulus, dominates; op-volume also double-
+-- counts the mandatory tangential/radial seam overlaps — the ~1.3× the original ≈5.6e10 estimate omitted,
+-- which is why this lands just past that estimate's ceiling). 6.0e10 = that honest value + ~4.5% margin.
+-- RUNTIME cost is ZERO (the world is baked once); the ceiling only protects LIVE look-dev sculpt time
+-- (~44s at ~1.3e9 studs³/s). Approved by the orchestrator after 5 failed thin-skin iterations. The FLOOR
+-- is raised 1.8e10 → 3.0e10 to match (a missing annulus now reads as a real regression). The mountain gate
+-- [2.4e10, 3.6e10] is UNTOUCHED.
 --------------------------------------------------------------------------------
 local function opVolume(o)
 	if o.op == "B" or o.op == "W" then
@@ -562,8 +577,57 @@ H.test("sculpt volume: mountain-op volume lands in the §2 bar-packet budget ban
 	print(("        [sculpt-volume] mountain op volume = %.3e studs^3, world total = %.3e studs^3"):format(mtnVol, worldVol))
 	H.ok(mtnVol >= 2.4e10, ("mountain-op volume %.3e is below the §2 bar-packet floor (2.4e10) — the mountains may have shrunk/vanished"):format(mtnVol))
 	H.ok(mtnVol <= 3.6e10, ("mountain-op volume %.3e is above the §2 bar-packet ceiling (3.6e10) — apply the budget trims (base fraction/body-ball count/height ceiling)"):format(mtnVol))
-	H.ok(worldVol >= 1.8e10, ("world sculpt-op volume %.3e is implausibly low (<1.8e10) — the world may be missing terrain"):format(worldVol))
-	H.ok(worldVol <= 4.2e10, ("world sculpt-op volume %.3e (>4.2e10) — over the whole-world sculpt-volume budget"):format(worldVol))
+	H.ok(worldVol >= 3.0e10, ("world sculpt-op volume %.3e is implausibly low (<3.0e10) — the solid outer-ground annulus may be missing"):format(worldVol))
+	H.ok(worldVol <= 6.0e10, ("world sculpt-op volume %.3e (>6.0e10) — over the whole-world sculpt-volume budget (solid-annulus ceiling)"):format(worldVol))
+end)
+
+--------------------------------------------------------------------------------
+-- 11c. OUTER GROUND: CONTINUOUS COVERAGE (S52 solid-annulus rebuild) — THE machine gate that would have
+-- caught all five thin-skin seam iterations. The old outer ground was thin stepped tile bands that left
+-- top-down holes (and, worse, an orientation bug that placed the tangential chord on the RADIAL axis, so
+-- sectors were near-non-covering slivers with huge azimuthal gaps). A top-down hole = a sample point over
+-- the annulus that NO sculpt op's XZ footprint covers → a ray from above falls straight past to the
+-- sunset-lit catch floor and reads as a pink slot. This gate sweeps a dense (azimuth × radius) grid over
+-- the whole annulus band and asserts SOME B op's oriented XZ footprint covers every sample — pure data
+-- over plan.sculptOps (post-tiling), no engine needed. It fails loudly the instant the outer ground stops
+-- being a gap-free solid cover, from ANY azimuth.
+--------------------------------------------------------------------------------
+H.test("outer ground: continuous coverage — no top-down hole over the whole annulus band", function()
+	local plan = WorldGen.plan(GameConfig)
+	-- point-in-oriented-rectangle for a B op: rotate the sample into the block's local frame (the block is
+	-- placed by CFrame.Angles(0, yaw, 0): local +X → world (cos yaw, -sin yaw), local +Z → (sin yaw,
+	-- cos yaw); the inverse is the transpose), then test against the half-extents. W/C/L ops have no
+	-- rectangular XZ footprint here, so only B ops (the floor + the solid annulus + mountain bases) count.
+	local function covers(o, px, pz)
+		if o.op ~= "B" then return false end
+		local yaw = o.yaw or 0
+		local c, s = math.cos(yaw), math.sin(yaw)
+		local dx, dz = px - o.x, pz - o.z
+		local lx = dx * c - dz * s
+		local lz = dx * s + dz * c
+		return math.abs(lx) <= o.sx / 2 and math.abs(lz) <= o.sz / 2
+	end
+	local uncovered, firstBad, checked = 0, nil, 0
+	for azd = 0, 359, 10 do
+		local a = math.rad(azd)
+		local cosA, sinA = math.cos(a), math.sin(a)
+		for r = 3400, 9100, 300 do
+			checked = checked + 1
+			local px, pz = cosA * r, sinA * r
+			local hit = false
+			for _, o in ipairs(plan.sculptOps) do
+				if covers(o, px, pz) then hit = true; break end
+			end
+			if not hit then
+				uncovered = uncovered + 1
+				if not firstBad then firstBad = ("az=%d° r=%d (%.0f,%.0f)"):format(azd, r, px, pz) end
+			end
+		end
+	end
+	H.eq(uncovered, 0,
+		("%d of %d annulus sample points have NO sculpt-op footprint above them (first: %s) — a top-down " ..
+			"ray there falls to the catch floor and reads as a seam/pink slot (the thin-skin leak class)")
+			:format(uncovered, checked, tostring(firstBad)))
 end)
 
 --------------------------------------------------------------------------------
