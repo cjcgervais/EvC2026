@@ -6,6 +6,10 @@
 build/
 *.rbxm
 *.rbxmx
+# ...except the committed terrain-bake artifact: default.project.json $path-maps this into
+# Workspace.Terrain at build time (tools/Bake-World.ps1 / tools/Extract-Terrain.luau produce it;
+# a placeholder empty Terrain ships so a fresh clone's `rojo build` never fails on a missing $path).
+!assets/BakedTerrain.rbxm
 
 # Downloaded Rojo binary (bootstrapped by tools/Bootstrap-Rojo.ps1; not committed)
 tools/bin/

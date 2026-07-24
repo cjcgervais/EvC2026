@@ -98,6 +98,9 @@
       "$properties": {
         "Gravity": 196.2,
         "StreamingEnabled": false
+      },
+      "Terrain": {
+        "$path": "assets/BakedTerrain.rbxm"
       }
     }
   }

@@ -2232,7 +2232,14 @@ local remotesElapsed = os.clock() - bootT0
 -- with Remotes already up (the client can still join/see a world, even if not the intended one).
 local worldT0 = os.clock()
 if GameConfig.Map and GameConfig.Map.worldV2 then
-	local okBuild, errBuild = pcall(WorldGen.build, Workspace, GameConfig)
+	-- Bake pipeline (tools/Bake-World.ps1 + tools/Extract-Terrain.luau): when the checked-in
+	-- Workspace.Terrain (assets/BakedTerrain.rbxm, wired in via default.project.json's $path) already
+	-- carries real SmoothGrid voxels from a Studio bake, it is stamped BakedByWorldGen=true. Skip the
+	-- expensive terrain:Clear()+sculpt() (the sole thing only real Studio can produce) and let
+	-- WorldGen.build do everything else (birth contract, Map parts/scatter, lighting) at normal cost.
+	local preTerrain = Workspace:FindFirstChildOfClass("Terrain")
+	local baked = preTerrain ~= nil and preTerrain:GetAttribute("BakedByWorldGen") == true
+	local okBuild, errBuild = pcall(WorldGen.build, Workspace, GameConfig, { skipSculpt = baked })
 	if not okBuild then
 		-- S51: loud + greppable, and flagged on Workspace, so a "map is broken again" report can be
 		-- attributed instantly -- this fallback lands on the rejected legacy gray-box look.

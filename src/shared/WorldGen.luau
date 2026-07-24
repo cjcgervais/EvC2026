@@ -1195,7 +1195,17 @@ function WorldGen.applyLighting(L, cfg)
 	end
 end
 
-function WorldGen.build(target, cfg)
+-- opts.skipSculpt (bake pipeline): when Workspace.Terrain already carries baked SmoothGrid voxels
+-- (stamped BakedByWorldGen=true by tools/Extract-Terrain.luau after a Studio bake — see
+-- tools/Bake-World.ps1), build() must NOT terrain:Clear()+sculpt() over it — that would erase the
+-- one thing Studio alone can produce and pay the ~sculpt-cost we baked specifically to avoid at
+-- boot. applyStyle() is deliberately NOT gated by skipSculpt: it is a handful of SetMaterialColor/
+-- Water* property writes (cheap, idempotent), and it is not certain every consumer of a baked rbxm
+-- re-applies the exact same style pass (colors DO serialize onto the Terrain instance per the spike,
+-- but re-asserting them here costs nothing and removes that uncertainty entirely) — see GameServer's
+-- call site for the baked-marker check that sets skipSculpt.
+function WorldGen.build(target, cfg, opts)
+	opts = opts or {}
 	-- S51 BOOT-CLOCK (Chad: "round 1 was over before the map ever rendered" — SOP: probe before
 	-- optimizing). One always-on print at the end of build() naming where the ~63s boot actually goes,
 	-- phase by phase, so a future slow-boot complaint has a named culprit instead of a guess.
@@ -1207,11 +1217,14 @@ function WorldGen.build(target, cfg)
 	target.Gravity = plan.gravity
 	pcall(function() target.StreamingEnabled = false end)
 
-	-- TERRAIN — clear then sculpt the valley + peaked rim + de-boxed water, then apply the style.
+	-- TERRAIN — clear then sculpt the valley + peaked rim + de-boxed water (skipped when baked),
+	-- then always apply the style (cheap/idempotent — see the skipSculpt note above build()).
 	local terrain = target:FindFirstChildOfClass("Terrain")
 	if terrain then
-		terrain:Clear()
-		WorldGen.sculpt(terrain, plan)
+		if not opts.skipSculpt then
+			terrain:Clear()
+			WorldGen.sculpt(terrain, plan)
+		end
 		WorldGen.applyStyle(terrain, plan.terrainStyle)
 	end
 	local tSculpt = os.clock()
@@ -1296,9 +1309,9 @@ function WorldGen.build(target, cfg)
 	local tLighting = os.clock()
 
 	print(string.format(
-		"[BootClock] plan=%.3fs sculpt=%.3fs parts=%.3fs prewarmScatter=%.3fs scatter=%.3fs lighting=%.3fs total=%.3fs",
+		"[BootClock] plan=%.3fs sculpt=%.3fs parts=%.3fs prewarmScatter=%.3fs scatter=%.3fs lighting=%.3fs total=%.3fs baked=%s",
 		tPlan - tStart, tSculpt - tPlan, tParts - tSculpt, tPrewarmScatter, tScatter - tParts, tLighting - tScatter,
-		tLighting - tStart))
+		tLighting - tStart, tostring(opts.skipSculpt == true)))
 end
 
 -- clear(target) → honest flag-off: wipe the terrain and destroy the worldV2 "Map" folder.
