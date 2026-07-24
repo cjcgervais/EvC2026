@@ -55,9 +55,21 @@ end
 --    with no dialog) and copies the saved file out before this script returns.
 print("BAKEREADY")
 
--- 5. DWELL — hold the process open long enough for the wrapper to detect+copy the save. run-in-roblox
---    closes Studio the instant this script RETURNS, so this budget must comfortably exceed the
---    wrapper's poll-for-LastWriteTime-change + copy time (Bake-World.ps1 polls up to 30s).
-task.wait(40)
+-- 5. DWELL — hold the process open long enough for the wrapper to land a save. run-in-roblox closes
+--    Studio the instant this script RETURNS. Two layers race in the wrapper: Layer 1 (hardened
+--    SendInput Ctrl+S, up to 60s) is the fast path; if a background process's synthetic keystroke never
+--    lands (Windows' foreground lock can deny SetForegroundWindow from a non-foreground process),
+--    Layer 2 harvests Studio's AutoSave instead, which fires ~5min after modification. This dwell was
+--    extended from 40s to 420s specifically to keep Studio alive long enough for that AutoSave timer,
+--    printing a BAKEWAIT heartbeat every 30s so the wrapper can tail progress while it polls.
+local DWELL_TOTAL_SEC = 420
+local HEARTBEAT_SEC = 30
+local waited = 0
+while waited < DWELL_TOTAL_SEC do
+	local step = math.min(HEARTBEAT_SEC, DWELL_TOTAL_SEC - waited)
+	task.wait(step)
+	waited += step
+	print("BAKEWAIT " .. tostring(waited))
+end
 
 print("BAKEDONE")
