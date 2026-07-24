@@ -81,7 +81,13 @@ local FLOOR_RELIEF = 4      -- max |dip| of the shallow playable bowl (kept < th
 -- CATCH_THICKNESS is that Part's Size.Y.
 local CATCH_FLOOR_Y     = -120
 local CATCH_THICKNESS    = 20
-local REACHABLE_RADIUS   = 8000
+-- FIX 4 (S51 red-team, P3 safety hole): the far mountain clusters sit at r≈8200 with jitter/geometry
+-- offset out to ≈8700-8750 (see buildDistantMountains), but this used to be 8000 — the catch-floor Part
+-- span (±REACHABLE_RADIUS) fell SHORT of the mountains it's supposed to backstop, so a bird lured out
+-- past the backdrop that descends falls past the net straight to the unconditional -200 kill (the only
+-- lethal mechanism in rescue). Raised with margin past the outermost mountain Part; the catch floor is a
+-- single Part now (zero sculpt cost), so widening it costs nothing.
+local REACHABLE_RADIUS   = 9500
 
 -- Roblox Terrain fill has a ~4096-stud PER-AXIS extent limit ("Extents are too large" on FillBlock);
 -- lune has no Terrain so only a REAL engine (the M2 capture smoke) sees it. The big axis-aligned slabs
@@ -187,7 +193,11 @@ local function buildFoothills()
 			crest = 15 + n01(i * 11 + 5) * 20 -- 15..35, near-zero
 		else
 			local jitter = 0.6 + n01(i * 7 + 3) * 0.8 -- 0.6..1.4
-			crest = math.clamp(60 + n01(i * 13 + 9) * 260 * amp * jitter, 20, 320)
+			-- FIX 5 (S51 red-team, west berm): the +60 FLOOR used to sit OUTSIDE the amp scaling, so even at
+			-- the west arc's amp≈0.12 minimum every hill still carried a continuous ~60-stud berm and the
+			-- sea horizon read walled at low altitude. Scale the whole base by amp so west-arc hills nearly
+			-- vanish (amp≈0.12 → ~8-15ish); the explicit gap hills (isGap, above) still force hard breaks.
+			crest = math.clamp((60 + n01(i * 13 + 9) * 260 * jitter) * amp, 8, 320)
 		end
 		local px, pz = math.cos(a) * FOOTHILL_INNER_R, math.sin(a) * FOOTHILL_INNER_R
 		local w = 850 * (0.85 + n01(i * 17 + 21) * 0.25)     -- footprint width, ≈850
@@ -245,26 +255,40 @@ end
 -- carry the rest of the horizon.
 --------------------------------------------------------------------------------
 local FALLOFF_INNER_R, FALLOFF_OUTER_R = 5400, 6800
-local FALLOFF_INNER_Y, FALLOFF_OUTER_Y = -40, -110
+-- FIX 3 (S51 horizon-iterate-2, machine-eyes: "stepped green cliffs" in 13_mountains-backdrop): the 2
+-- radial bands used to butt edge-to-edge at a fixed Y, so every band boundary read as a hard terraced
+-- rectangular step. Sunk both ~15 studs deeper (below the sightline/haze), given per-tile Y jitter so any
+-- visible edge breaks instead of ruler-straight, and the bands now overlap radially instead of just
+-- touching (see FALLOFF_OVERLAP below) so there's no gap/step between them.
+local FALLOFF_INNER_Y, FALLOFF_OUTER_Y = -55, -125
 local FALLOFF_N, FALLOFF_BANDS = 28, 2
 local FALLOFF_THICK = 14
+local FALLOFF_OVERLAP = 80  -- radial overlap added to each tile's depth so neighboring bands overlap, not step
+local FALLOFF_Y_JITTER = 6  -- ± studs, per-tile, so the outer edge reads broken not straight
 
 -- buildFalloffCollar() → a flat array of thin skin records {x,y,z,sx,sy,sz,yaw,mat}. Pure.
 local function buildFalloffCollar()
 	local tiles = {}
 	local bandDepth = (FALLOFF_OUTER_R - FALLOFF_INNER_R) / FALLOFF_BANDS
+	local tileSz = bandDepth + FALLOFF_OVERLAP -- FIX 3(c): wider than the band's own slice → overlaps its neighbor
 	for bi = 0, FALLOFF_BANDS - 1 do
 		local rMid = FALLOFF_INNER_R + bandDepth * (bi + 0.5)
 		local u = (bi + 0.5) / FALLOFF_BANDS
-		local y = FALLOFF_INNER_Y + (FALLOFF_OUTER_Y - FALLOFF_INNER_Y) * u
+		local yBase = FALLOFF_INNER_Y + (FALLOFF_OUTER_Y - FALLOFF_INNER_Y) * u
 		for i = 0, FALLOFF_N - 1 do
 			-- stagger each band's tile seams by half a step so the two rings' seams don't line up radially.
 			local ad = ((i + bi * 0.5) / FALLOFF_N) * 360
 			local a = math.rad(ad)
 			local chord = (2 * math.pi * rMid) / FALLOFF_N * 1.15
+			local hSeed = bi * 1000 + i * 7 + 41
+			local yj = (n01(hSeed) - 0.5) * (2 * FALLOFF_Y_JITTER) -- FIX 3(b): ±FALLOFF_Y_JITTER, per tile
+			-- FIX 3: blend the INNERMOST ring (bi==0, where the collar meets the foothill toe) toward Grass
+			-- ~half the time so there's no hard green(foothill)→brown(Ground collar) ring; the outer band
+			-- (bi==1, deeper/further from the foothills) stays pure Ground.
+			local mat = (bi == 0 and n01(hSeed + 3) < 0.5) and "Grass" or "Ground"
 			tiles[#tiles + 1] = {
-				x = math.cos(a) * rMid, y = y, z = math.sin(a) * rMid,
-				sx = chord, sy = FALLOFF_THICK, sz = bandDepth * 1.1, yaw = -a, mat = "Ground",
+				x = math.cos(a) * rMid, y = yBase + yj, z = math.sin(a) * rMid,
+				sx = chord, sy = FALLOFF_THICK, sz = tileSz, yaw = -a, mat = mat,
 			}
 		end
 	end
@@ -299,54 +323,119 @@ local function mountainColor(cool)
 	)
 end
 
+-- localOffset(x,z,yaw,ox,oz) → world XZ of a local-frame offset (ox,oz) under a Y-yaw. Same right-hand
+-- rotation convention assembleOps' B() tiler derives in detail (see its comment): local +X → world
+-- (cos yaw, -sin yaw), local +Z → world (sin yaw, cos yaw). Shared here so the wedge-pair placement below
+-- and B()'s tiler agree on what "yaw" means.
+local function localOffset(x, z, yaw, ox, oz)
+	local c, s = math.cos(yaw), math.sin(yaw)
+	return x + ox * c + oz * s, z - ox * s + oz * c
+end
+
+-- FIX 1 (S51 horizon-iterate-2, machine-eyes: "mountains read as CITY BOXES, not peaks"): each peak used
+-- to be a single flat-topped axis-aligned cube — a downtown skyline silhouette. A peak is now a WedgePart
+-- PAIR forming a ridge tent. WedgePart geometry: height varies along LOCAL Z (full Size.Y at local
+-- Z=-size.z/2, zero at local Z=+size.z/2) and is CONSTANT along local X. So each wedge's local Z is
+-- yawed onto the WORLD TANGENTIAL axis — the silhouette (height vs. tangential position) reads as a
+-- triangle when viewed radially from the play area, exactly the peaked profile wanted — while local X
+-- (Size.X = depth, the unsloped extrusion thickness) stays on the WORLD RADIAL axis. Both wedges' tall
+-- (-Z local) edges land on the same world point (the shared apex/ridge line); the mirror wedge is yawed
+-- +pi so its local +Z points the opposite tangential direction, sloping down to the other side.
+local function emitPeak(parts, px, pz, az, width, depth, height, baseY, yawJit, color, seed)
+	local sizeZ = width / 2  -- each wedge's own slope-run length; the mirrored pair spans the full width
+	local offset = sizeZ / 2 -- wedge center sits this far from the shared apex/ridge line
+	local yawA = -az + yawJit -- ±0.2 rad yaw-jitter off tangent (spec FIX 1), shared by both wedges of the pair
+	local yawB = yawA + math.pi
+	local topY = baseY + height
+	local widx = 0
+	for _, yaw in ipairs({ yawA, yawB }) do
+		widx = widx + 1
+		local cx, cz = localOffset(px, pz, yaw, 0, offset)
+		-- Coplanarity gate: jitter every crest Y unique, plus a tiny per-wedge nudge — the mirrored pair
+		-- shares the apex/ridge line (and can overlap there), so it must never read as an exact top-face
+		-- match even before the continuous hash jitter is considered.
+		local crestJ = (n01(seed + 13 + widx) - 0.5) * 4 + widx * 0.08
+		local ty = topY + crestJ
+		parts[#parts + 1] = {
+			name = "Peak" .. tostring(#parts + 1),
+			shape = "Wedge",
+			size = Vector3.new(depth, ty - baseY, sizeZ),
+			pos = Vector3.new(cx, (baseY + ty) / 2, cz),
+			yaw = yaw,
+			canQuery = false,
+			transparency = 0,
+			color = color,
+			material = Enum.Material.Rock,
+		}
+	end
+end
+
+-- Snow cap: a SMALLER wedge pair sitting flush on the peak's upper slope (top ~25%-ish of tall peaks
+-- only), same ridge line/yaw as the peak beneath it, scaled down so it reads as a cap, not a second peak.
+local function emitSnowCap(parts, px, pz, az, width, depth, height, baseY, yawJit, seed)
+	local capWidth, capDepth = width * 0.6, depth * 0.62
+	local capHeight = height * 0.28
+	local topY = baseY + height
+	local capBaseY = topY - capHeight * 0.85 -- flush into the peak's top ~25%-ish band
+	local sizeZ = capWidth / 2
+	local offset = sizeZ / 2
+	local yawA = -az + yawJit
+	local yawB = yawA + math.pi
+	local widx = 0
+	for _, yaw in ipairs({ yawA, yawB }) do
+		widx = widx + 1
+		local cx, cz = localOffset(px, pz, yaw, 0, offset)
+		local crestJ = (n01(seed + 17 + widx) - 0.5) * 3 + widx * 0.05
+		local by = capBaseY + crestJ * 0.3
+		local ty = capBaseY + capHeight + crestJ
+		parts[#parts + 1] = {
+			name = "PeakSnow" .. tostring(#parts + 1),
+			shape = "Wedge",
+			size = Vector3.new(capDepth, ty - by, sizeZ),
+			pos = Vector3.new(cx, (by + ty) / 2, cz),
+			yaw = yaw,
+			canQuery = false,
+			transparency = 0,
+			color = MOUNTAIN_SNOW_COLOR,
+			material = Enum.Material.Snow,
+		}
+	end
+end
+
+-- emitCluster: 2-3 overlapping peaks spread within ~18° of centerAz. The wide width band (900-1600) vs.
+-- the tight az spread is what makes neighboring peaks within a cluster overlap ~30% and read as one
+-- jagged ridge mass rather than separate boxes (FIX 1's "overlap neighbors ~30%" ask).
+local function emitCluster(parts, centerAz, r, hMin, hMax, wMin, wMax, dMin, dMax, cool, snowCap, seedBase)
+	local n = 2 + math.floor(n01(seedBase) * 2) -- 2..3 overlapping peaks per cluster
+	for k = 1, n do
+		local h1 = seedBase + k * 37
+		local az = centerAz + (n01(h1) - 0.5) * 18 -- spread within ~18° of the cluster center
+		local a = math.rad(az)
+		local rr = r + (n01(h1 + 3) - 0.5) * 500
+		local h = hMin + n01(h1 + 7) * (hMax - hMin)
+		local width = wMin + n01(h1 + 11) * (wMax - wMin)  -- tangential — WIDER than tall (FIX 1)
+		local depth = dMin + n01(h1 + 29) * (dMax - dMin)  -- radial
+		local yawJit = (n01(h1 + 23) - 0.5) * 0.4           -- ±0.2 rad
+		local px, pz = math.cos(a) * rr, math.sin(a) * rr
+		local baseY = -20 + (n01(h1 + 31) - 0.5) * 6        -- bury slightly into the foothill toe, varied
+		emitPeak(parts, px, pz, a, width, depth, h, baseY, yawJit, mountainColor(cool), h1)
+		if snowCap and h > (hMin + hMax) / 2 then
+			emitSnowCap(parts, px, pz, a, width, depth, h, baseY, yawJit, h1)
+		end
+	end
+end
+
 -- buildDistantMountains() → plan.parts records (Parts, not terrain). Pure: only Vector3/Color3 value
 -- construction, matching buildCatchFloorPart's contract. CanQuery=false (CastShadow/CanCollide=false
 -- come from build()'s Part-minting loop defaults).
 local function buildDistantMountains()
 	local parts = {}
-	local function emitCluster(centerAz, r, hMin, hMax, wMin, wMax, cool, snowCap, seedBase)
-		local n = 2 + math.floor(n01(seedBase) * 2) -- 2..3 overlapping blocks per cluster
-		for k = 1, n do
-			local h1 = seedBase + k * 37
-			local az = centerAz + (n01(h1) - 0.5) * 18 -- spread within ~18° of the cluster center
-			local a = math.rad(az)
-			local rr = r + (n01(h1 + 3) - 0.5) * 500
-			local h = hMin + n01(h1 + 7) * (hMax - hMin)
-			local w = wMin + n01(h1 + 11) * (wMax - wMin)
-			local px, pz = math.cos(a) * rr, math.sin(a) * rr
-			-- Coplanarity gate: jitter every crest Y unique so no overlapping pair shares a top-face Y.
-			local crestY = h / 2 - 20 + (n01(h1 + 13) - 0.5) * 4
-			parts[#parts + 1] = {
-				name = "Peak" .. tostring(#parts + 1),
-				size = Vector3.new(w, h, w),
-				pos = Vector3.new(px, crestY, pz),
-				canQuery = false,
-				transparency = 0,
-				color = mountainColor(cool),
-				material = Enum.Material.Rock,
-			}
-			if snowCap and h > (hMin + hMax) / 2 then
-				local capH = h * 0.16 + 10
-				parts[#parts + 1] = {
-					name = "PeakSnow" .. tostring(#parts + 1),
-					size = Vector3.new(w * 0.62, capH, w * 0.62),
-					pos = Vector3.new(px, h - 20 + (n01(h1 + 17) - 0.5) * 3, pz),
-					canQuery = false,
-					transparency = 0,
-					color = MOUNTAIN_SNOW_COLOR,
-					material = Enum.Material.Snow,
-				}
-			end
-		end
-	end
-
 	for ci, az in ipairs(MOUNTAIN_MID_CLUSTERS) do
-		emitCluster(az, MOUNTAIN_MID_R, 700, 1400, 700, 1100, 0.0, false, ci * 500)
+		emitCluster(parts, az, MOUNTAIN_MID_R, 700, 1400, 900, 1600, 400, 800, 0.0, false, ci * 500)
 	end
 	for ci, az in ipairs(MOUNTAIN_FAR_CLUSTERS) do
-		emitCluster(az, MOUNTAIN_FAR_R, 1600, 2600, 900, 1500, 1.0, true, 3000 + ci * 500)
+		emitCluster(parts, az, MOUNTAIN_FAR_R, 1600, 2600, 900, 1600, 400, 800, 1.0, true, 3000 + ci * 500)
 	end
-
 	return parts
 end
 
@@ -650,13 +739,16 @@ local function buildLighting()
 		GeographicLatitude = 35,
 		ShadowSoftness = 0.3,
 		-- Open-horizon packet: Density/Haze bumped so the far foothill/mountain backdrop dissolves into
-		-- aerial haze (fades the far ridges, dissolves the falloff-collar edge) instead of reading as a
-		-- hard cutoff — a bluer Decay reinforces the far-fade. Keep ClockTime/Bloom/ColorCorrection
-		-- (locked golden-hour rig) untouched.
+		-- aerial haze instead of reading as a hard cutoff. S51 horizon-iterate-2 (machine-eyes FIX 2):
+		-- that first pass overshot — everything past the bowl, even near foothills, swam in salmon-pink.
+		-- Pulled Density/Haze back down and shifted Decay cooler/bluer (less warm-pink, more cool blue-
+		-- gray) so depth reads in distinct layers: warm golden-hour valley near, mid ridge still legible,
+		-- far peaks half-dissolved into cool haze, and real sky gaps between clusters read as SKY, not
+		-- pink soup. Keep ClockTime/Bloom/ColorCorrection (locked golden-hour rig) untouched.
 		Atmosphere = {
-			Density = 0.20, Offset = 0.6, Haze = 3.2, Glare = 0.4,
+			Density = 0.14, Offset = 0.6, Haze = 2.4, Glare = 0.4,
 			Color = Color3.fromRGB(255, 205, 165),
-			Decay = Color3.fromRGB(100, 92, 140),
+			Decay = Color3.fromRGB(70, 88, 150),
 		},
 		ColorCorrection = {
 			Brightness = 0.02, Contrast = 0.08, Saturation = 0.18,
@@ -1131,11 +1223,16 @@ function WorldGen.build(target, cfg)
 	map.Name = "Map"
 	map.Parent = target
 	for _, p in ipairs(plan.parts) do
-		local part = Instance.new("Part")
+		-- FIX 1 (S51 horizon-iterate-2): the distant-mountain peaks are now WedgePart pairs (p.shape ==
+		-- "Wedge"), not plain Parts — everything else about a plan.parts record (size/pos/canQuery/
+		-- transparency/color/material) keeps working unchanged for both classes. p.yaw (radians, optional)
+		-- rotates the instance about Y; every existing producer (e.g. CatchFloor) omits it and gets 0,
+		-- identical to the old Position-only assignment.
+		local part = Instance.new(p.shape == "Wedge" and "WedgePart" or "Part")
 		part.Anchored = true
 		part.Name = p.name
 		part.Size = p.size
-		part.Position = p.pos
+		part.CFrame = CFrame.new(p.pos) * CFrame.Angles(0, p.yaw or 0, 0)
 		part.CanCollide = false
 		part.CanQuery = p.canQuery == true -- default false; the P3 catch floor is the sole documented exception
 		part.CanTouch = false

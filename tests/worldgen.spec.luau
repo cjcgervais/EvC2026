@@ -89,11 +89,21 @@ H.test("water-P3: the hidden CATCH FLOOR underlies the whole reachable world abo
 	for _, b in ipairs(plan.water) do minWaterFloor = math.min(minWaterFloor, b.floorY) end
 	H.ok(plan.catchFloorY < minWaterFloor,
 		("catchFloorY=%.0f must sit below the lowest water floor (%.0f) or it caps a lake"):format(plan.catchFloorY, minWaterFloor))
-	-- (b) P3 coverage: the catch slab spans at least the reachable radius, so no reachable void gap
-	-- (the axis crescents r=FLAT_R→rim, and everything past the rim) can drop a bird past -200.
-	H.ok(plan.reachableRadius >= 8000,
-		("reachableRadius=%.0f must cover the legacy baseplate reach (±8000) so no reachable void exists")
-			:format(plan.reachableRadius))
+	-- (b) P3 coverage: the catch slab must reach at least 500 studs past the outermost distant-mountain
+	-- Part (by XZ radius), so no reachable void gap — including just beyond the mountain backdrop, the
+	-- S51 red-team's P3 safety hole — can drop a bird past -200. Derived from plan.parts (not a hard-coded
+	-- constant) so a future mountain-radius tune can never go stale against this gate again.
+	local maxMtnR = 0
+	for _, p in ipairs(plan.parts) do
+		if p.name ~= "CatchFloor" then
+			local r = math.sqrt(p.pos.X ^ 2 + p.pos.Z ^ 2)
+			if r > maxMtnR then maxMtnR = r end
+		end
+	end
+	H.ok(maxMtnR > 0, "expected at least one distant-mountain part to compute the reachable-radius margin from")
+	H.ok(plan.reachableRadius >= maxMtnR + 500,
+		("reachableRadius=%.0f must cover at least 500 studs past the outermost distant-mountain part (r=%.0f)")
+			:format(plan.reachableRadius, maxMtnR))
 end)
 
 H.test("water-P3: sampling every water region, the solid floor never crosses the failsafe", function()
